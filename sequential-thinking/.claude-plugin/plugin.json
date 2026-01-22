@@ -1,0 +1,10 @@
+{
+  "name": "sequential-thinking",
+  "version": "1.0.0",
+  "author": {
+    "name": "Anthropic"
+  },
+  "description": "MCP server for dynamic, reflective problem-solving through structured chain-of-thought reasoning",
+  "homepage": "https://www.npmjs.com/package/@modelcontextprotocol/server-sequential-thinking",
+  "repository": "https://github.com/modelcontextprotocol/servers.git"
+}
