@@ -1,0 +1,17 @@
+{
+  "name": "cblecker-claude-plugins",
+  "owner": {
+    "name": "Christoph Blecker",
+    "email": "admin@toph.ca"
+  },
+  "metadata": {
+    "description": "Personal collection of Claude Code plugins"
+  },
+  "plugins": [
+    {
+      "name": "sequential-thinking",
+      "source": "./sequential-thinking",
+      "strict": true
+    }
+  ]
+}

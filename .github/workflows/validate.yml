@@ -1,0 +1,77 @@
+name: Validate Plugins
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  setup:
+    name: Setup Plugin Matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      plugin-matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Generate plugin matrix
+        id: set-matrix
+        run: |
+          matrix=$(jq -c '[.plugins[] | {source}]' .claude-plugin/marketplace.json)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  validate-marketplace:
+    name: Validate Marketplace
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run marketplace validator
+        run: claude plugin validate .
+
+  validate-plugins:
+    name: Validate Plugin - ${{ matrix.source }}
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.setup.outputs.plugin-matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin
+        run: claude plugin validate "${{ matrix.source }}"
+
