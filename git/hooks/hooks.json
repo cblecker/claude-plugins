@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "The user is creating a pull request via GitHub MCP. Provide brief reminders:\n\n1. Check if repository is a fork (has both origin and upstream remotes). If so, verify the base repository is correct (usually upstream, not origin).\n\n2. Look for PR templates in the repository (.github/PULL_REQUEST_TEMPLATE.md or .github/PULL_REQUEST_TEMPLATE/). If found, remind to use the template structure.\n\nKeep reminders to 1-2 sentences. Return as systemMessage.",
+            "prompt": "A pull request is being created via GitHub MCP. Examine the tool parameters in $TOOL_INPUT:\n\n- If 'head' contains a colon (e.g., 'user:branch'), this is a fork PR - verify 'owner' is the upstream repository.\n- If 'head' is just a branch name, this is a direct repository PR.\n\nProvide a brief 1-sentence reminder only if you notice a potential issue. If parameters look correct, return empty systemMessage.",
             "timeout": 30
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "The user is pushing files via GitHub MCP. Verify the target is correct:\n\n1. Check the branch in $TOOL_INPUT - if pushing to main/master, warn that feature branches are preferred.\n\n2. If repository is a fork, verify pushing to the correct remote (usually origin for forks).\n\nProvide 1-2 sentence reminder as systemMessage.",
+            "prompt": "Files are being pushed via GitHub MCP. Examine the 'branch' parameter in $TOOL_INPUT:\n\n- If branch is 'main' or 'master', remind that feature branches are preferred for changes.\n\nProvide a brief 1-sentence reminder only if pushing to a mainline branch. Otherwise return empty systemMessage.",
             "timeout": 30
           }
         ]
