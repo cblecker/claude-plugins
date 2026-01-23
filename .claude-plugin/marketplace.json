@@ -12,6 +12,11 @@
       "name": "sequential-thinking",
       "source": "./sequential-thinking",
       "strict": true
+    },
+    {
+      "name": "git",
+      "source": "./git",
+      "strict": true
     }
   ]
 }
