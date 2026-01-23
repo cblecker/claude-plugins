@@ -1,0 +1,10 @@
+{
+  "name": "git",
+  "version": "0.1.0",
+  "description": "Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails",
+  "author": {
+    "name": "cblecker",
+    "email": "admin@toph.ca"
+  },
+  "keywords": ["git", "workflow", "safety", "conventional-commits", "fork", "pr"]
+}

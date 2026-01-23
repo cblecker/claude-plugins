@@ -1,0 +1,37 @@
+{
+  "description": "Git workflow enhancement hooks providing safety reminders and convention detection",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Analyze the bash command in $TOOL_INPUT. If it contains git or gh commands, provide relevant reminders:\n\n1. For 'git commit': Check if on mainline branch (main/master). Remind about conventional commits if detected in repo. Mention CLAUDE.md verification steps if present.\n\n2. For 'git add': Remind about staged vs unstaged files. Warn if adding sensitive files (.env, credentials, keys).\n\n3. For 'git checkout -b', 'git switch -c', 'git branch' (creating branches): If conventional commits detected, suggest type prefixes (feat/, fix/, docs/, etc.).\n\n4. For 'git push': Check for fork setup (origin vs upstream). Warn if force pushing to main/master.\n\n5. For 'git rebase', 'git reset --hard', 'git push --force' (dangerous ops): Remind about safety rules - never force push to mainline, use --force-with-lease, backup before hard reset.\n\n6. For 'gh pr': Suggest using GitHub MCP tools instead for better integration.\n\n7. For 'gh' (other commands): Mention GitHub MCP tools may be available for this operation.\n\nProvide concise reminders (1-2 sentences max). Only provide reminders relevant to the actual command. Return empty systemMessage if no git/gh commands detected.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_github_github__create_pull_request",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The user is creating a pull request via GitHub MCP. Provide brief reminders:\n\n1. Check if repository is a fork (has both origin and upstream remotes). If so, verify the base repository is correct (usually upstream, not origin).\n\n2. Look for PR templates in the repository (.github/PULL_REQUEST_TEMPLATE.md or .github/PULL_REQUEST_TEMPLATE/). If found, remind to use the template structure.\n\nKeep reminders to 1-2 sentences. Return as systemMessage.",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_github_github__push_files",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The user is pushing files via GitHub MCP. Verify the target is correct:\n\n1. Check the branch in $TOOL_INPUT - if pushing to main/master, warn that feature branches are preferred.\n\n2. If repository is a fork, verify pushing to the correct remote (usually origin for forks).\n\nProvide 1-2 sentence reminder as systemMessage.",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
