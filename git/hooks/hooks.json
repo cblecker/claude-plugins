@@ -1,78 +1,95 @@
 {
-  "description": "Git workflow hooks: safety controls and skill suggestions",
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Bash(git push:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "mainline=$(\"${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh\"); jq -r --arg mainline \"$mainline\" '(.tool_input.command | test(\"\\\\s--force|\\\\s-[a-zA-Z]*f\")) as $is_force | (.tool_input.command | test(\"\\\\s\" + $mainline + \"(\\\\s|$)\")) as $to_mainline | (.tool_input.command | test(\":\" + $mainline + \"(\\\\s|$)\")) as $refspec_mainline | ($to_mainline or $refspec_mainline) as $pushing_mainline | if $is_force and $pushing_mainline then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Force pushing to mainline is never allowed.\"}} elif $is_force then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Force pushing requires explicit user permission.\"}} else null end'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mainline=$(\"${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh\"); jq -r --arg mainline \"$mainline\" '(.tool_input.command | test(\"\\\\s--force|\\\\s-[a-zA-Z]*f\")) as $is_force | (.tool_input.command | test(\"\\\\s\" + $mainline + \"(\\\\s|$)\")) as $to_mainline | (.tool_input.command | test(\":\" + $mainline + \"(\\\\s|$)\")) as $refspec_mainline | ($to_mainline or $refspec_mainline) as $pushing_mainline | if $is_force and $pushing_mainline then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Force pushing to mainline is never allowed.\"}} elif $is_force then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Force pushing requires explicit user permission.\"}} else null end'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git commit:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:commit skill instead. It provides mainline protection, conventional commits detection, and respects CLAUDE.md workflow configuration.\"}}'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:commit skill instead. It provides mainline protection, conventional commits detection, and respects CLAUDE.md workflow configuration.\"}}'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git checkout -b:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:branch skill instead. It provides smart branch naming based on conventional commits detection.\"}}'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:branch skill instead. It provides smart branch naming based on conventional commits detection.\"}}'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git switch -c:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:branch skill instead. It provides smart branch naming based on conventional commits detection.\"}}'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using /git:branch skill instead. It provides smart branch naming based on conventional commits detection.\"}}'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git reset:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "jq -r 'if .tool_input.command | test(\"--hard\") then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"CAUTION: git reset --hard will discard uncommitted changes. Consider backing up first.\"}} else null end'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r 'if .tool_input.command | test(\"--hard\") then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"CAUTION: git reset --hard will discard uncommitted changes. Consider backing up first.\"}} else null end'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git clean:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "jq -r '(.tool_input.command | test(\"\\\\s--force|\\\\s-[a-zA-Z]*f\")) as $has_force | (.tool_input.command | test(\"\\\\s--dry-run|\\\\s-[a-zA-Z]*n\")) as $has_dry_run | if $has_force and ($has_dry_run | not) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"CAUTION: git clean -f permanently deletes untracked files. Use git clean -n first to preview.\"}} else null end'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '(.tool_input.command | test(\"\\\\s--force|\\\\s-[a-zA-Z]*f\")) as $has_force | (.tool_input.command | test(\"\\\\s--dry-run|\\\\s-[a-zA-Z]*n\")) as $has_dry_run | if $has_force and ($has_dry_run | not) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"CAUTION: git clean -f permanently deletes untracked files. Use git clean -n first to preview.\"}} else null end'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(git rebase:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "mainline=$(\"${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh\"); cat | jq -r --arg mainline \"$mainline\" 'if .tool_input.command | test($mainline) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"WARNING: Rebasing onto mainline. Ensure this is intentional.\"}} else null end'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mainline=$(\"${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh\"); cat | jq -r --arg mainline \"$mainline\" 'if .tool_input.command | test($mainline) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"WARNING: Rebasing onto mainline. Ensure this is intentional.\"}} else null end'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "Bash(gh:*)",
-        "hooks": [{
-          "type": "command",
-          "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using GitHub MCP tools (mcp__plugin_github_github__*) for better integration.\"}}'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"Consider using GitHub MCP tools (mcp__plugin_github_github__*) for better integration.\"}}'",
+            "timeout": 5
+          }
+        ]
       },
       {
         "matcher": "mcp__plugin_github_github__create_pull_request",
-        "hooks": [{
-          "type": "command",
-          "command": "jq -r --arg url \"$(git remote get-url upstream 2>/dev/null)\" 'if $url == \"\" then null else (($url | capture(\".*[:/](?<owner>[^/]+)/[^/]+(\\\\.git)?$\") | .owner) as $upstream | if (.tool_input.owner == $upstream | not) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"WARNING: Fork detected (upstream remote exists). PR owner should be the upstream repository owner, not your fork.\"}} else null end) end'",
-          "timeout": 5
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r --arg url \"$(git remote get-url upstream 2>/dev/null)\" 'if $url == \"\" then null else (($url | capture(\".*[:/](?<owner>[^/]+)/[^/]+(\\\\.git)?$\") | .owner) as $upstream | if (.tool_input.owner == $upstream | not) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"WARNING: Fork detected (upstream remote exists). PR owner should be the upstream repository owner, not your fork.\"}} else null end) end'",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
