@@ -11,11 +11,10 @@ Personal Claude Code plugin marketplace
 - Sparse format for plugin directories
 - `claude plugin validate .` - Validate marketplace
 - `claude plugin validate ./<plugin-name>` - Validate specific plugin
-- `npx markdownlint-cli2 "**/*.md"` - Verify markdown files
+- `npx markdownlint-cli2 --config ${CLAUDE_PROJECT_DIR}/.markdownlint-cli2.jsonc "**/*.md"` - Verify markdown files
 - `uvx claudelint --strict` - Lint plugin
 - Use kebab-case for all names
 - Use `${CLAUDE_PLUGIN_ROOT}` for portable paths in hooks/MCP configs
-- Use `claudelint` for linting
 
 ## Documentation
 
