@@ -10,9 +10,5 @@
     "MD036": false,  // Emphasis used instead of header
     "MD040": false,  // Fenced code language (many examples are generic)
     "MD060": false   // Table column style
-  },
-  // Ignore symlinked reference directories to avoid duplicate linting
-  "ignores": [
-    "git/skills/*/reference/**"
-  ]
+  }
 }
