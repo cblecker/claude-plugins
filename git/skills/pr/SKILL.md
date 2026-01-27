@@ -1,21 +1,31 @@
 ---
 name: git:pr
 description: This skill should be used when the user asks to "create a pull request", "make a PR", "open a pull request", "create PR", "submit for review", or mentions creating a GitHub/GitLab pull request or merge request. Enhances PR creation with fork detection and template discovery.
-version: 0.1.0
 ---
 
 # Git Pull Request Creation
 
 Enhance pull request creation with automatic fork detection, PR template discovery, and proper base branch targeting.
 
-## When to Use This Skill
+## Quick Reference
 
-Use this skill when creating pull requests (PRs) or merge requests. It provides:
-- Fork workflow detection (origin vs upstream)
-- PR template discovery and usage
-- Base branch determination
-- Uncommitted changes handling
-- Integration with GitHub MCP tools
+**Workflow:**
+1. ✓ [Check uncommitted changes](#1-pre-flight-checks) (commit if needed)
+2. ✓ [Verify not on mainline](#1-pre-flight-checks) (must be on feature branch)
+3. ✓ [Detect fork setup](#2-detect-fork-setup) (origin vs upstream)
+4. ✓ [Find PR templates](#4-find-pr-templates)
+5. ✓ [Push branch](#5-push-branch-if-needed) (if not already pushed)
+6. ✓ [Create PR](#6-create-pull-request) using GitHub MCP tools
+
+**Sections:** [Current Git State](#current-git-state) • [Core Workflow](#core-workflow) • [Examples](#examples)
+
+## Current Git State
+
+- Current branch: !`git rev-parse --abbrev-ref HEAD`
+- Mainline branch: !`${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/detect-mainline.sh`
+- Has uncommitted changes: !`git diff-index --quiet HEAD -- 2>/dev/null && echo "no" || echo "yes"`
+- Remotes: !`git remote -v`
+- Commits since mainline: !`mainline=$(${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/detect-mainline.sh); git log ${mainline}..HEAD --oneline 2>/dev/null || echo "unable to determine"`
 
 ## Core Workflow
 
@@ -23,94 +33,42 @@ Follow these steps when the user requests PR creation:
 
 ### 1. Pre-Flight Checks
 
-**Check for uncommitted changes:**
+Use git state from dynamic context above.
 
-```bash
-# Check for staged or unstaged changes
-if ! git diff-index --quiet HEAD --; then
-  # Has uncommitted changes
-  echo "You have uncommitted changes"
-fi
-```
+**Verify branch is not mainline:**
+
+If current branch equals mainline branch, error and suggest creating a feature branch first.
 
 **If uncommitted changes exist:**
 1. Ask user: "You have uncommitted changes. Would you like to commit them first?"
 2. If yes, invoke `/git:commit` skill using the Skill tool
 3. After commit succeeds, continue with PR process
 
-**Verify branch is not mainline:**
-
-```bash
-current_branch=$(git rev-parse --abbrev-ref HEAD)
-mainline=$(detect_mainline_branch)
-
-if [ "$current_branch" = "$mainline" ]; then
-  echo "ERROR: Cannot create PR from mainline branch"
-  echo "Create a feature branch first"
-  exit 1
-fi
-```
-
 ### 2. Detect Fork Setup
 
-**Check remote configuration:**
+Use remotes from dynamic context above.
 
-```bash
-# Check if both origin and upstream exist
-has_origin=$(git remote | grep -c "^origin$" || true)
-has_upstream=$(git remote | grep -c "^upstream$" || true)
+**Fork detection:**
 
-if [ "$has_origin" -eq 1 ] && [ "$has_upstream" -eq 1 ]; then
-  is_fork="true"
-else
-  is_fork="false"
-fi
-```
+If both `origin` and `upstream` remotes exist, this is a fork setup:
+- Push to: `origin` (your fork)
+- PR targets: `upstream` (original repo)
+- head format: `username:branch`
 
-**Extract remote information:**
+**Direct repository:**
 
-```bash
-# Get origin owner/repo
-origin_url=$(git remote get-url origin)
-origin_repo=$(echo "$origin_url" | sed -E 's|.*[:/]([^/]+/[^/]+)(\.git)?$|\1|' | sed 's/\.git$//')
+If only `origin` remote exists:
+- Push to: `origin`
+- PR targets: `origin`
+- head format: `branch`
 
-# Get upstream owner/repo (if fork)
-if [ "$is_fork" = "true" ]; then
-  upstream_url=$(git remote get-url upstream)
-  upstream_repo=$(echo "$upstream_url" | sed -E 's|.*[:/]([^/]+/[^/]+)(\.git)?$|\1|' | sed 's/\.git$//')
-fi
-```
-
-See `reference/fork-detection.md` for detailed detection logic.
-
-**Determine push target and PR base:**
-
-```bash
-if [ "$is_fork" = "true" ]; then
-  push_remote="origin"        # Push to your fork
-  pr_base_owner="upstream"    # PR targets upstream
-  pr_base_repo="$upstream_repo"
-else
-  push_remote="origin"        # Push to main repo
-  pr_base_owner="origin"      # PR targets same repo
-  pr_base_repo="$origin_repo"
-fi
-```
+**Extract owner/repo from remote URLs** for use with GitHub MCP tools.
 
 ### 3. Gather Context
 
-**Get commit history since mainline:**
+**Review commits:**
 
-```bash
-mainline=$(detect_mainline_branch)
-current_branch=$(git rev-parse --abbrev-ref HEAD)
-
-# Get commits that will be in PR
-git log $mainline..HEAD --oneline
-
-# Get full diff
-git diff $mainline...HEAD
-```
+Use commits since mainline from dynamic context above to understand what will be in the PR.
 
 **Check if branch is pushed:**
 
@@ -229,31 +187,6 @@ After PR created:
 2. Provide PR URL for viewing
 3. Mention any next steps (request reviewers, run CI, etc.)
 
-## CLAUDE.md Configuration
-
-Respect CLAUDE.md settings:
-
-**Fork configuration:**
-```markdown
-## Git Workflow
-- This is a fork; push to origin, PRs target upstream
-```
-
-**PR guidelines:**
-```markdown
-## Git Workflow
-- PR description must include: summary, testing, related issues
-- Request review from: @team-lead, @reviewer
-```
-
-**Base branch:**
-```markdown
-## Git Workflow
-- PRs target: develop (not main)
-```
-
-**Priority:** CLAUDE.md > Auto-detection > Defaults
-
 ## Examples
 
 ### Example 1: Create PR from Fork
@@ -308,38 +241,6 @@ Respect CLAUDE.md settings:
 5. Create PR with base: `develop`
 6. Return PR URL
 
-## Error Handling
-
-**On mainline branch:**
-```
-ERROR: Cannot create PR from mainline branch.
-Create a feature branch first: git checkout -b feature-name
-```
-
-**No commits since base:**
-```
-ERROR: No commits found since main.
-Cannot create PR with no changes.
-```
-
-**Not pushed to remote:**
-```
-Branch not on remote. Pushing now...
-git push -u origin {branch-name}
-```
-
-**Fork push to wrong remote:**
-```
-WARNING: Attempting to push to upstream (original repo).
-Should push to origin (your fork) instead.
-```
-
-**Permission denied:**
-```
-ERROR: Permission denied when creating PR.
-Verify you have push access to the repository.
-```
-
 ## Integration with Other Skills
 
 **This skill invokes:**
@@ -347,53 +248,3 @@ Verify you have push access to the repository.
 
 **This skill is invoked by:**
 - Users directly when ready to create PR
-
-## GitHub MCP Tools vs gh CLI
-
-**Prefer GitHub MCP tools:**
-- Better integration with Claude Code
-- Structured parameters
-- Type-safe
-- Better error handling
-
-**Available GitHub MCP tools for PRs:**
-- `create_pull_request` - Create new PR
-- `update_pull_request` - Update existing PR
-- `pull_request_read` - Get PR details
-- `list_pull_requests` - List PRs
-
-**When to use gh CLI:**
-- GitHub MCP not available
-- User explicitly requests gh CLI
-- Advanced gh features not in MCP
-
-## Quick Reference
-
-**Pre-flight checklist:**
-1. ✓ No uncommitted changes (or commit them first)
-2. ✓ Not on mainline branch
-3. ✓ Branch has commits since base
-4. ✓ Branch is pushed to correct remote
-
-**Fork workflow:**
-- Push to: `origin` (your fork)
-- PR base: `upstream` (original repo)
-- head format: `username:branch`
-
-**Direct repository:**
-- Push to: `origin`
-- PR base: `origin`
-- head format: `branch`
-
-**PR description:**
-- Use template if found
-- Include: summary, changes, testing, related issues
-- Be specific and descriptive
-
-## Reference Files
-
-For detailed information:
-- **`reference/fork-detection.md`** - Fork setup detection
-- **`reference/mainline-detection.md`** - Base branch identification
-- **`reference/conventional-commits.md`** - Commit analysis for PR description
-- **`reference/git-safety.md`** - Safety guidelines
