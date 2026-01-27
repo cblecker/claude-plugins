@@ -15,6 +15,7 @@ Personal Claude Code plugin marketplace
 - `uvx claudelint --strict` - Lint plugin
 - Use kebab-case for all names
 - Use `${CLAUDE_PLUGIN_ROOT}` for portable paths in hooks/MCP configs
+- Update `README.md` Available Plugins table when adding new plugins
 
 ## Documentation
 
