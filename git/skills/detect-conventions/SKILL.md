@@ -33,3 +33,14 @@ DETECTION_METHOD: config_file|history_analysis|claude_md|none
 CONFIDENCE: high|medium|low
 TYPES_IN_USE: feat, fix, docs, ...
 ```
+
+## Task Coordination
+
+On start:
+- Call TaskList to find parent workflow task (if running as subagent)
+- Read parent task context if found (workflow type, branch)
+
+On completion:
+- If parent task exists, update its metadata with findings:
+  - metadata: `{ conventions: { style: "<conventional|standard>", prefix: "<type-if-conventional>", confidence: "<high|medium|low>" } }`
+- If no parent task, return results directly to caller

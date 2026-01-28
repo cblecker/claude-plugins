@@ -241,6 +241,21 @@ After PR created:
 5. Create PR with base: `develop`
 6. Return PR URL
 
+## Task Coordination
+
+At workflow start:
+- Create coordination task with TaskCreate:
+  - subject: "Create pull request"
+  - activeForm: "Creating pull request"
+  - metadata: `{ workflow: "pr", branch: "<current-branch>", base: "<target-branch>", startedAt: "<timestamp>" }`
+
+During workflow:
+- Update task metadata for significant events (push, template found, etc.)
+
+At workflow end:
+- Update task status to completed
+- Add result metadata: `{ result: { prUrl: "<url>", prNumber: <number> } }`
+
 ## Integration with Other Skills
 
 **This skill invokes:**
