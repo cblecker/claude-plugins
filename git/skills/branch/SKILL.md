@@ -177,6 +177,21 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
 fi
 ```
 
+## Task Coordination
+
+At workflow start:
+- Create coordination task with TaskCreate:
+  - subject: "Create git branch"
+  - activeForm: "Creating git branch"
+  - metadata: `{ workflow: "branch", base: "<base-branch>", startedAt: "<timestamp>" }`
+
+During workflow:
+- Update task metadata as conventions are detected (from detect-conventions skill)
+
+At workflow end:
+- Update task status to completed
+- Add result metadata: `{ result: { branchName: "<name>" } }`
+
 ## Integration with Other Skills
 
 This skill may be invoked by:

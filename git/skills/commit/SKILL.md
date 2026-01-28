@@ -234,6 +234,22 @@ Report success to user with commit hash and message. If there was a problem, rep
 5. Craft message: `Update installation instructions`
 6. Create commit and verify
 
+## Task Coordination
+
+At workflow start:
+- Create coordination task with TaskCreate:
+  - subject: "Create git commit"
+  - activeForm: "Creating git commit"
+  - metadata: `{ workflow: "commit", branch: "<current-branch>", startedAt: "<timestamp>" }`
+
+During workflow:
+- Update task metadata as conventions are detected (from detect-conventions skill)
+- Add metadata on errors or user decisions
+
+At workflow end:
+- Update task status to completed
+- Add result metadata: `{ result: { commitSha: "<sha>", message: "<summary>" } }`
+
 ## Integration with Other Skills
 
 **This skill invokes:**
