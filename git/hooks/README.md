@@ -2,6 +2,19 @@
 
 Safety controls and workflow suggestions for git operations.
 
+## Architecture
+
+All git-related Bash hooks are routed through a single router script (`scripts/git-bash-router.sh`) that:
+- Uses pure jq for all command routing and logic
+- Caches mainline branch detection via `CLAUDE_MAINLINE_BRANCH` environment variable
+- Returns `null` for non-git commands (fast no-op)
+
+**Performance:** ~15-20ms per Bash tool use vs ~400ms for multiple separate jq hooks.
+
+**Portability:** Pure jq implementation ensures consistent behavior across Bash 3.2 (macOS system shell) and Bash 5.3+ (modern systems).
+
+**Implementation:** Single `Bash` matcher in `hooks.json` pipes all Bash commands to the router.
+
 ## Hook Categories
 
 | Category | Decision | Purpose |
@@ -131,6 +144,25 @@ Safety controls and workflow suggestions for git operations.
 
 ## Technical Notes
 
-- Use `(.a == .b | not)` instead of `.a != .b` in jq - bash escapes `!` as `\!`
-- Matchers use `:*` for word boundary (e.g., `Bash(git push:*)`)
+### Router Implementation
+
+- **Architecture:** Pure jq for all command routing and logic
+- **Command routing:** jq `startswith()` function with conditional logic
+- **Helper functions:** jq `def` for reusable patterns (force flags, dry-run flags, mainline detection)
+- **Mainline caching:** Bash checks `CLAUDE_MAINLINE_BRANCH` before calling detect script
+- **No-op return:** jq `null` for non-matching commands
+- **Portability:** Consistent behavior across Bash 3.2 (macOS) and Bash 5.3+ (modern systems)
+
+### jq Patterns
+
+- Use `(.a == .b | not)` instead of `.a != .b` - bash escapes `!` as `\!`
+- Test for flags with word boundaries: `test("\\s--force|\\s-[a-zA-Z]*f")`
 - Mainline detection via `${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh`
+
+### Hook Matchers
+
+Hook matchers are regex patterns matched against tool names:
+- `Bash` - matches the Bash tool exactly
+- `Bash|Write` - matches Bash or Write tools
+- `mcp__plugin_.*` - matches any MCP plugin tool
+- See [Hook documentation](https://code.claude.com/docs/en/hooks) for official syntax

@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Detect mainline branch
-# Priority: Cached > Upstream HEAD > Origin HEAD > Local fallback
+# Priority: Cached > Origin HEAD > Local fallback
 # Note: CLAUDE.md workflow overrides (like "allow mainline commits") are
 # handled by skills which have LLM context to parse varied formats.
 
@@ -10,15 +10,7 @@ if [ -n "$CLAUDE_MAINLINE_BRANCH" ]; then
   exit 0
 fi
 
-# Try upstream first (fork setup - upstream is the "true" repo)
-if git remote | grep -q "^upstream$"; then
-  mainline=$(git ls-remote --symref upstream HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||')
-fi
-
-# Fall back to origin
-if [ -z "$mainline" ]; then
-  mainline=$(git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||')
-fi
+mainline=$(git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||')
 
 # Fallback to local detection
 if [ -z "$mainline" ]; then
