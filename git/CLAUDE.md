@@ -34,29 +34,47 @@ Place dynamic context section after Quick Reference, before Core Workflow.
 
 ## Hooks Architecture
 
-### Command-Based Hooks
+### Router-Based Hook Pattern
 
-Replaced prompt-based hooks with jq-based command hooks for:
-- Faster execution (no LLM invocation)
-- More reliable parsing
-- Lower latency
+Single router script (`scripts/git-bash-router.sh`) handles all git-related Bash commands:
+
+**Architecture:**
+```
+Bash tool use → hooks.json matcher: "Bash" → router script (pure jq)
+                                                    ↓
+                                          if startswith("git push")
+                                          elif startswith("git commit")
+                                          else null
+```
+
+**Performance optimization:**
+1. **Pure jq implementation** for consistent behavior across systems
+2. **Helper functions** (def) for reusable patterns (force flags, dry-run, mainline)
+3. **Cached mainline** via `CLAUDE_MAINLINE_BRANCH` environment variable
+4. **Single jq process** for all routing and logic
+
+**Result:** ~15-20ms per Bash tool use vs ~400ms for multiple separate jq hooks.
+
+**Portability:** Pure jq avoids Bash 3.2 (macOS) vs Bash 5.3+ inconsistencies with stdin handling.
 
 **Pattern:**
 ```json
 {
-  "matcher": "Bash(git push:*)",
+  "matcher": "Bash",
   "hooks": [{
     "type": "command",
-    "command": "mainline=$(\"${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh\"); jq -r --arg mainline \"$mainline\" '...'",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh",
     "timeout": 5
   }]
 }
 ```
 
 **Technical notes:**
-- Use `(.a == .b | not)` instead of `.a != .b` (bash escapes `!` as `\!`)
-- Matchers use `:*` for word boundary (e.g., `Bash(git commit:*)`)
+- Matchers are regex patterns matched against tool names
+- Use `(.a == .b | not)` instead of `.a != .b` in jq (bash escapes `!` as `\!`)
 - Return `null` for no-op (hook passes through)
+- Pure jq implementation ensures consistent behavior across Bash versions
+- See [Hook documentation](https://code.claude.com/docs/en/hooks) for matcher syntax
 
 ### Hook Categories
 
@@ -136,12 +154,14 @@ The `detect-conventions` skill uses haiku model for detection:
 
 **Guideline:** Use haiku for detection/analysis subagents, sonnet for generation/reasoning.
 
-### Command Hooks Beat Prompt Hooks
+### Router Pattern Beats Multiple Hooks
 
-Prompt-based hooks required LLM invocation for every matched command.
-Command-based hooks use jq for instant parsing.
+Initial implementation used 8 separate hook entries with individual jq processes.
+Router pattern uses single entry with pure jq for all routing and logic.
 
-**Performance:** Command hooks respond in milliseconds vs seconds for prompt hooks.
+**Performance:** Router responds in ~15-20ms vs ~400ms for multiple jq processes.
+
+**Pattern:** Pure jq for portability and consistency across systems. Acceptable performance tradeoff for reliable behavior.
 
 ### Symlinks for Code Reuse with Permissions
 
