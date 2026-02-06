@@ -1,0 +1,10 @@
+{
+  "name": "github",
+  "description": "GitHub MCP server with all toolsets and insiders mode enabled for full repository management, code security, discussions, notifications, Copilot, and more.",
+  "version": "1.0.0",
+  "author": {
+    "name": "GitHub"
+  },
+  "homepage": "https://github.com/github/github-mcp-server",
+  "keywords": ["github", "mcp", "issues", "pull-requests", "copilot", "code-security"]
+}

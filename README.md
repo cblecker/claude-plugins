@@ -18,6 +18,7 @@ claude plugin marketplace add cblecker/claude-plugins
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
 | [sequential-thinking](./sequential-thinking) | MCP server for dynamic, reflective problem-solving through structured chain-of-thought reasoning |
 | [git](./git)                                 | Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails |
+| [github](./github)                           | GitHub MCP server with all toolsets and insiders mode enabled                                    |
 
 ## License
 

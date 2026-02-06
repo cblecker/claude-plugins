@@ -17,6 +17,11 @@
       "name": "git",
       "source": "./git",
       "strict": true
+    },
+    {
+      "name": "github",
+      "source": "./github",
+      "strict": true
     }
   ]
 }
