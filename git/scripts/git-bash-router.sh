@@ -11,6 +11,9 @@ fi
 jq -r --arg mainline "$mainline" '
   .tool_input.command as $cmd |
 
+  # Helper: match command at start or after && / ; (with optional override prefix)
+  def cmd_match($p): test("(^|&&|;)\\s*(GIT_WORKFLOWS_OVERRIDE=1\\s+)?" + $p);
+
   # Helper: check for force flags
   def has_force: test("\\s--force|\\s-[a-zA-Z]*f");
 
@@ -21,8 +24,11 @@ jq -r --arg mainline "$mainline" '
   def pushing_mainline:
     test("\\s" + $mainline + "(\\s|$)") or test(":" + $mainline + "(\\s|$)");
 
-  # Route based on command prefix
-  if ($cmd | startswith("git push")) then
+  # Check for override prefix anywhere in command
+  ($cmd | test("GIT_WORKFLOWS_OVERRIDE=1")) as $has_override |
+
+  # Safety checks (always enforced, even with override)
+  if ($cmd | cmd_match("git push")) then
     if ($cmd | has_force) and ($cmd | pushing_mainline) then
       {hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -37,19 +43,7 @@ jq -r --arg mainline "$mainline" '
       }}
     else null end
 
-  elif ($cmd | startswith("git commit")) then
-    {hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      additionalContext: "Consider using /git:commit skill instead. It provides mainline protection, conventional commits detection, and respects CLAUDE.md workflow configuration."
-    }}
-
-  elif ($cmd | startswith("git checkout -b")) or ($cmd | startswith("git switch -c")) then
-    {hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      additionalContext: "Consider using /git:branch skill instead. It provides smart branch naming based on conventional commits detection."
-    }}
-
-  elif ($cmd | startswith("git reset")) then
+  elif ($cmd | cmd_match("git reset")) then
     if ($cmd | test("--hard")) then
       {hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -57,7 +51,7 @@ jq -r --arg mainline "$mainline" '
       }}
     else null end
 
-  elif ($cmd | startswith("git clean")) then
+  elif ($cmd | cmd_match("git clean")) then
     if ($cmd | has_force) and (($cmd | has_dry_run) | not) then
       {hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -65,7 +59,7 @@ jq -r --arg mainline "$mainline" '
       }}
     else null end
 
-  elif ($cmd | startswith("git rebase")) then
+  elif ($cmd | cmd_match("git rebase")) then
     if ($cmd | test("\\s" + $mainline + "(\\s|$)")) then
       {hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -73,10 +67,26 @@ jq -r --arg mainline "$mainline" '
       }}
     else null end
 
-  elif ($cmd | startswith("gh ")) then
+  # Skill enforcement (only when override is not present)
+  elif ($has_override | not) and ($cmd | cmd_match("git commit")) then
     {hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      additionalContext: "Consider using GitHub MCP tools (mcp__plugin_github_github__*) for better integration."
+      permissionDecision: "deny",
+      permissionDecisionReason: "Use the git:commit skill instead (invoked via Skill tool). If the skill cannot handle your specific case, prefix the command with GIT_WORKFLOWS_OVERRIDE=1 to bypass this check."
+    }}
+
+  elif ($has_override | not) and ($cmd | cmd_match("(?:git checkout -b|git checkout --branch|git switch -c|git switch --create)")) then
+    {hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Use the git:branch skill instead (invoked via Skill tool). If the skill cannot handle your specific case, prefix the command with GIT_WORKFLOWS_OVERRIDE=1 to bypass this check."
+    }}
+
+  elif ($has_override | not) and ($cmd | cmd_match("gh pr create")) then
+    {hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Use the git:pr skill instead (invoked via Skill tool). If the skill cannot handle your specific case, prefix the command with GIT_WORKFLOWS_OVERRIDE=1 to bypass this check."
     }}
 
   else null end
