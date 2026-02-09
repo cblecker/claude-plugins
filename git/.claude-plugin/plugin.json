@@ -1,6 +1,6 @@
 {
   "name": "git",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails",
   "author": {
     "name": "cblecker",

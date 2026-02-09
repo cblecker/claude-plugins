@@ -17,16 +17,37 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 ## Hook Categories
 
-| Category | Decision | Purpose |
-|----------|----------|---------|
-| Safety (hard) | `deny` | Block dangerous operations unconditionally |
-| Safety (soft) | `ask` | Require explicit user permission |
-| Suggestion | `additionalContext` | Nudge toward better workflows |
-| Warning | `additionalContext` | Alert about potentially risky operations |
+| Category | Event | Decision | Purpose |
+|----------|-------|----------|---------|
+| Skill Enforcement | `PreToolUse` | `deny` | Block direct git commands, enforce skill usage |
+| Safety (hard) | `PreToolUse` | `deny` | Block dangerous operations unconditionally |
+| Safety (soft) | `PreToolUse` | `ask` | Require explicit user permission |
+| Warning | `PreToolUse` | `additionalContext` | Alert about potentially risky operations |
 
 ## Hooks
 
-### 1. Force Push Protection (`git push`)
+### 1. Skill Enforcement (`PreToolUse` for `Bash`)
+
+**Intent:** Enforce skill usage for commit/branch/PR operations by blocking direct git commands.
+
+**Logic:**
+- Detects `git commit` commands → **DENY**, suggest `git:commit` skill
+- Detects `git checkout -b`, `git checkout --branch`, `git switch -c`, `git switch --create` → **DENY**, suggest `git:branch` skill
+- Detects `gh pr create` → **DENY**, suggest `git:pr` skill
+- Skills can bypass enforcement by prefixing commands with `GIT_WORKFLOWS_OVERRIDE=1`
+- Safety checks always apply, even with override prefix
+
+**Override Mechanism:**
+- Skills instruct Claude to prefix git commands with `GIT_WORKFLOWS_OVERRIDE=1`
+- Example: `GIT_WORKFLOWS_OVERRIDE=1 git commit -m "feat: add auth"`
+- Override only bypasses skill enforcement, not safety checks
+- Override is auditable and visible in the command itself
+
+**Why PreToolUse:** Fires on every tool call regardless of origin (user-initiated or autonomous). UserPromptSubmit only fires on user prompts, missing autonomous actions like multi-step tasks.
+
+**Implementation:** Integrated into `scripts/git-bash-router.sh` using `cmd_match()` helper that detects commands at start or after `&&`/`;` with optional override prefix.
+
+### 2. Force Push Protection (`git push`)
 
 **Intent:** Prevent accidental force pushes that rewrite shared history.
 
@@ -38,23 +59,7 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 **Why:** Force pushing to mainline breaks other contributors' branches, loses commits, and disrupts CI/CD. Force pushing to feature branches is sometimes needed (rebasing) but should be intentional.
 
-### 2. Commit Skill Suggestion (`git commit`)
-
-**Intent:** Encourage use of `/git:commit` skill for enhanced workflow.
-
-**Logic:** Simple suggestion when `git commit` is detected.
-
-**Why:** The skill provides mainline protection, conventional commits detection, pre-commit verification, and respects CLAUDE.md configuration.
-
-### 3. Branch Skill Suggestion (`git checkout -b`, `git switch -c`)
-
-**Intent:** Encourage use of `/git:branch` skill for smart naming.
-
-**Logic:** Simple suggestion when branch creation is detected.
-
-**Why:** The skill detects conventional commits and suggests appropriate branch prefixes (feat/, fix/, etc.).
-
-### 4. Hard Reset Warning (`git reset`)
+### 3. Hard Reset Warning (`git reset`)
 
 **Intent:** Alert before discarding uncommitted work.
 
@@ -62,7 +67,7 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 **Why:** `git reset --hard` permanently discards uncommitted changes. Users should consider `git stash` or creating a backup branch first.
 
-### 5. Clean Warning (`git clean`)
+### 4. Clean Warning (`git clean`)
 
 **Intent:** Alert before permanently deleting untracked files.
 
@@ -72,7 +77,7 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 **Why:** `git clean -f` permanently deletes untracked files. Using `-n` first shows what would be deleted.
 
-### 6. Rebase Warning (`git rebase`)
+### 5. Rebase Warning (`git rebase`)
 
 **Intent:** Alert when rebasing onto mainline branch.
 
@@ -80,15 +85,7 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 **Why:** Rebasing onto mainline is often intentional but can cause issues if done accidentally on shared branches.
 
-### 7. GitHub CLI Suggestion (`gh`)
-
-**Intent:** Encourage use of GitHub MCP tools for better integration.
-
-**Logic:** Simple suggestion when any `gh` command is detected.
-
-**Why:** MCP tools provide better context and error handling than CLI.
-
-### 8. Fork PR Owner Check (`mcp__plugin_github_github__create_pull_request`)
+### 6. Fork PR Owner Check (`mcp__plugin_github_github__create_pull_request`)
 
 **Intent:** Catch when Claude forgets a repo is a fork and targets the wrong owner.
 
@@ -101,6 +98,22 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 ## Testing
 
+### Skill Enforcement Tests
+
+| Command | Expected |
+|---------|----------|
+| `git commit -m "test"` | **DENY**, suggest git:commit skill |
+| `git add . && git commit -m "test"` | **DENY**, suggest git:commit skill (chained) |
+| `GIT_WORKFLOWS_OVERRIDE=1 git commit -m "test"` | Pass through (override) |
+| `git add . && GIT_WORKFLOWS_OVERRIDE=1 git commit -m "test"` | Pass through (override in chain) |
+| `git checkout -b feat/test` | **DENY**, suggest git:branch skill |
+| `git switch -c feat/test` | **DENY**, suggest git:branch skill |
+| `GIT_WORKFLOWS_OVERRIDE=1 git switch -c feat/test` | Pass through (override) |
+| `gh pr create --title "test"` | **DENY**, suggest git:pr skill |
+| `GIT_WORKFLOWS_OVERRIDE=1 gh pr create --title "test"` | Pass through (override) |
+| `GIT_WORKFLOWS_OVERRIDE=1 git push --force origin main` | **DENY** (safety always applies) |
+| `git status` | Pass through (not blocked) |
+
 ### Force Push Tests
 
 | Command | Expected |
@@ -112,14 +125,6 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 | `git push --force-with-lease origin feature` | **ASK** |
 | `git push --force-if-includes origin feature` | **ASK** |
 | `git push origin feature` | (no hook output) |
-
-### Skill Suggestion Tests
-
-| Command | Expected |
-|---------|----------|
-| `git commit -m "test"` | Suggestion: use `/git:commit` |
-| `git checkout -b feature` | Suggestion: use `/git:branch` |
-| `git switch -c feature` | Suggestion: use `/git:branch` |
 
 ### Warning Tests
 
@@ -137,18 +142,115 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 | Scenario | Expected |
 |----------|----------|
-| `gh issue list` | Suggestion: use MCP tools |
 | PR create with upstream, owner mismatch | Warning: fork detected |
 | PR create with upstream, owner matches | (no warning) |
 | PR create without upstream remote | (no warning) |
+
+### Running Tests
+
+**Environment Setup:**
+
+The router script requires environment variables to be set:
+
+```bash
+export CLAUDE_PLUGIN_ROOT=<path-to-git-plugin>  # e.g., ~/claude-plugins/git
+export CLAUDE_MAINLINE_BRANCH=main  # Optional, will auto-detect if not set
+```
+
+**Single Test Example:**
+
+```bash
+echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | \
+  jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+```
+
+**Full Test Suite:**
+
+```bash
+export CLAUDE_PLUGIN_ROOT=<path-to-git-plugin>
+export CLAUDE_MAINLINE_BRANCH=main
+
+# Test 1: git commit enforcement
+echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+
+# Test 2: git commit with override
+echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git commit -m \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
+# Expected: "null" (pass through)
+
+# Test 3: chained git commit
+echo '{"tool_input":{"command":"git add . && git commit -m \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+
+# Test 4: chained with override
+echo '{"tool_input":{"command":"git add . && GIT_WORKFLOWS_OVERRIDE=1 git commit -m \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
+# Expected: "null" (pass through)
+
+# Test 5: git checkout -b enforcement
+echo '{"tool_input":{"command":"git checkout -b feat/test"}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+
+# Test 6: git switch -c with override
+echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git switch -c feat/test"}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
+# Expected: "null" (pass through)
+
+# Test 7: gh pr create enforcement
+echo '{"tool_input":{"command":"gh pr create --title \"test\""}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+
+# Test 8: force push to main with override (safety still applies)
+echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git push --force origin main"}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "deny"
+
+# Test 9: git status (should pass)
+echo '{"tool_input":{"command":"git status"}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
+# Expected: "null" (pass through)
+
+# Test 10: force push to feature (should ask)
+echo '{"tool_input":{"command":"git push --force origin feature"}}' | \
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+# Expected: "ask"
+```
+
+**Understanding Output:**
+
+- `"deny"` - Command blocked, skill enforcement or safety check triggered
+- `"ask"` - User permission required (soft safety check)
+- `"null"` - Command passes through (no hook action)
+- `{hookSpecificOutput: {...}}` - Full hook response with context/warnings
+
+**Plugin Validation:**
+
+```bash
+claude plugin validate ./git
+```
+
+**Markdown Linting:**
+
+```bash
+npx markdownlint-cli2 --config ${CLAUDE_PROJECT_DIR}/.markdownlint-cli2.jsonc "git/**/*.md"
+```
 
 ## Technical Notes
 
 ### Router Implementation
 
 - **Architecture:** Pure jq for all command routing and logic
-- **Command routing:** jq `startswith()` function with conditional logic
-- **Helper functions:** jq `def` for reusable patterns (force flags, dry-run flags, mainline detection)
+- **Command routing:** jq `cmd_match()` helper that matches commands at start or after `&&`/`;` with optional override prefix
+- **Helper functions:** jq `def` for reusable patterns (cmd_match, force flags, dry-run flags, mainline detection)
+- **Override detection:** Simple boolean check for `GIT_WORKFLOWS_OVERRIDE=1` anywhere in command
+- **Routing order:** Safety checks first (always enforced), then skill enforcement (only if no override)
 - **Mainline caching:** Bash checks `CLAUDE_MAINLINE_BRANCH` before calling detect script
 - **No-op return:** jq `null` for non-matching commands
 - **Portability:** Consistent behavior across Bash 3.2 (macOS) and Bash 5.3+ (modern systems)
@@ -156,8 +258,13 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 ### jq Patterns
 
 - Use `(.a == .b | not)` instead of `.a != .b` - bash escapes `!` as `\!`
+- `cmd_match()` helper: `def cmd_match($p): test("(^|&&|;)\\s*(GIT_WORKFLOWS_OVERRIDE=1\\s+)?" + $p);`
+  - Matches command at start (`^`) or after chaining operators (`&&`, `;`)
+  - Handles optional `GIT_WORKFLOWS_OVERRIDE=1` prefix
+  - Works for both simple and chained commands
 - Test for flags with word boundaries: `test("\\s--force|\\s-[a-zA-Z]*f")`
 - Mainline detection via `${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh`
+- Override detection: `($cmd | test("GIT_WORKFLOWS_OVERRIDE=1")) as $has_override`
 
 ### Hook Matchers
 

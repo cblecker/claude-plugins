@@ -9,6 +9,7 @@
     "MD034": false,  // Bare URLs (acceptable in reference docs)
     "MD036": false,  // Emphasis used instead of header
     "MD040": false,  // Fenced code language (many examples are generic)
+    "MD041": false,  // First line heading (skills use YAML frontmatter)
     "MD060": false   // Table column style
   }
 }
