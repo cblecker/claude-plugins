@@ -7,7 +7,7 @@ description: Enhanced git commit with mainline protection, conventional commits 
 
 **Workflow:**
 
-1. Check if on mainline (if yes, create branch first)
+1. Check if on mainline (if yes, create branch unless explicitly allowed)
 2. Verify changes exist (use dynamic context)
 3. Run pre-commit checks (CLAUDE.md verification)
 4. Stage specific files (check for sensitive files, avoid `git add -A`)
@@ -44,7 +44,11 @@ All steps reference the dynamic context above for current state.
 
 **If on mainline branch:**
 
-1. Warn user: "You're on the `{mainline}` branch. Creating a feature branch first is recommended."
+Check if the user's prompt or project CLAUDE.md explicitly allows committing directly to mainline (e.g., "commit to main", "no feature branch", "allow mainline commits"). If so, skip branch creation and proceed with the commit.
+
+Otherwise, automatically create a feature branch:
+
+1. Inform user: "You're on the `{mainline}` branch. Creating a feature branch."
 2. Invoke the `branch` skill using the Skill tool
 3. After branch created, continue with commit process
 
