@@ -5,8 +5,7 @@
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
         "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}",
-        "X-MCP-Toolsets": "all",
-        "X-MCP-Insiders": "true"
+        "X-MCP-Toolsets": "default,actions,orgs,labels,notifications,discussions,gists,projects,code_security,secret_protection,dependabot,security_advisories,github_support_docs_search"
       }
     }
   }
