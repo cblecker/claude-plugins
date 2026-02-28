@@ -22,6 +22,11 @@
       "name": "github",
       "source": "./github",
       "strict": true
+    },
+    {
+      "name": "gofmt",
+      "source": "./gofmt",
+      "strict": true
     }
   ]
 }
