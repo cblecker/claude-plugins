@@ -33,11 +33,11 @@ Place dynamic context section after Quick Reference, before Core Workflow.
 
 ### PreToolUse Router-Based Enforcement Pattern
 
-Single router script (`scripts/git-bash-router.sh`) handles both safety checks and skill enforcement for git-related Bash commands:
+Single router script (`scripts/git-bash-router.py`) handles both safety checks and skill enforcement for git-related Bash commands:
 
 **Architecture:**
 ```
-Bash tool use → hooks.json matcher: "Bash" → router script (pure jq)
+Bash tool use → hooks.json matcher: "Bash" → router script (Python)
                                                     ↓
                                     1. Check for GIT_WORKFLOWS_OVERRIDE=1
                                     2. Safety checks (always applied)
@@ -68,14 +68,14 @@ Bash tool use → hooks.json matcher: "Bash" → router script (pure jq)
 **Why PreToolUse:** Fires on every tool call regardless of origin (user-initiated or autonomous). Catches both direct user commands and autonomous multi-step operations.
 
 **Performance optimization:**
-1. **Pure jq implementation** for consistent behavior across systems
-2. **cmd_match() helper** handles start/chained commands and optional override prefix
+1. **Python 3 with stdlib `json` module** for consistent behavior across systems
+2. **`cmd_match()` helper** handles start/chained commands and optional override prefix
 3. **Cached mainline** via `CLAUDE_MAINLINE_BRANCH` environment variable
-4. **Single jq process** for all routing and logic
+4. **Single Python process** for all routing and logic
 
-**Result:** ~15-20ms per Bash tool use vs ~400ms for multiple separate jq hooks.
+**Result:** ~30-60ms per Bash tool use vs ~400ms for multiple separate hooks.
 
-**Portability:** Pure jq avoids Bash 3.2 (macOS) vs Bash 5.3+ inconsistencies with stdin handling.
+**Portability:** Python 3 stdlib (`json`, `re`, `subprocess`) avoids jq dependency and Bash version inconsistencies.
 
 **Pattern:**
 ```json
@@ -83,7 +83,7 @@ Bash tool use → hooks.json matcher: "Bash" → router script (pure jq)
   "matcher": "Bash",
   "hooks": [{
     "type": "command",
-    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh",
+    "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py",
     "timeout": 5
   }]
 }
@@ -91,10 +91,10 @@ Bash tool use → hooks.json matcher: "Bash" → router script (pure jq)
 
 **Technical notes:**
 - Matchers are regex patterns matched against tool names
-- `cmd_match()` helper: matches commands at start or after `&&`/`;` with optional override prefix
-- Use `(.a == .b | not)` instead of `.a != .b` in jq (bash escapes `!` as `\!`)
+- `cmd_match()` helper: uses `re.search()` to match commands at start or after `&&`/`;` with optional override prefix
 - Return `null` for no-op (hook passes through)
-- Pure jq implementation ensures consistent behavior across Bash versions
+- Error handling: any exception outputs `null` and exits 0 (degrade to passthrough)
+- Python 3 stdlib only (`json`, `re`, `subprocess`, `os`, `sys`)
 - See [Hook documentation](https://code.claude.com/docs/en/hooks) for matcher syntax
 
 ### Hook Categories
@@ -178,12 +178,12 @@ The `detect-conventions.sh` and `detect-mainline.sh` scripts use bash for detect
 
 ### Router Pattern Beats Multiple Hooks
 
-Initial implementation used 8 separate hook entries with individual jq processes.
-Router pattern uses single entry with pure jq for all routing and logic.
+Initial implementation used 8 separate hook entries with individual processes.
+Router pattern uses single entry with Python for all routing and logic.
 
-**Performance:** Router responds in ~15-20ms vs ~400ms for multiple jq processes.
+**Performance:** Router responds in ~30-60ms vs ~400ms for multiple separate processes.
 
-**Pattern:** Pure jq for portability and consistency across systems. Acceptable performance tradeoff for reliable behavior.
+**Pattern:** Python 3 stdlib for portability and consistency across systems. No external dependencies required.
 
 ### Symlinks for Code Reuse with Permissions
 
@@ -214,8 +214,7 @@ Set environment variables and pipe JSON to the router script:
 export CLAUDE_PLUGIN_ROOT=<path-to-git-plugin>
 export CLAUDE_MAINLINE_BRANCH=main
 echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | \
-  jq -c '.hookSpecificOutput.permissionDecision // "pass"'
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
 ```
 
 Full test suite available in `git/hooks/README.md` under "Running Tests" section.
