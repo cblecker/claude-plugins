@@ -4,14 +4,14 @@ Safety controls and workflow suggestions for git operations.
 
 ## Architecture
 
-All git-related Bash hooks are routed through a single router script (`scripts/git-bash-router.sh`) that:
-- Uses pure jq for all command routing and logic
+All git-related Bash hooks are routed through a single router script (`scripts/git-bash-router.py`) that:
+- Uses Python 3 with stdlib `json` module for all command routing and logic
 - Caches mainline branch detection via `CLAUDE_MAINLINE_BRANCH` environment variable
 - Returns `null` for non-git commands (fast no-op)
 
-**Performance:** ~15-20ms per Bash tool use vs ~400ms for multiple separate jq hooks.
+**Performance:** ~30-60ms per Bash tool use vs ~400ms for multiple separate hooks.
 
-**Portability:** Pure jq implementation ensures consistent behavior across Bash 3.2 (macOS system shell) and Bash 5.3+ (modern systems).
+**Portability:** Python 3 stdlib (`json`, `re`, `subprocess`) requires no external dependencies. More universally available than jq.
 
 **Implementation:** Single `Bash` matcher in `hooks.json` pipes all Bash commands to the router.
 
@@ -45,7 +45,7 @@ All git-related Bash hooks are routed through a single router script (`scripts/g
 
 **Why PreToolUse:** Fires on every tool call regardless of origin (user-initiated or autonomous). UserPromptSubmit only fires on user prompts, missing autonomous actions like multi-step tasks.
 
-**Implementation:** Integrated into `scripts/git-bash-router.sh` using `cmd_match()` helper that detects commands at start or after `&&`/`;` with optional override prefix.
+**Implementation:** Integrated into `scripts/git-bash-router.py` using `cmd_match()` helper that detects commands at start or after `&&`/`;` with optional override prefix.
 
 ### 2. Force Push Protection (`git push`)
 
@@ -161,9 +161,8 @@ export CLAUDE_MAINLINE_BRANCH=main  # Optional, will auto-detect if not set
 
 ```bash
 echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | \
-  jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", ...}}
 ```
 
 **Full Test Suite:**
@@ -174,53 +173,53 @@ export CLAUDE_MAINLINE_BRANCH=main
 
 # Test 1: git commit enforcement
 echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "deny", ...}
 
 # Test 2: git commit with override
 echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
-# Expected: "null" (pass through)
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: null (pass through)
 
 # Test 3: chained git commit
 echo '{"tool_input":{"command":"git add . && git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "deny", ...}
 
 # Test 4: chained with override
 echo '{"tool_input":{"command":"git add . && GIT_WORKFLOWS_OVERRIDE=1 git commit -m \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
-# Expected: "null" (pass through)
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: null (pass through)
 
 # Test 5: git checkout -b enforcement
 echo '{"tool_input":{"command":"git checkout -b feat/test"}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "deny", ...}
 
 # Test 6: git switch -c with override
 echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git switch -c feat/test"}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
-# Expected: "null" (pass through)
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: null (pass through)
 
 # Test 7: gh pr create enforcement
 echo '{"tool_input":{"command":"gh pr create --title \"test\""}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "deny", ...}
 
 # Test 8: force push to main with override (safety still applies)
 echo '{"tool_input":{"command":"GIT_WORKFLOWS_OVERRIDE=1 git push --force origin main"}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "deny"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "deny", ...}
 
 # Test 9: git status (should pass)
 echo '{"tool_input":{"command":"git status"}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '. // "null"'
-# Expected: "null" (pass through)
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: null (pass through)
 
 # Test 10: force push to feature (should ask)
 echo '{"tool_input":{"command":"git push --force origin feature"}}' | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh | jq -c '.hookSpecificOutput.permissionDecision // "pass"'
-# Expected: "ask"
+  ${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py
+# Expected: {..., "permissionDecision": "ask", ...}
 ```
 
 **Understanding Output:**
@@ -246,25 +245,26 @@ npx markdownlint-cli2 --config ${CLAUDE_PROJECT_DIR}/.markdownlint-cli2.jsonc "g
 
 ### Router Implementation
 
-- **Architecture:** Pure jq for all command routing and logic
-- **Command routing:** jq `cmd_match()` helper that matches commands at start or after `&&`/`;` with optional override prefix
-- **Helper functions:** jq `def` for reusable patterns (cmd_match, force flags, dry-run flags, mainline detection)
-- **Override detection:** Simple boolean check for `GIT_WORKFLOWS_OVERRIDE=1` anywhere in command
+- **Architecture:** Python 3 with stdlib `json` and `re` modules for all command routing and logic
+- **Command routing:** `cmd_match()` helper using `re.search()` to match commands at start or after `&&`/`;` with optional override prefix
+- **Helper functions:** Python functions for reusable patterns (cmd_match, force flags, dry-run flags, mainline detection)
+- **Override detection:** Simple string check for `GIT_WORKFLOWS_OVERRIDE=1` anywhere in command
 - **Routing order:** Safety checks first (always enforced), then skill enforcement (only if no override)
-- **Mainline caching:** Bash checks `CLAUDE_MAINLINE_BRANCH` before calling detect script
-- **No-op return:** jq `null` for non-matching commands
-- **Portability:** Consistent behavior across Bash 3.2 (macOS) and Bash 5.3+ (modern systems)
+- **Mainline caching:** Checks `CLAUDE_MAINLINE_BRANCH` env var before calling detect script via `subprocess`
+- **No-op return:** Outputs `null` for non-matching commands
+- **Error handling:** Wraps entire script in try/except; any failure outputs `null` and exits 0 (passthrough)
+- **Portability:** Python 3 stdlib only — no external dependencies required
 
-### jq Patterns
+### Python Patterns
 
-- Use `(.a == .b | not)` instead of `.a != .b` - bash escapes `!` as `\!`
-- `cmd_match()` helper: `def cmd_match($p): test("(^|&&|;)\\s*(GIT_WORKFLOWS_OVERRIDE=1\\s+)?" + $p);`
+- `cmd_match(pattern)`: `re.search(r"(^|&&|;)\s*(GIT_WORKFLOWS_OVERRIDE=1\s+)?" + pattern, cmd)`
   - Matches command at start (`^`) or after chaining operators (`&&`, `;`)
   - Handles optional `GIT_WORKFLOWS_OVERRIDE=1` prefix
   - Works for both simple and chained commands
-- Test for flags with word boundaries: `test("\\s--force|\\s-[a-zA-Z]*f")`
-- Mainline detection via `${CLAUDE_PLUGIN_ROOT}/scripts/detect-mainline.sh`
-- Override detection: `($cmd | test("GIT_WORKFLOWS_OVERRIDE=1")) as $has_override`
+- Flag detection: `re.search(r"\s--force|\s-[a-zA-Z]*f", cmd)`
+- Mainline branch values are `re.escape()`d before use in patterns
+- Mainline detection via `subprocess.run(["bash", detect_script], ...)`
+- Override detection: `"GIT_WORKFLOWS_OVERRIDE=1" in cmd`
 
 ### Hook Matchers
 

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r --arg url \"$(git remote get-url upstream 2>/dev/null)\" 'if $url == \"\" then null else (($url | capture(\".*[:/](?<owner>[^/]+)/[^/]+(\\\\.git)?$\") | .owner) as $upstream | if (.tool_input.owner == $upstream | not) then {\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"WARNING: Fork detected (upstream remote exists). PR owner should be the upstream repository owner, not your fork.\"}} else null end) end'",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/fork-detector.py",
             "timeout": 5
           }
         ]
