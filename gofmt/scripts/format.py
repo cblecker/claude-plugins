@@ -3,8 +3,20 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+
+TIMEOUT_SECONDS = 8
+
+
+def run_formatter(cmd):
+    """Run a formatter command, returning True on success."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_SECONDS)
+        return result.returncode == 0
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def main():
@@ -22,19 +34,18 @@ def main():
     if not os.path.isfile(file_path):
         sys.exit(0)
 
-    # Try goimports first, fall back to gofmt
-    result = subprocess.run(
-        ["go", "run", "golang.org/x/tools/cmd/goimports@latest", "-w", file_path],
-        capture_output=True,
-    )
-    if result.returncode == 0:
+    # Try local goimports binary first
+    if shutil.which("goimports") and run_formatter(["goimports", "-w", file_path]):
         sys.exit(0)
 
-    result = subprocess.run(
-        ["gofmt", "-w", file_path],
-        capture_output=True,
-    )
-    if result.returncode == 0:
+    # Fall back to go run goimports
+    if shutil.which("go") and run_formatter(
+        ["go", "run", "golang.org/x/tools/cmd/goimports@latest", "-w", file_path]
+    ):
+        sys.exit(0)
+
+    # Fall back to gofmt
+    if run_formatter(["gofmt", "-w", file_path]):
         sys.exit(0)
 
     sys.exit(1)
