@@ -1,22 +1,15 @@
-# Git Plugin Development Notes
-
-Development learnings and architectural decisions for the git plugin.
-
-Key decisions:
-- Use [dynamic context injection](https://code.claude.com/docs/en/skills#inject-dynamic-context) to pre-fetch information where possible.
-- Place dynamic context section after Quick Reference, before Core Workflow.
+# Git Plugin
 
 ## Architecture
 
 ### Dynamic Context Injection
 
-Use [dynamic context injection](https://code.claude.com/docs/en/skills#inject-dynamic-context) to pre-fetch information where possible.
-
-Place dynamic context section after Quick Reference, before Core Workflow.
+Use [dynamic context injection](https://code.claude.com/docs/en/skills#inject-dynamic-context) to pre-fetch information where possible. Place the dynamic context section after Quick Reference, before Core Workflow.
 
 ### Skill Structure
 
 **Standardized sections (in order):**
+
 1. YAML frontmatter (name, description, version)
 2. **Quick Reference** (workflow, key info)
 3. Current Git State (dynamic context)
@@ -26,8 +19,30 @@ Place dynamic context section after Quick Reference, before Core Workflow.
 7. Integration with Other Skills
 
 **Quick Reference should include:**
+
 - Workflow checklist
 - Key reference info (commit types, branch prefixes, etc.)
+
+### Shell Scripts for Detection
+
+The `detect-conventions.sh` and `detect-mainline.sh` scripts use bash for detection:
+
+- Faster than subagents for simple analysis tasks
+- Lower cost
+- Sufficient for pattern matching and config checking
+- Cached results for session reuse
+
+**Guideline:** Use shell scripts for detection/analysis when possible, subagents for complex reasoning.
+
+### Symlinks for Code Reuse
+
+Symlinks allow:
+
+- Single canonical implementation
+- Per-skill permission scoping (each skill's scripts/ directory)
+- Easy updates (change one file, all symlinks benefit)
+
+**Pattern:** Canonical in `scripts/`, symlinks in `skills/*/scripts/`.
 
 ## Hooks Architecture
 
@@ -36,7 +51,8 @@ Place dynamic context section after Quick Reference, before Core Workflow.
 Single router script (`scripts/git-bash-router.py`) handles both safety checks and skill enforcement for git-related Bash commands:
 
 **Architecture:**
-```
+
+```text
 Bash tool use → hooks.json matcher: "Bash" → router script (Python)
                                                     ↓
                                     1. Check for GIT_WORKFLOWS_OVERRIDE=1
@@ -47,6 +63,7 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
 ```
 
 **Routing Order:**
+
 1. **Override detection:** Check for `GIT_WORKFLOWS_OVERRIDE=1` anywhere in command
 2. **Safety checks** (always enforced, even with override):
    - Force push to mainline → deny
@@ -60,6 +77,7 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
    - `gh pr create` → deny, suggest `git:pr`
 
 **Override Mechanism:**
+
 - Skills instruct Claude to prefix commands with `GIT_WORKFLOWS_OVERRIDE=1`
 - Example: `GIT_WORKFLOWS_OVERRIDE=1 git commit -m "feat: add auth"`
 - Override bypasses skill enforcement only, not safety checks
@@ -67,17 +85,10 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
 
 **Why PreToolUse:** Fires on every tool call regardless of origin (user-initiated or autonomous). Catches both direct user commands and autonomous multi-step operations.
 
-**Performance optimization:**
-1. **Python 3 with stdlib `json` module** for consistent behavior across systems
-2. **`cmd_match()` helper** handles start/chained commands and optional override prefix
-3. **Cached mainline** via `CLAUDE_MAINLINE_BRANCH` environment variable
-4. **Single Python process** for all routing and logic
-
-**Result:** ~30-60ms per Bash tool use vs ~400ms for multiple separate hooks.
-
-**Portability:** Python 3 stdlib (`json`, `re`, `subprocess`) avoids jq dependency and Bash version inconsistencies.
+**Performance:** ~30-60ms per Bash tool use vs ~400ms for multiple separate hooks. Single Python process handles all routing and logic.
 
 **Pattern:**
+
 ```json
 {
   "matcher": "Bash",
@@ -90,6 +101,7 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
 ```
 
 **Technical notes:**
+
 - Matchers are regex patterns matched against tool names
 - `cmd_match()` helper: uses `re.search()` to match commands at start or after `&&`/`;` with optional override prefix
 - Return `null` for no-op (hook passes through)
@@ -107,6 +119,7 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
 | Warning | `PreToolUse` | `additionalContext` | Alert about potentially risky operations |
 
 **Examples:**
+
 - `git commit -m "msg"` → `deny`, suggest `git:commit` skill
 - `GIT_WORKFLOWS_OVERRIDE=1 git commit -m "msg"` → pass through (skill-authorized)
 - Force push to mainline → `deny` (never allowed, even with override)
@@ -116,11 +129,10 @@ Bash tool use → hooks.json matcher: "Bash" → router script (Python)
 ### Hook Documentation
 
 Comprehensive `hooks/README.md` includes:
+
 - Intent, logic, and rationale for each hook
 - Test plan with expected outcomes
 - Technical implementation notes
-
-**Benefit:** Makes hooks maintainable and testable without diving into JSON.
 
 ## Workflow Patterns
 
@@ -129,6 +141,7 @@ Comprehensive `hooks/README.md` includes:
 **Pattern:** All skills should check prerequisites before doing detection work.
 
 **Correct order:**
+
 1. Check uncommitted changes (warn)
 2. Confirm base branch / verify not on mainline
 3. Detect conventions (invoke subagent)
@@ -142,6 +155,7 @@ Comprehensive `hooks/README.md` includes:
 Place safety rules section before Core Workflow so they're immediately visible.
 
 **Structure:**
+
 ```markdown
 ## Quick Reference
 ## Current Git State
@@ -149,56 +163,12 @@ Place safety rules section before Core Workflow so they're immediately visible.
 ## Core Workflow
 ```
 
-## Development Learnings
-
-### Dynamic Context Reduces Token Usage
-
-Before: Skills executed 3-5 git commands during workflow
-After: Dynamic context pre-fetches at invocation time
-
-**Measurement:** ~50% reduction in git command execution during skill run.
-
-### Quick Reference Improves Navigation
-
-Moved Quick Reference to top provides:
-- Instant overview of workflow
-- Better first impression for users
-
-**Pattern:** Always include workflow checklist.
-
-### Shell Scripts for Detection
-
-The `detect-conventions.sh` and `detect-mainline.sh` scripts use bash for detection:
-- Faster than subagents for simple analysis tasks
-- Lower cost
-- Sufficient for pattern matching and config checking
-- Cached results for session reuse
-
-**Guideline:** Use shell scripts for detection/analysis when possible, subagents for complex reasoning.
-
-### Router Pattern Beats Multiple Hooks
-
-Initial implementation used 8 separate hook entries with individual processes.
-Router pattern uses single entry with Python for all routing and logic.
-
-**Performance:** Router responds in ~30-60ms vs ~400ms for multiple separate processes.
-
-**Pattern:** Python 3 stdlib for portability and consistency across systems. No external dependencies required.
-
-### Symlinks for Code Reuse with Permissions
-
-Symlinks allow:
-- Single canonical implementation
-- Per-skill permission scoping (each skill's scripts/ directory)
-- Easy updates (change one file, all symlinks benefit)
-
-**Pattern:** Canonical in `scripts/`, symlinks in `skills/*/scripts/`.
-
 ## Maintenance
 
 ### Testing Hooks
 
 See `git/hooks/README.md` for comprehensive test plan covering:
+
 - Skill enforcement tests (deny without override, pass with override)
 - Chained command tests (enforcement and safety in chains)
 - Force push tests (deny to mainline, ask elsewhere)
@@ -218,5 +188,3 @@ echo '{"tool_input":{"command":"git commit -m \"test\""}}' | \
 ```
 
 Full test suite available in `git/hooks/README.md` under "Running Tests" section.
-
-**Pattern:** Document test cases in README alongside hook descriptions.
