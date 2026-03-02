@@ -16,7 +16,6 @@ claude plugin marketplace add cblecker/claude-plugins
 
 | Plugin                                       | Description                                                                                      |
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
-| [sequential-thinking](./sequential-thinking) | MCP server for dynamic, reflective problem-solving through structured chain-of-thought reasoning |
 | [git](./git)                                 | Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails |
 | [github](./github)                           | GitHub MCP server with all toolsets and insiders mode enabled                                    |
 | [gofmt](./gofmt)                             | Auto-format Go files with goimports/gofmt after Write/Edit operations                           |
