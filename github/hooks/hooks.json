@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'You have access to a GitHub MCP server. Prefer GitHub MCP tools over the gh CLI and WebFetch tools for all GitHub operations. For raw.githubusercontent.com URLs, use the get_file_contents MCP tool with the appropriate owner, repo, path, and ref parameters instead of WebFetch.'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
