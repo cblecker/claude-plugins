@@ -18,7 +18,6 @@ claude plugin marketplace add cblecker/claude-plugins
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
 | [git](./git)                                 | Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails |
 | [github](./github)                           | GitHub MCP server with all toolsets and insiders mode enabled                                    |
-| [gofmt](./gofmt)                             | Auto-format Go files with goimports/gofmt after Write/Edit operations                           |
 
 ## License
 
