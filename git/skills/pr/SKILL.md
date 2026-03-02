@@ -26,7 +26,7 @@ description: Enhanced pull request creation with fork detection, template discov
 
 ### 1. Pre-Flight Checks
 
-**Uncommitted changes:** If present, ask user whether to commit first. If yes, invoke the `commit` skill via the Skill tool, then re-fetch current branch and uncommitted status (the commit skill may have created a new branch). If no, stop -- user must commit or stash before creating a PR.
+**Uncommitted changes:** If present, invoke the `commit` skill via the Skill tool to commit them, then re-fetch current branch and uncommitted status (the commit skill may have created a new branch if on mainline).
 
 **Mainline protection:** If current branch equals mainline, stop and instruct the user to create a feature branch first. This check runs after any commit (since branch may have changed) and when the working tree is already clean.
 
