@@ -1,1 +1,0 @@
-../../../scripts/detect-mainline.sh

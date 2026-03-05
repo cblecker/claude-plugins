@@ -1,1 +1,0 @@
-../../../scripts/detect-conventions.sh

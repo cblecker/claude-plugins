@@ -1,108 +1,71 @@
 # Git Plugin
 
-Enhanced git workflows with smart defaults, safety guardrails, and automatic convention detection.
+Replaces Claude Code's built-in git instructions with enhanced, project-aware
+versions injected at session start.
 
-## Overview
+## Prerequisites
 
-The git plugin enhances Claude Code's built-in git capabilities with:
+Set `includeGitInstructions: false` in your Claude Code settings to disable
+the built-in git instructions. This plugin provides its own replacement.
 
-- **Smart branch creation** - Auto-detects conventional commit style and suggests appropriate prefixes
-- **Mainline protection** - Prevents accidental commits directly to main/master branches
-- **Fork workflow support** - Auto-detects fork setup and guides PR creation to upstream
-- **Conventional commits** - Detects and helps maintain conventional commit style
-- **Safety reminders** - Warns before dangerous operations like force push to mainline
+In `.claude/settings.json` or `.claude/settings.local.json`:
 
-## Features
+```json
+{
+  "includeGitInstructions": false
+}
+```
 
-### Skills
+Or set the environment variable `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1`.
 
-- **`/git:branch`** - Create branches with smart naming and base branch awareness
-- **`/git:commit`** - Create commits with mainline protection and style detection
-- **`/git:pr`** - Create pull requests with fork detection and template discovery
+## What It Does
 
-### Hooks
+At session start, the plugin runs a detection script that:
 
-- **PreToolUse hooks** - Provide contextual reminders before git/gh operations
-  - Bash git commands: Checks for mainline, conventional commits, safety rules
-  - GitHub MCP tools: Verifies fork setup, finds PR templates
+1. **Detects your mainline branch** (via `origin HEAD`, falls back to `main`/`master`)
+2. **Detects conventional commits** (commitlint config or commit history analysis)
+3. **Detects fork setup** (checks for `upstream` remote)
+
+Then injects tailored git instructions covering:
+
+- **Git Safety Protocol** -- never force push mainline, never skip hooks, prefer
+  specific file staging, prefer new commits over amending
+- **Commit workflow** -- review changes, stage specific files, HEREDOC format,
+  conventional commits format when detected
+- **Branch workflow** -- create from mainline, conventional prefixes when detected,
+  kebab-case naming
+- **PR workflow** -- use GitHub MCP tools, fork-aware PR creation, structured body
+  format (Summary + Test plan)
 
 ## Usage
 
-### Creating a Branch
-
-Ask Claude to create a branch and the plugin will:
-1. Detect if conventional commits are used → suggest `feat/`, `fix/`, etc. prefixes
-2. Identify mainline branch to use as base
-3. Guide you through branch creation with proper naming
-
-### Making a Commit
-
-Ask Claude to commit changes and the plugin will:
-1. Check if you're on mainline → guide you to create a branch first
-2. Detect commit message style (conventional commits)
-3. Run any pre-commit checks specified in CLAUDE.md
-4. Help craft an appropriate commit message
-
-### Creating a Pull Request
-
-Ask Claude to create a PR and the plugin will:
-1. Check for uncommitted changes → guide you to commit first
-2. Detect fork setup (origin vs upstream)
-3. Find PR templates in the repository
-4. Guide PR creation with proper base branch
+Install the plugin and set the prerequisite. The plugin works automatically --
+no slash commands or special invocations needed. Claude receives the right git
+instructions from the start of every session.
 
 ## Configuration
 
-The plugin auto-detects repository conventions but respects overrides in your project's `CLAUDE.md`:
+The plugin auto-detects repository conventions at session start.
 
-```markdown
-## Git Workflow
-- This repo uses conventional commits
-- Branch naming: type/description (e.g., feat/add-login)
-- Before committing, run: `npm test` and `npm run lint`
-- This is a fork; push to origin, PRs target upstream
-```
-
-**Priority**: CLAUDE.md hints > auto-detection > defaults
-
-## How It Works
-
-The plugin uses:
-- **Reference files** - Shared detection utilities for mainline, forks, conventional commits, and safety
-- **Skill composition** - Skills can invoke each other (`/git:pr` → `/git:commit` → `/git:branch`)
-- **PreToolUse hooks** - Non-blocking reminders before git operations
-
-## Safety
-
-All hooks are **non-blocking** - they provide warnings and guidance but never prevent operations. You maintain full control over your git workflow.
+| Setting | Detection Method |
+|---------|-----------------|
+| Mainline branch | `git ls-remote --symref origin HEAD`, local fallback |
+| Conventional commits | commitlint config files, commit history pattern matching |
+| Fork setup | Presence of `upstream` remote |
 
 ## Testing
 
-To test the plugin locally:
+Validate the plugin:
 
 ```bash
-# From the marketplace directory
-claude --plugin-dir /path/to/claude-plugins
+claude plugin validate ./git
 ```
 
-### Test Cases
+Test the script standalone in any git repository:
 
-1. **Branch creation**: Ask "Create a branch for adding authentication"
-   - Should detect conventional commits if configured
-   - Suggests appropriate branch name with prefix
-
-2. **Commit on mainline**: Ask "Commit my changes" while on main/master
-   - Should detect mainline branch
-   - Suggests creating feature branch first
-
-3. **Pull request**: Ask "Create a pull request"
-   - Detects fork setup (if applicable)
-   - Finds PR templates
-   - Guides PR creation
-
-4. **Safety hooks**: Try "git push --force origin main"
-   - Should warn about dangerous operation
-   - Suggests safer alternatives
+```bash
+bash /path/to/git/scripts/git-instructions.sh
+```
 
 ## License
 
