@@ -74,7 +74,8 @@ contextually.
 - Branch workflow section added
 - `TodoWrite or Agent tools` references removed (not relevant to plugin context)
 - Claude Code attribution line removed from PR body template
-- Co-Authored-By trailer referenced generically (not hardcoded)
+- Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
+- Signed-off-by safety rule added (AI must never add DCO sign-off)
 
 ## Maintenance
 
