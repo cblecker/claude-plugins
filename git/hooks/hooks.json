@@ -1,23 +1,11 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-bash-router.py",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__plugin_github_github__create_pull_request",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/fork-detector.py",
-            "timeout": 5
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/git-instructions.sh"
           }
         ]
       }

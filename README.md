@@ -16,7 +16,7 @@ claude plugin marketplace add cblecker/claude-plugins
 
 | Plugin                                       | Description                                                                                      |
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
-| [git](./git)                                 | Enhanced git workflows with smart branch naming, conventional commits detection, fork handling, and safety guardrails |
+| [git](./git)                                 | Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails |
 | [github](./github)                           | GitHub MCP server with all toolsets and insiders mode enabled                                    |
 
 ## License
