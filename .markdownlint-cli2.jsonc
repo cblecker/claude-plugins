@@ -1,5 +1,8 @@
 {
   // Combined markdownlint rule configuration and CLI settings
+  "ignores": [
+    "gws/skills/**"  // Vendored upstream gws generate-skills output
+  ],
   "config": {
     "default": true,
     "MD013": false,  // Line length

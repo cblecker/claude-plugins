@@ -11,6 +11,7 @@ Personal Claude Code plugin marketplace
 ├── git/                       # Custom plugin: git workflows & safety
 ├── gofmt/                     # Custom plugin: Go formatting hooks
 ├── github/                    # MCP wrapper: GitHub tools
+├── gws/                       # Custom plugin: Google Workspace CLI skills
 ├── sequential-thinking/       # MCP wrapper: chain-of-thought reasoning
 └── CLAUDE.md
 ```

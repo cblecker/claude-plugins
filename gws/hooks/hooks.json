@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v gws >/dev/null 2>&1 && echo 'You have access to the Google Workspace CLI (gws). Use gws skills for Google Workspace operations. Run gws schema <service>.<resource>.<method> to discover API parameters.' || echo 'WARNING: gws CLI not found. Install with: npm install -g @googleworkspace/cli'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
