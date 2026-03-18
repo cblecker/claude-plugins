@@ -1,0 +1,10 @@
+{
+  "name": "gws",
+  "version": "1.0.0",
+  "description": "Google Workspace CLI skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, and Meet",
+  "author": {
+    "name": "cblecker"
+  },
+  "homepage": "https://github.com/googleworkspace/cli",
+  "keywords": ["google-workspace", "gws", "gmail", "calendar", "drive", "docs", "sheets", "slides", "meet"]
+}

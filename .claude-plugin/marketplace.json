@@ -17,6 +17,11 @@
       "name": "github",
       "source": "./github",
       "strict": true
+    },
+    {
+      "name": "gws",
+      "source": "./gws",
+      "strict": true
     }
   ]
 }

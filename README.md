@@ -18,6 +18,7 @@ claude plugin marketplace add cblecker/claude-plugins
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
 | [git](./git)                                 | Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails |
 | [github](./github)                           | GitHub MCP server with all toolsets and insiders mode enabled                                    |
+| [gws](./gws)                                 | Google Workspace CLI skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, and Meet          |
 
 ## License
 
