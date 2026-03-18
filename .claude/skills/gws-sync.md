@@ -13,7 +13,8 @@ Synchronize upstream `gws generate-skills` output with the curated skill set in 
 ### 1. Generate upstream skills
 
 ```bash
-gws generate-skills --output-dir "$TMPDIR/gws-skills-upstream"
+GWS_TMP_DIR="$(mktemp -d)"
+gws generate-skills --output-dir "$GWS_TMP_DIR"
 ```
 
 ### 2. Check current OAuth scopes
@@ -47,7 +48,7 @@ List all directories in `gws/skills/` to get the current vendored set.
 
 For each upstream skill directory:
 
-1. Read its `SKILL.md` frontmatter to get the `metadata.openclaw.requires.skills` list
+1. Read its `SKILL.md` frontmatter to get `metadata.openclaw.requires.skills` (default to `[]` if missing)
 2. Check if ALL required service skills have matching OAuth scopes
 3. Categorize:
    - **New + scoped**: upstream skill not in current set, all required services have scopes
@@ -83,7 +84,7 @@ After applying changes, bump the patch version in `gws/.claude-plugin/plugin.jso
 ### 8. Cleanup
 
 ```bash
-rm -rf "$TMPDIR/gws-skills-upstream"
+rm -rf "${GWS_TMP_DIR:?}"
 ```
 
 ### 9. Summary

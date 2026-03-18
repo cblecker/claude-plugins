@@ -1,0 +1,3 @@
+reviews:
+  path_filters:
+    - "!gws/skills/**"  # Vendored upstream gws generate-skills output
