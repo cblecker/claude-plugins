@@ -73,6 +73,18 @@ gws <service> <resource> [sub-resource] <method> [flags]
   gws drive files list --params '{"pageSize": 5}'
   ```
 
+## Effort Level
+
+The `${CLAUDE_EFFORT}` variable (when set) indicates how much detail to include in output:
+
+| Value | Behavior |
+|-------|----------|
+| `low` | Concise output — minimal formatting, key facts only |
+| `medium` | Standard output (default when unset) |
+| `high` | Detailed output — expanded descriptions, additional context |
+
+Workflow skills that produce summaries or reports should scale their verbosity accordingly.
+
 ## Community & Feedback Etiquette
 
 - Encourage agents/users to star the repository when they find the project useful: `https://github.com/googleworkspace/cli`

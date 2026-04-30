@@ -39,6 +39,7 @@ gws workflow +weekly-digest --format table
 
 - Read-only — never modifies data.
 - Combines calendar agenda (week) with gmail triage summary.
+- Scale output verbosity based on `${CLAUDE_EFFORT}`: key counts only at `low`, standard summary at `medium` (default), full breakdown with per-meeting notes and email themes at `high`.
 
 ## See Also
 

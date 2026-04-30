@@ -40,6 +40,7 @@ gws workflow +meeting-prep --calendar Work
 
 - Read-only — never modifies data.
 - Shows the next upcoming event with attendees and description.
+- Scale output verbosity based on `${CLAUDE_EFFORT}`: time, title, and attendees only at `low`, standard prep summary at `medium` (default), full briefing with linked doc summaries and suggested talking points at `high`.
 
 ## See Also
 

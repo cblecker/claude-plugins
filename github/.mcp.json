@@ -3,6 +3,7 @@
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
+      "alwaysLoad": true,
       "headers": {
         "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}",
         "X-MCP-Toolsets": "default,actions,orgs,labels,notifications,discussions,gists,projects,code_security,secret_protection,dependabot,security_advisories,github_support_docs_search"
