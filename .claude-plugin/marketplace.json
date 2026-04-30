@@ -1,11 +1,11 @@
 {
+  "$schema": "https://json.schemastore.org/claude-marketplace.json",
   "name": "cblecker-claude-plugins",
+  "version": "1.0.0",
+  "description": "Personal collection of Claude Code plugins",
   "owner": {
     "name": "Christoph Blecker",
     "email": "admin@toph.ca"
-  },
-  "metadata": {
-    "description": "Personal collection of Claude Code plugins"
   },
   "plugins": [
     {
