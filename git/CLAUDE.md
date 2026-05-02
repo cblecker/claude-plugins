@@ -76,6 +76,7 @@ contextually.
 - Claude Code attribution line removed from PR body template
 - Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
 - Signed-off-by safety rule added (AI must never add DCO sign-off)
+- "NEVER commit directly to mainline" safety rule added (upstream has no equivalent)
 
 ## Maintenance
 
