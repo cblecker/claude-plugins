@@ -17,7 +17,18 @@ GWS_TMP_DIR="$(mktemp -d)"
 gws generate-skills --output-dir "$GWS_TMP_DIR"
 ```
 
-### 2. Check current OAuth scopes
+### 2. Filter upstream output
+
+Remove curated-out categories before diffing:
+
+```bash
+rm -rf "$GWS_TMP_DIR"/recipe-* "$GWS_TMP_DIR"/persona-*
+```
+
+These categories are intentionally excluded: recipes are short step-by-step procedures
+Claude can compose from service/helper skills; personas are thin wrappers that overlap heavily.
+
+### 3. Check current OAuth scopes
 
 ```bash
 gws auth status --format json
@@ -40,11 +51,11 @@ Extract the `scopes` array. Map scopes to services:
 | `tasks` | Tasks |
 | `admin.reports` | Admin Reports |
 
-### 3. Inventory current skills
+### 4. Inventory current skills
 
 List all directories in `gws/skills/` to get the current vendored set.
 
-### 4. Diff upstream vs current
+### 5. Diff upstream vs current
 
 For each upstream skill directory:
 
@@ -59,7 +70,7 @@ For each upstream skill directory:
 
 Always include `gws-shared` regardless of scopes (it has no service dependency).
 
-### 5. Present findings
+### 6. Present findings
 
 Use AskUserQuestion to present:
 - New scoped skills (recommended for inclusion)
@@ -69,7 +80,7 @@ Use AskUserQuestion to present:
 
 Let the user select which to add/update/remove.
 
-### 6. Apply changes
+### 7. Apply changes
 
 For each selected skill:
 - Copy the `SKILL.md` from the upstream temp directory to `gws/skills/<skill-name>/SKILL.md`
@@ -77,16 +88,16 @@ For each selected skill:
 
 For removals, delete the skill directory from `gws/skills/`.
 
-### 7. Bump version
+### 8. Bump version
 
 After applying changes, bump the patch version in `gws/.claude-plugin/plugin.json`.
 
-### 8. Cleanup
+### 9. Cleanup
 
 ```bash
 rm -rf "${GWS_TMP_DIR:?}"
 ```
 
-### 9. Summary
+### 10. Summary
 
 Report what was added, updated, and removed.

@@ -42,17 +42,6 @@ Multi-step productivity workflows:
 - `gws-workflow-weekly-digest` - Weekly activity summary
 - `gws-workflow-file-announce` - Share files with notifications
 
-### Personas
-
-Role-based skill bundles:
-
-- `persona-exec-assistant` - Executive assistant workflows
-- `persona-team-lead` - Team leadership workflows
-
-### Recipes
-
-Pre-built task automations using scoped services (~33 recipes covering email management, calendar scheduling, document creation, spreadsheet operations, and more).
-
 ## Updating Skills
 
 To sync with the latest upstream `gws` skills:
