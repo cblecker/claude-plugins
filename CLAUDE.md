@@ -25,7 +25,7 @@ structure.
 | `claude plugin validate .` | Validate marketplace |
 | `claude plugin validate ./<plugin-name>` | Validate specific plugin |
 | `npx markdownlint-cli2 --config ${CLAUDE_PROJECT_DIR}/.markdownlint-cli2.jsonc "**/*.md"` | Lint markdown files |
-| `uvx claudelint --strict` | Lint plugin |
+| `uvx skillsaw --strict` | Lint plugin |
 
 ## Adding a Plugin
 
