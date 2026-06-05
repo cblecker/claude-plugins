@@ -1,10 +1,11 @@
 {
   "name": "git",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails",
   "author": {
     "name": "cblecker",
     "email": "admin@toph.ca"
   },
-  "keywords": ["git", "workflow", "safety", "conventional-commits", "fork", "pr"]
+  "keywords": ["git", "workflow", "safety", "conventional-commits", "fork", "pr"],
+  "dependencies": ["github"]
 }
