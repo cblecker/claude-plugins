@@ -11,6 +11,15 @@
   },
   "enabledPlugins": {
     "plugin-dev@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true,
+    "agent-eval-harness@opendatahub-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "opendatahub-skills": {
+      "source": {
+        "source": "github",
+        "repo": "opendatahub-io/skills-registry"
+      }
+    }
   }
 }

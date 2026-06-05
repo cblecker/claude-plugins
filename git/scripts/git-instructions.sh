@@ -68,6 +68,25 @@ detect_conventions() {
 ###############################################################################
 # Detection: Fork setup
 ###############################################################################
+detect_fork_owner() {
+  local origin_url owner
+  origin_url=$(git remote get-url origin 2>/dev/null || true)
+
+  if [ -z "$origin_url" ]; then
+    echo "your-username"
+    return
+  fi
+
+  owner=$(echo "$origin_url" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
+
+  if [ -z "$owner" ] || ! [[ "$owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "your-username"
+    return
+  fi
+
+  echo "$owner"
+}
+
 detect_fork() {
   local upstream_url upstream_owner
   upstream_url=$(git remote get-url upstream 2>/dev/null || true)
@@ -102,6 +121,7 @@ detect_fork() {
 MAINLINE=$(detect_mainline 2>/dev/null || echo "main")
 CONVENTIONS=$(detect_conventions 2>/dev/null || echo "no")
 FORK_RESULT=$(detect_fork 2>/dev/null || echo "no")
+FORK_OWNER=$(detect_fork_owner 2>/dev/null || echo "your-username")
 
 IS_FORK="no"
 UPSTREAM_OWNER=""
@@ -147,7 +167,7 @@ if [[ "$IS_FORK" == "yes" ]]; then
 This repository is a fork. The upstream owner is ${UPSTREAM_OWNER}.
 - Push branches to origin (your fork)
 - Create PRs targeting the upstream repository (owner: ${UPSTREAM_OWNER})
-- When using mcp__plugin_github_github__create_pull_request, set owner to ${UPSTREAM_OWNER} and use your-username:branch-name as the head parameter"
+- When using the GitHub MCP create_pull_request tool, set owner to ${UPSTREAM_OWNER} and use ${FORK_OWNER}:branch-name as the head parameter"
 fi
 
 # Build branch naming section
@@ -229,10 +249,10 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request title and summary:
    - Keep the PR title short (under 70 characters)
    - Use the description/body for details, not the title
-3. Run the following commands in parallel:
+3. Complete the following steps in order:
    - Create new branch if needed (if on ${MAINLINE}, create a feature branch first)
    - Push to remote with -u flag if needed
-   - Create PR using GitHub MCP tools (mcp__plugin_github_github__create_pull_request) with: owner, repo, title, head, base (${MAINLINE}), body
+   - Create PR using the GitHub MCP create_pull_request tool with: owner, repo, title, head, base (${MAINLINE}), body
    - PR body format:
 <example>
 ## Summary
@@ -253,11 +273,4 @@ ${BRANCH_NAMING}
 - Use kebab-case for branch names
 - Check \`git branch\` before creating to avoid duplicates
 
-# Additional git safety
-
-Before running destructive operations (e.g., git reset --hard, git push --force, git checkout --, git branch -D), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.
-
-Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.
-
-Prefer to create a new commit rather than amending an existing commit.
 EOF

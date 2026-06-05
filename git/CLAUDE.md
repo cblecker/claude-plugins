@@ -65,7 +65,7 @@ contextually.
 ### Differences from built-in instructions
 
 - `main/master` replaced with detected mainline branch name
-- `gh pr create` replaced with `mcp__plugin_github_github__create_pull_request`
+- `gh pr create` replaced with the GitHub MCP `create_pull_request` tool
 - `--no-gpg-sign` and `-c commit.gpgsign=false` merged into the safety protocol
   (built-in has these in a separate fragment)
 - "If a hook fails, investigate and fix" merged inline (same)
