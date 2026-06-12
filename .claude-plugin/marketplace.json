@@ -22,6 +22,11 @@
       "name": "gws",
       "source": "./gws",
       "strict": true
+    },
+    {
+      "name": "rh-dataverse",
+      "source": "./rh-dataverse",
+      "strict": true
     }
   ]
 }
