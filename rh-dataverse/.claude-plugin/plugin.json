@@ -1,0 +1,9 @@
+{
+  "name": "rh-dataverse",
+  "description": "Red Hat Dataverse MCP server",
+  "version": "1.0.0",
+  "author": {
+    "name": "cblecker"
+  },
+  "keywords": ["rh-dataverse", "dataverse", "rover", "people", "snowflake", "mcp"]
+}

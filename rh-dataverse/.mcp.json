@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rh-dataverse": {
+      "type": "http",
+      "url": "https://mcp.dataverse.redhat.com/mcp/"
+    }
+  }
+}
