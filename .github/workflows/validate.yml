@@ -75,3 +75,25 @@ jobs:
       - name: Validate plugin
         run: claude plugin validate "${{ matrix.source }}"
 
+  conclusion:
+    name: Validate Plugins Conclusion
+    needs:
+      - validate-marketplace
+      - validate-plugins
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        env:
+          MARKETPLACE_RESULT: ${{ needs.validate-marketplace.result }}
+          PLUGINS_RESULT: ${{ needs.validate-plugins.result }}
+        run: |
+          results=("${MARKETPLACE_RESULT}" "${PLUGINS_RESULT}")
+          for result in "${results[@]}"; do
+            printf '::notice ::job status: %s\n' "$result"
+            if [[ "$result" = "failure" ]] || [[ "$result" = "cancelled" ]]; then
+              printf '::error ::a validation job %s.\n' "$result"
+              exit 1
+            fi
+          done
+
