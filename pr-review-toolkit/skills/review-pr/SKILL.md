@@ -24,8 +24,9 @@ allowed-tools:
    pattern `https://github.com/{owner}/{repo}/pull/{number}`
 2. Call `pull_request_read` with method `get` to get PR details -- extract the
    head commit SHA
-3. Call `pull_request_read` with method `get_files` to get the list of changed
-   file paths
+3. Call `pull_request_read` with method `get_files` to get structured file
+   metadata (filename, status, patch, additions, deletions). Paginate with
+   `page` if the PR has more than 100 files.
 4. Run `git rev-parse HEAD` to get the local HEAD SHA
 5. If local HEAD matches the PR head SHA, set isLocal to true; otherwise false
 
@@ -35,7 +36,8 @@ Invoke the Workflow tool with:
 
 - `scriptPath`: `${CLAUDE_SKILL_DIR}/review-pr.js`
 - `args`: `{ owner, repo, pullNumber, headSha, changedFiles, isLocal }` where
-  changedFiles is an array of filename strings
+  changedFiles is the array of file objects from `get_files` (each with
+  filename, status, patch, additions, deletions)
 
 Wait for the workflow to complete -- it returns
 `{ findings, positiveObservations }`
