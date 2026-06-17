@@ -17,10 +17,11 @@ const FINDING_SCHEMA = {
           file: { type: 'string' },
           line: { type: 'number' },
           severity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
+          confidence: { type: 'number', minimum: 0, maximum: 100 },
           title: { type: 'string' },
           description: { type: 'string' }
         },
-        required: ['file', 'severity', 'title', 'description']
+        required: ['file', 'severity', 'confidence', 'title', 'description']
       }
     },
     positiveObservations: {
@@ -34,38 +35,69 @@ const FINDING_SCHEMA = {
 const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
 
 function buildContext() {
-  const fileList = config.changedFiles.join(', ')
-  const instruction = config.isLocal
-    ? 'The code is checked out locally at the PR head commit. Use local file reads and git diff to examine the code.'
-    : 'The code is NOT checked out locally. Use GitHub MCP tools (pull_request_read, get_file_contents) for all file reads and diffs.'
+  const fileSummary = config.changedFiles
+    .map(f => '- ' + f.filename + ' (' + f.status + ', +' + (f.additions || 0) + '/-' + (f.deletions || 0) + ')')
+    .join('\n')
+
+  let totalPatchSize = 0
+  for (let i = 0; i < config.changedFiles.length; i++) {
+    totalPatchSize += (config.changedFiles[i].patch || '').length
+  }
+
+  let diffSection
+  if (totalPatchSize > 0 && totalPatchSize <= 100000) {
+    diffSection = config.changedFiles
+      .map(f => '### ' + f.filename + ' (' + f.status + ')\n```diff\n' + (f.patch || '(binary or empty)') + '\n```')
+      .join('\n\n')
+  } else if (totalPatchSize > 100000) {
+    diffSection = 'Patches omitted due to size (' + Math.round(totalPatchSize / 1024) + 'KB). ' +
+      (config.isLocal
+        ? 'Read the changed files locally for content.'
+        : 'Use GitHub get_file_contents to read changed files.')
+  } else {
+    diffSection = 'No patch content available. ' +
+      (config.isLocal
+        ? 'Read the changed files locally for content.'
+        : 'Use GitHub get_file_contents to read changed files.')
+  }
+
+  const readInstruction = config.isLocal
+    ? 'If you need context beyond the diff hunks, read the full file locally.'
+    : 'If you need context beyond the diff hunks, use GitHub get_file_contents.'
 
   return '\n\n---\n\nReview context:\n' +
     '- Repository: ' + config.owner + '/' + config.repo + '\n' +
     '- PR #' + config.pullNumber + '\n' +
-    '- Head SHA: ' + config.headSha + '\n' +
-    '- Changed files: ' + fileList + '\n' +
-    '- ' + instruction + '\n\n' +
-    'Focus your review on the changed files listed above. Return your findings using the StructuredOutput tool with severity ratings (critical, important, suggestion).'
+    '- Head SHA: ' + config.headSha + '\n\n' +
+    '## Changed files\n' + fileSummary + '\n\n' +
+    'The diffs below are from GitHub\'s merge-base comparison and are authoritative.\n' +
+    'Each file\'s status (added/modified/removed/renamed) is definitive — do not infer\n' +
+    'deletions or additions beyond what is stated. For modified files, assume only the\n' +
+    'lines shown in the diff changed unless the patch appears truncated or is missing,\n' +
+    'in which case read the full file for complete context.\n' +
+    readInstruction + '\n\n' +
+    '## Diffs\n\n' + diffSection + '\n\n' +
+    'Focus your review on the changes shown above. Return your findings using the StructuredOutput tool with severity ratings (critical, important, suggestion).'
 }
 
 function selectAgents(changedFiles) {
   const agents = ['code-reviewer']
 
   const hasCodeFiles = changedFiles.some(f =>
-    !/\.(md|txt|rst|json|yaml|yml|toml|lock|sum)$/i.test(f))
+    !/\.(md|txt|rst|json|yaml|yml|toml|lock|sum)$/i.test(f.filename))
 
   if (hasCodeFiles) {
     agents.push('silent-failure-hunter')
     agents.push('pr-test-analyzer')
   }
 
-  if (changedFiles.some(f => /\.md$|\.txt$|\.rst$|doc|readme/i.test(f))
+  if (changedFiles.some(f => /\.md$|\.txt$|\.rst$|doc|readme/i.test(f.filename))
       || changedFiles.length >= 3) {
     agents.push('comment-analyzer')
   }
 
   const typedLangs = /\.(ts|tsx|go|rs|java|cs|kt|scala|swift)$/i
-  if (changedFiles.some(f => typedLangs.test(f))) {
+  if (changedFiles.some(f => typedLangs.test(f.filename))) {
     agents.push('type-design-analyzer')
   }
 
@@ -90,7 +122,7 @@ Three representative scenarios:
 
 ## Review Scope
 
-By default, review unstaged changes from \`git diff\`. The user may specify different files or scope to review.
+Review the diff provided in the review context below. The diff is from GitHub's merge-base comparison and is authoritative.
 
 ## Core Review Responsibilities
 
@@ -249,7 +281,13 @@ Be aware of project-specific patterns from CLAUDE.md:
 - Empty catch blocks are never acceptable
 - Tests should not be fixed by disabling them; errors should not be fixed by bypassing them
 
-Remember: Every silent failure you catch prevents hours of debugging frustration for users and developers. Be thorough, be skeptical, and never let an error slip through unnoticed.`,
+Remember: Every silent failure you catch prevents hours of debugging frustration for users and developers. Be thorough, be skeptical, and never let an error slip through unnoticed.
+
+## Structured Output Requirements
+
+When returning findings via the StructuredOutput tool, use these exact field values:
+- severity: "critical" (silent failures, broad catches hiding errors, missing error propagation), "important" (poor error messages, unjustified fallbacks, missing context), or "suggestion" (minor improvements to logging or specificity)
+- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`,
 
   'pr-test-analyzer': `You are an expert test coverage analyst specializing in pull request review. Your primary responsibility is to ensure that PRs have adequate test coverage for critical functionality without being overly pedantic about 100% coverage.
 
@@ -321,7 +359,13 @@ Structure your analysis as:
 - Be specific about what each test should verify and why it matters
 - Note when tests are testing implementation rather than behavior
 
-You are thorough but pragmatic, focusing on tests that provide real value in catching bugs and preventing regressions rather than achieving metrics. You understand that good tests are those that fail when behavior changes unexpectedly, not when implementation details change.`,
+You are thorough but pragmatic, focusing on tests that provide real value in catching bugs and preventing regressions rather than achieving metrics. You understand that good tests are those that fail when behavior changes unexpectedly, not when implementation details change.
+
+## Structured Output Requirements
+
+When returning findings via the StructuredOutput tool, use these exact field values:
+- severity: "critical" (missing tests for code that could cause data loss, security issues, or system failures), "important" (missing coverage for business logic or error scenarios), or "suggestion" (nice-to-have coverage improvements)
+- confidence: integer 0-100 indicating how certain you are this gap is real and impactful (only report findings with confidence >= 50)`,
 
   'comment-analyzer': `You are a meticulous code comment analyzer with deep expertise in technical documentation and long-term code maintainability. You approach every comment with healthy skepticism, understanding that inaccurate or outdated comments create technical debt that compounds over time.
 
@@ -394,7 +438,13 @@ Your analysis output should be structured as:
 
 Remember: You are the guardian against technical debt from poor documentation. Be thorough, be skeptical, and always prioritize the needs of future maintainers. Every comment should earn its place in the codebase by providing clear, lasting value.
 
-IMPORTANT: You analyze and provide feedback only. Do not modify code or comments directly. Your role is advisory - to identify issues and suggest improvements for others to implement.`,
+IMPORTANT: You analyze and provide feedback only. Do not modify code or comments directly. Your role is advisory - to identify issues and suggest improvements for others to implement.
+
+## Structured Output Requirements
+
+When returning findings via the StructuredOutput tool, use these exact field values:
+- severity: "critical" (factually incorrect comments that will mislead maintainers), "important" (outdated, incomplete, or ambiguous comments that need revision), or "suggestion" (comments that could be improved or removed for clarity)
+- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`,
 
   'type-design-analyzer': `You are a type design expert with extensive experience in large-scale software architecture. Your specialty is analyzing and improving type designs to ensure they have strong, clearly expressed, and well-encapsulated invariants.
 
@@ -506,7 +556,13 @@ Always consider:
 - Performance implications of additional validation
 - The balance between safety and usability
 
-Think deeply about each type's role in the larger system. Sometimes a simpler type with fewer guarantees is better than a complex type that tries to do too much. Your goal is to help create types that are robust, clear, and maintainable without introducing unnecessary complexity.`
+Think deeply about each type's role in the larger system. Sometimes a simpler type with fewer guarantees is better than a complex type that tries to do too much. Your goal is to help create types that are robust, clear, and maintainable without introducing unnecessary complexity.
+
+## Structured Output Requirements
+
+When returning findings via the StructuredOutput tool, use these exact field values:
+- severity: "critical" (types that allow invalid states or have broken invariants), "important" (weak encapsulation, missing validation, or unclear invariant expression), or "suggestion" (design improvements that would strengthen the type)
+- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`
 }
 
 // Main execution
@@ -530,8 +586,10 @@ results.filter(Boolean).forEach(r => {
 })
 
 const severityOrder = { critical: 0, important: 1, suggestion: 2 }
-allFindings.sort((a, b) =>
-  ((severityOrder[a.severity] !== undefined ? severityOrder[a.severity] : 3) -
-   (severityOrder[b.severity] !== undefined ? severityOrder[b.severity] : 3)))
+allFindings.sort((a, b) => {
+  const sevDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+  if (sevDiff !== 0) return sevDiff
+  return (b.confidence || 0) - (a.confidence || 0)
+})
 
 return { findings: allFindings, positiveObservations: allPositive }
