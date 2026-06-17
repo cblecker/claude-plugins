@@ -36,7 +36,7 @@ const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
 
 function buildContext() {
   const fileSummary = config.changedFiles
-    .map(f => '- ' + f.filename + ' (' + f.status + ', +' + (f.additions || 0) + '/-' + (f.deletions || 0) + ')')
+    .map(f => '- ' + f.filename + (f.status ? ' (' + f.status + ')' : ''))
     .join('\n')
 
   let totalPatchSize = 0
@@ -47,7 +47,7 @@ function buildContext() {
   let diffSection
   if (totalPatchSize > 0 && totalPatchSize <= 100000) {
     diffSection = config.changedFiles
-      .map(f => '### ' + f.filename + ' (' + f.status + ')\n```diff\n' + (f.patch || '(binary or empty)') + '\n```')
+      .map(f => '### ' + f.filename + (f.status ? ' (' + f.status + ')' : '') + '\n```diff\n' + (f.patch || '(binary or empty)') + '\n```')
       .join('\n\n')
   } else if (totalPatchSize > 100000) {
     diffSection = 'Patches omitted due to size (' + Math.round(totalPatchSize / 1024) + 'KB). ' +
@@ -65,16 +65,22 @@ function buildContext() {
     ? 'If you need context beyond the diff hunks, read the full file locally.'
     : 'If you need context beyond the diff hunks, use GitHub get_file_contents.'
 
+  let excludedNote = ''
+  if (config.excludedFileSummary) {
+    excludedNote = '\n\n**Excluded from review:** ' + config.excludedFileSummary +
+      '. The files listed below are the reviewable subset.\n'
+  }
+
   return '\n\n---\n\nReview context:\n' +
     '- Repository: ' + config.owner + '/' + config.repo + '\n' +
     '- PR #' + config.pullNumber + '\n' +
-    '- Head SHA: ' + config.headSha + '\n\n' +
+    '- Head SHA: ' + config.headSha + '\n' +
+    excludedNote + '\n' +
     '## Changed files\n' + fileSummary + '\n\n' +
-    'The diffs below are from GitHub\'s merge-base comparison and are authoritative.\n' +
-    'Each file\'s status (added/modified/removed/renamed) is definitive — do not infer\n' +
-    'deletions or additions beyond what is stated. For modified files, assume only the\n' +
-    'lines shown in the diff changed unless the patch appears truncated or is missing,\n' +
-    'in which case read the full file for complete context.\n' +
+    'The diffs below are from the merge-base comparison and are authoritative.\n' +
+    'Do not infer deletions or additions beyond what is shown in the diffs.\n' +
+    'For files where the patch appears truncated or is missing, read the full\n' +
+    'file for complete context.\n' +
     readInstruction + '\n\n' +
     '## Diffs\n\n' + diffSection + '\n\n' +
     'Focus your review on the changes shown above. Return your findings using the StructuredOutput tool with severity ratings (critical, important, suggestion).'
