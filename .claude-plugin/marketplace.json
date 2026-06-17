@@ -19,6 +19,11 @@
       "strict": true
     },
     {
+      "name": "pr-review-toolkit",
+      "source": "./pr-review-toolkit",
+      "strict": true
+    },
+    {
       "name": "gws",
       "source": "./gws",
       "strict": true

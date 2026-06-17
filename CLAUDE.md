@@ -11,6 +11,7 @@ Personal Claude Code plugin marketplace
 ├── git/                       # Custom plugin: git workflows & safety
 ├── github/                    # MCP wrapper: GitHub tools
 ├── gws/                       # Custom plugin: Google Workspace CLI skills
+├── pr-review-toolkit/         # Custom plugin: PR review workflow
 └── CLAUDE.md
 ```
 
