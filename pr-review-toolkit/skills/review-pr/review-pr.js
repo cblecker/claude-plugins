@@ -17,10 +17,11 @@ const FINDING_SCHEMA = {
           file: { type: 'string' },
           line: { type: 'number' },
           severity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
+          confidence: { type: 'number', minimum: 0, maximum: 100 },
           title: { type: 'string' },
           description: { type: 'string' }
         },
-        required: ['file', 'severity', 'title', 'description']
+        required: ['file', 'severity', 'confidence', 'title', 'description']
       }
     },
     positiveObservations: {
@@ -530,8 +531,10 @@ results.filter(Boolean).forEach(r => {
 })
 
 const severityOrder = { critical: 0, important: 1, suggestion: 2 }
-allFindings.sort((a, b) =>
-  ((severityOrder[a.severity] !== undefined ? severityOrder[a.severity] : 3) -
-   (severityOrder[b.severity] !== undefined ? severityOrder[b.severity] : 3)))
+allFindings.sort((a, b) => {
+  const sevDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+  if (sevDiff !== 0) return sevDiff
+  return (b.confidence || 0) - (a.confidence || 0)
+})
 
 return { findings: allFindings, positiveObservations: allPositive }
