@@ -34,80 +34,37 @@ const FINDING_SCHEMA = {
 
 const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
 
-function buildContext() {
-  const fileSummary = config.changedFiles
-    .map(f => '- ' + f.filename + (f.status ? ' (' + f.status + ')' : ''))
-    .join('\n')
+function diffPreamble() {
+  const filterRules = `Filter out files not relevant to your review:
+   - Skip paths starting with \`vendor/\`
+   - Skip generated files matching: \`zz_generated*\`, \`*_generated.go\`, \`*.pb.go\`, \`*_string.go\`, \`bindata.go\`, \`*.sum\``
 
-  let totalPatchSize = 0
-  for (let i = 0; i < config.changedFiles.length; i++) {
-    totalPatchSize += (config.changedFiles[i].patch || '').length
+  if (config.isLocal) {
+    return `## Setup — verify checkout and collect diff
+
+Before reviewing, verify you are looking at the correct data and collect the diff yourself.
+
+1. Run \`git rev-parse HEAD\` and confirm the output matches the expected head SHA: ${config.headSha}. If it does not match, report an error and stop.
+2. Run \`git diff --name-status origin/${config.baseRef}...HEAD\` to get the list of changed files with their statuses.
+3. ${filterRules}
+4. Run \`git diff origin/${config.baseRef}...HEAD -- <file1> <file2> ...\` with the remaining files to get the actual patches to review.
+
+The diffs are authoritative merge-base comparisons — the same comparison GitHub uses for the PR. Do not infer deletions or additions beyond what is shown in the diffs.
+
+`
   }
+  return `## Setup — collect diff via GitHub
 
-  let diffSection
-  if (totalPatchSize > 0 && totalPatchSize <= 100000) {
-    diffSection = config.changedFiles
-      .map(f => '### ' + f.filename + (f.status ? ' (' + f.status + ')' : '') + '\n```diff\n' + (f.patch || '(binary or empty)') + '\n```')
-      .join('\n\n')
-  } else if (totalPatchSize > 100000) {
-    diffSection = 'Patches omitted due to size (' + Math.round(totalPatchSize / 1024) + 'KB). ' +
-      (config.isLocal
-        ? 'Read the changed files locally for content.'
-        : 'Use GitHub get_file_contents to read changed files.')
-  } else {
-    diffSection = 'No patch content available. ' +
-      (config.isLocal
-        ? 'Read the changed files locally for content.'
-        : 'Use GitHub get_file_contents to read changed files.')
-  }
+Before reviewing, collect the PR diff yourself.
 
-  const readInstruction = config.isLocal
-    ? 'If you need context beyond the diff hunks, read the full file locally.'
-    : 'If you need context beyond the diff hunks, use GitHub get_file_contents.'
+1. Call \`pull_request_read\` with method \`get_files\` for ${config.owner}/${config.repo} PR #${config.pullNumber} to get the list of changed files with their statuses. Paginate with \`perPage: 100\` if needed.
+2. ${filterRules}
+3. Use each file's \`patch\` from \`get_files\` as the authoritative review diff.
+4. Only if \`patch\` is missing (large, binary, or truncated), use \`get_file_contents\` for extra context and avoid line-specific findings for that file.
 
-  let excludedNote = ''
-  if (config.excludedFileSummary) {
-    excludedNote = '\n\n**Excluded from review:** ' + config.excludedFileSummary +
-      '. The files listed below are the reviewable subset.\n'
-  }
+The patches from the GitHub API are the authoritative set of changes. Do not infer deletions or additions beyond what is shown.
 
-  return '\n\n---\n\nReview context:\n' +
-    '- Repository: ' + config.owner + '/' + config.repo + '\n' +
-    '- PR #' + config.pullNumber + '\n' +
-    '- Head SHA: ' + config.headSha + '\n' +
-    excludedNote + '\n' +
-    '## Changed files\n' + fileSummary + '\n\n' +
-    'The diffs below are from the merge-base comparison and are authoritative.\n' +
-    'Do not infer deletions or additions beyond what is shown in the diffs.\n' +
-    'For files where the patch appears truncated or is missing, read the full\n' +
-    'file for complete context.\n' +
-    readInstruction + '\n\n' +
-    '## Diffs\n\n' + diffSection + '\n\n' +
-    'Focus your review on the changes shown above. Return your findings using the StructuredOutput tool with severity ratings (critical, important, suggestion).'
-}
-
-function selectAgents(changedFiles) {
-  const agents = ['code-reviewer']
-
-  const hasCodeFiles = changedFiles.some(f =>
-    !/\.(md|txt|rst|json|yaml|yml|toml|lock|sum)$/i.test(f.filename))
-
-  if (hasCodeFiles) {
-    agents.push('silent-failure-hunter')
-    agents.push('pr-test-analyzer')
-  }
-
-  if (changedFiles.some(f => /\.md$|\.txt$|\.rst$|doc|readme/i.test(f.filename))
-      || changedFiles.length >= 3) {
-    agents.push('comment-analyzer')
-  }
-
-  const typedLangs = /\.(ts|tsx|go|rs|java|cs|kt|scala|swift)$/i
-  if (changedFiles.some(f => typedLangs.test(f.filename))) {
-    agents.push('type-design-analyzer')
-  }
-
-  return agents
+`
 }
 
 // Agent prompts derived from Anthropic's pr-review-toolkit plugin
@@ -128,7 +85,7 @@ Three representative scenarios:
 
 ## Review Scope
 
-Review the diff provided in the review context below. The diff is from GitHub's merge-base comparison and is authoritative.
+Review the PR diff collected in the setup section below.
 
 ## Core Review Responsibilities
 
@@ -574,11 +531,15 @@ When returning findings via the StructuredOutput tool, use these exact field val
 // Main execution
 phase('Analyze')
 
-const selected = selectAgents(config.changedFiles)
+const filtered = Array.isArray(config.agents)
+  ? config.agents.filter(name => typeof PROMPTS[name] === 'string')
+  : []
+if (filtered.indexOf('code-reviewer') === -1) filtered.unshift('code-reviewer')
+const selected = filtered
 log('Running ' + selected.length + ' review agents: ' + selected.join(', '))
 
 const results = await parallel(selected.map(name => () => {
-  const prompt = PROMPTS[name] + buildContext()
+  const prompt = PROMPTS[name] + '\n\n' + diffPreamble()
   const opts = { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'max' }
   if (name === 'code-reviewer') opts.model = 'opus'
   return agent(prompt, opts)
