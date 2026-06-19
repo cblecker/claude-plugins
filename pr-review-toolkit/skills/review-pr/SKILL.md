@@ -123,23 +123,11 @@ Wait for the workflow to complete. It returns a JSON object:
 ```
 
 `line` may be absent for findings that apply to an entire file or PR.
-Each finding has a `status` from the contextualization phase:
-
-- `new` — no existing thread covers this issue
-- `duplicate` — an existing thread fully covers the same concern
-- `partial_overlap` — an existing thread touches the same area but our
-  finding adds something; `delta` describes the addition and
-  `adjustedSeverity`/`adjustedConfidence` rescore the incremental value
-
-Each finding also has verification data from the adversarial verify phase:
-
-- `verificationStatus`: `verified` or `unverified` (if the verifier was
-  unavailable) — false positives are filtered before this output
-- `verificationRationale`: what the verifier checked and confirmed
-
-`threadVerifications` is non-empty when `hasOwnResolvedThreads` is true
-(we left comments in a previous review that have since been resolved).
-Each entry assesses whether the author addressed the concern.
+False positives are filtered before this output — remaining findings have
+`verificationStatus` of `verified` or `unverified` (verifier unavailable).
+`threadVerifications` is non-empty only when `hasOwnResolvedThreads` is
+true, meaning we left comments in a previous review that have since been
+resolved.
 
 ## Phase 3: Present findings
 
@@ -164,29 +152,16 @@ only when line is present.
 ```
 ## PR Review: owner/repo#123
 
-### Critical Issues
+{for each severity in [critical, important, suggestion]}
+### {Severity} Issues
 
-{for each finding where status = "new" and effective severity = critical}
+{for each finding where status = "new" and effective severity = {severity}}
 
-1. `{file}[:{line}]` -- **{title}**
+N. `{file}[:{line}]` -- **{title}**
    {description}
    {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
-### Important Issues
-
-{for each finding where status = "new" and effective severity = important}
-
-2. `{file}[:{line}]` -- **{title}**
-   {description}
-   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
-
-### Suggestions
-
-{for each finding where status = "new" and effective severity = suggestion}
-
-3. `{file}[:{line}]` -- **{title}**
-   {description}
-   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
+{end for}
 
 ### Partial Overlaps
 
@@ -196,6 +171,10 @@ only when line is present.
    Extends existing review comment: {existingCoverage}.
    New insight: {delta}.
    {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
+
+{if any findings have status = "duplicate"}
+_N findings omitted as duplicates of existing review threads._
+{end if}
 
 ### Strengths
 
@@ -207,31 +186,9 @@ only when line is present.
 
 {for each threadVerification, only if threadVerifications is non-empty}
 
-{icon} `{file}:{line}` -- {originalConcern}
+{if fixed + adequate}Resolved{else if fixed + inadequate}Fix incomplete{else if fixed + newIssue}Fix introduced new issue: {newIssueDescription}{else if pushed_back + adequate}Author disagrees -- reasoning valid{else if pushed_back + inadequate}Author disagrees -- {assessment}{else if unaddressed}Still unresolved{end if} `{file}:{line}` -- {originalConcern}
    {assessment}
-
-Icons:
-  fixed + adequate:         Resolved
-  fixed + inadequate:       Fix incomplete
-  fixed + newIssue:         Fix introduced new issue: {newIssueDescription}
-  pushed_back + adequate:   Author disagrees -- reasoning valid
-  pushed_back + inadequate: Author disagrees -- {assessment}
-  unaddressed:              Still unresolved
 ```
-
-Key formatting rules:
-
-- **No `[severity/confidence]` tags** — severity is conveyed by section
-  header; confidence is implicit (low-confidence findings were filtered
-  during analysis; false positives were removed by verification)
-- **Verification line in italics** only for verified findings — omit
-  entirely when `verificationStatus` is `unverified`
-- **Only actionable findings are numbered** — Strengths and Previous
-  Review Status are informational only
-- **Duplicates omitted** — if any, add a one-line note: "N findings
-  omitted as duplicates of existing review threads"
-- **Partial overlaps** shown with existing coverage context and the new
-  insight delta
 
 ### Step 2: Recommendation
 
@@ -243,10 +200,8 @@ one-line recommendation:
 ## Recommendations
 
 1. **Include** -- nil pointer panic is a real crash risk in the error path
-2. **Include** -- context cancellation gaps cause resource waste under load
-3. **Skip** -- sync.Pool is a performance optimization, not a correctness
+2. **Skip** -- sync.Pool is a performance optimization, not a correctness
    issue; low value as a review comment on this PR
-4. **Include** -- the existing thread missed the race condition angle
 ```
 
 Consider these factors when making recommendations:
@@ -285,7 +240,6 @@ For each approved finding, generate the exact text that will be posted
 as a GitHub review comment. Comments should be:
 
 - Written in first-person, natural voice (as if the user wrote them)
-- 2-5 sentences: what the issue is, why it matters, suggested fix
 - No boilerplate headers, severity tags, or "AI-generated" markers
 
 ### Step 2: Present draft comments for approval

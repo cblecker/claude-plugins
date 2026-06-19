@@ -128,7 +128,16 @@ const VERIFICATION_SCHEMA = {
   required: ['verifications']
 }
 
-const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
+const config = args || {}
+
+const SEVERITY_ORDER = { critical: 0, important: 1, suggestion: 2 }
+function sortFindings(arr) {
+  arr.sort((a, b) => {
+    const sevDiff = (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3)
+    if (sevDiff !== 0) return sevDiff
+    return (b.confidence || 0) - (a.confidence || 0)
+  })
+}
 
 function diffPreamble() {
   const filterRules = `Filter out files not relevant to your review:
@@ -545,11 +554,10 @@ const STANDARDIZATION_SUFFIX = `Format each finding's description as: what the i
 // Main execution
 phase('Analyze')
 
-const filtered = Array.isArray(config.agents)
+const selected = Array.isArray(config.agents)
   ? config.agents.filter(name => typeof PROMPTS[name] === 'string')
   : []
-if (filtered.indexOf('code-reviewer') === -1) filtered.unshift('code-reviewer')
-const selected = filtered
+if (selected.indexOf('code-reviewer') === -1) selected.unshift('code-reviewer')
 log('Running ' + selected.length + ' review agents: ' + selected.join(', '))
 
 const AGENT_OPTS = {
@@ -577,12 +585,7 @@ results.filter(Boolean).forEach(r => {
   if (r.positiveObservations) allPositive.push(...r.positiveObservations)
 })
 
-const severityOrder = { critical: 0, important: 1, suggestion: 2 }
-allFindings.sort((a, b) => {
-  const sevDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
-  if (sevDiff !== 0) return sevDiff
-  return (b.confidence || 0) - (a.confidence || 0)
-})
+sortFindings(allFindings)
 
 // Verify each finding against the diff
 phase('Verify')
@@ -641,11 +644,7 @@ allFindings.forEach((finding, i) => {
   }))
 })
 
-verifiedFindings.sort((a, b) => {
-  const sevDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
-  if (sevDiff !== 0) return sevDiff
-  return (b.confidence || 0) - (a.confidence || 0)
-})
+sortFindings(verifiedFindings)
 
 allFindings = verifiedFindings
 log('Verification complete: ' + verifiedFindings.length + ' confirmed, ' + falsePositiveCount + ' filtered, ' + verificationErrorCount + ' verifier error(s)')
@@ -654,7 +653,7 @@ log('Verification complete: ' + verifiedFindings.length + ' confirmed, ' + false
 phase('Contextualize')
 log('Fetching existing review threads')
 
-const fetchPrompt = `Fetch the authenticated user login via \`get_me\`, and all review comment threads via \`pull_request_read\` with method \`get_review_comments\` for ${config.owner}/${config.repo} PR #${config.pullNumber}. Paginate if needed to get all threads. For each thread, populate \`id\` (the thread node ID), \`author\` (the GitHub login of the first comment's author, matching the format returned by \`get_me\`), \`isResolved\`, and include the thread's replies. Return \`threads\` and \`myUsername\` as structured output.`
+const fetchPrompt = `Fetch the authenticated user login via \`get_me\`, and all review comment threads via \`pull_request_read\` with method \`get_review_comments\` for ${config.owner}/${config.repo} PR #${config.pullNumber}. Paginate if needed to get all threads. For each thread, populate \`id\` (the thread node ID), \`author\` (the GitHub login of the first comment's author, matching the format returned by \`get_me\`), \`isResolved\`, and include the thread's replies.`
 
 const threadData = await agent(fetchPrompt, {
   label: 'fetch-threads',
@@ -702,11 +701,9 @@ ${findingsJson}
 For each finding (by its index in the array), classify it:
 - "new": no existing thread covers this issue
 - "duplicate": an existing thread fully covers the same concern — same file, same logical concern (not just physical proximity), same fundamental problem. Provide matchedThreadId and existingCoverage (brief summary of what the thread already says).
-- "partial_overlap": an existing thread touches the same area but our finding adds something the thread missed. Provide matchedThreadId, existingCoverage, delta (what we found that others missed), and rescore with adjustedSeverity and adjustedConfidence reflecting the incremental value of our finding.
+- "partial_overlap": an existing thread touches the same area but our finding adds something the thread missed. Provide matchedThreadId, existingCoverage, delta (what we found that others missed), and rescore with adjustedSeverity and adjustedConfidence reflecting the incremental value — higher if we caught something critical the thread only tangentially mentioned, lower if the thread mostly covers it.
 
-Be precise: two comments about the same file are not duplicates unless they identify the same problem. A thread about error handling on line 42 is not a duplicate of a finding about a race condition on line 45.
-
-For partial overlaps, increase adjustedConfidence if our finding caught something critical that the existing thread only tangentially mentioned. Decrease it if the existing thread mostly covers the issue and our finding only adds a minor nuance.`
+Be precise: two comments about the same file are not duplicates unless they identify the same problem. A thread about error handling on line 42 is not a duplicate of a finding about a race condition on line 45.`
 
 const myResolvedThreads = threads.filter(t => t.isResolved && t.author === myUsername)
 
