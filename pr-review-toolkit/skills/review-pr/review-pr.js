@@ -552,10 +552,21 @@ if (filtered.indexOf('code-reviewer') === -1) filtered.unshift('code-reviewer')
 const selected = filtered
 log('Running ' + selected.length + ' review agents: ' + selected.join(', '))
 
+const AGENT_OPTS = {
+  'code-reviewer':         { model: 'opus', effort: 'max' },
+  'silent-failure-hunter': { effort: 'high' },
+  'pr-test-analyzer':      { effort: 'high' },
+  'comment-analyzer':      { effort: 'high' },
+  'type-design-analyzer':  { effort: 'high' }
+}
+
 const results = await parallel(selected.map(name => () => {
   const prompt = PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + '\n\n' + diffPreamble()
-  const opts = { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'max' }
-  if (name === 'code-reviewer') opts.model = 'opus'
+  const overrides = AGENT_OPTS[name] || {}
+  const opts = Object.assign(
+    { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'high' },
+    overrides
+  )
   return agent(prompt, opts)
 }))
 
@@ -601,7 +612,9 @@ Default to skepticism. If the finding cannot be confirmed in the diff, mark it a
   return agent(verifyPrompt, {
     label: 'verify:' + finding.file + (finding.line ? ':' + finding.line : ''),
     schema: VERIFY_SCHEMA,
-    phase: 'Verify'
+    phase: 'Verify',
+    model: 'sonnet',
+    effort: 'high'
   })
 }))
 
@@ -646,7 +659,9 @@ const fetchPrompt = `Fetch the authenticated user login via \`get_me\`, and all 
 const threadData = await agent(fetchPrompt, {
   label: 'fetch-threads',
   schema: THREAD_SCHEMA,
-  phase: 'Contextualize'
+  phase: 'Contextualize',
+  model: 'haiku',
+  effort: 'low'
 })
 
 const threads = (threadData && threadData.threads) || []
@@ -699,7 +714,8 @@ const contextualizeAgents = [
   () => agent(classifyPrompt, {
     label: 'classify-findings',
     schema: CLASSIFICATION_SCHEMA,
-    phase: 'Contextualize'
+    phase: 'Contextualize',
+    effort: 'high'
   })
 ]
 
