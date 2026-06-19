@@ -1,6 +1,6 @@
 {
   "name": "pr-review-toolkit",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Comprehensive PR review using parallel workflow agents",
   "author": {
     "name": "cblecker",

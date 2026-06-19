@@ -3,6 +3,7 @@ export const meta = {
   description: 'Comprehensive PR review with parallel specialized agents',
   phases: [
     { title: 'Analyze', detail: 'Run specialized review agents on PR changes' },
+    { title: 'Verify', detail: 'Independently verify each finding against the diff' },
     { title: 'Contextualize', detail: 'Classify findings against existing review threads' }
   ]
 }
@@ -31,6 +32,18 @@ const FINDING_SCHEMA = {
     }
   },
   required: ['findings', 'positiveObservations']
+}
+
+const VERIFY_SCHEMA = {
+  type: 'object',
+  properties: {
+    verification: {
+      type: 'string',
+      enum: ['verified', 'false_positive']
+    },
+    rationale: { type: 'string' }
+  },
+  required: ['verification', 'rationale']
 }
 
 const THREAD_SCHEMA = {
@@ -527,6 +540,8 @@ Think deeply about each type's role in the larger system. Sometimes a simpler ty
 Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
 }
 
+const STANDARDIZATION_SUFFIX = `Format each finding's description as: what the issue is, why it matters, and (if applicable) a concrete fix. 2-4 sentences. Write in a neutral technical voice — do not reference yourself, your role, or your review methodology.`
+
 // Main execution
 phase('Analyze')
 
@@ -538,13 +553,13 @@ const selected = filtered
 log('Running ' + selected.length + ' review agents: ' + selected.join(', '))
 
 const results = await parallel(selected.map(name => () => {
-  const prompt = PROMPTS[name] + '\n\n' + diffPreamble()
+  const prompt = PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + '\n\n' + diffPreamble()
   const opts = { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'max' }
   if (name === 'code-reviewer') opts.model = 'opus'
   return agent(prompt, opts)
 }))
 
-const allFindings = []
+let allFindings = []
 const allPositive = []
 results.filter(Boolean).forEach(r => {
   if (r.findings) allFindings.push(...r.findings)
@@ -557,6 +572,70 @@ allFindings.sort((a, b) => {
   if (sevDiff !== 0) return sevDiff
   return (b.confidence || 0) - (a.confidence || 0)
 })
+
+// Verify each finding against the diff
+phase('Verify')
+log('Verifying ' + allFindings.length + ' finding(s)')
+
+const verifyResults = await parallel(allFindings.map(finding => () => {
+  const verifyPrompt = `You are an adversarial code review verifier. Your job is to independently verify or refute a finding from a code review.
+
+## The finding
+
+- File: ${finding.file}${finding.line ? ':' + finding.line : ''}
+- Severity: ${finding.severity}
+- Title: ${finding.title}
+- Description: ${finding.description}
+
+${diffPreamble()}
+
+## Your task
+
+1. Locate the exact code referenced by this finding in the diff
+2. Confirm the issue actually exists at the stated location
+3. Check whether the described impact is real
+4. Attempt to disprove the finding — look for reasons it might be wrong
+
+Default to skepticism. If the finding cannot be confirmed in the diff, mark it as false_positive.`
+
+  return agent(verifyPrompt, {
+    label: 'verify:' + finding.file + (finding.line ? ':' + finding.line : ''),
+    schema: VERIFY_SCHEMA,
+    phase: 'Verify'
+  })
+}))
+
+const verifiedFindings = []
+let falsePositiveCount = 0
+let verificationErrorCount = 0
+allFindings.forEach((finding, i) => {
+  const v = verifyResults[i]
+  if (!v) {
+    verificationErrorCount++
+    verifiedFindings.push(Object.assign({}, finding, {
+      verificationStatus: 'unverified',
+      verificationRationale: 'Verification unavailable — finding retained without independent verification.'
+    }))
+    return
+  }
+  if (v.verification === 'false_positive') {
+    falsePositiveCount++
+    return
+  }
+  verifiedFindings.push(Object.assign({}, finding, {
+    verificationStatus: 'verified',
+    verificationRationale: v.rationale
+  }))
+})
+
+verifiedFindings.sort((a, b) => {
+  const sevDiff = (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+  if (sevDiff !== 0) return sevDiff
+  return (b.confidence || 0) - (a.confidence || 0)
+})
+
+allFindings = verifiedFindings
+log('Verification complete: ' + verifiedFindings.length + ' confirmed, ' + falsePositiveCount + ' filtered, ' + verificationErrorCount + ' verifier error(s)')
 
 // Contextualize findings against existing review threads
 phase('Contextualize')
