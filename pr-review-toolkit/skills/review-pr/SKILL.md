@@ -14,7 +14,6 @@ allowed-tools:
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
-  - mcp__plugin_github_github__get_me
   - AskUserQuestion
 ---
 
@@ -22,7 +21,9 @@ allowed-tools:
 
 ## Constraints
 
-All data processing must use only: git commands, jq, and MCP tools.
+Do not generate ad-hoc scripts to process data. Use only the tools listed
+in allowed-tools. Workflow return values and MCP results are structured
+JSON — read them directly, do not shell out to parse or format them.
 
 ## Phase 1: Collect PR metadata
 
@@ -76,21 +77,160 @@ Invoke the Workflow tool with:
   - `owner`, `repo`, `pullNumber`, `headSha`, `baseRef`, `isLocal`
   - `agents`: array of selected agent names from Step 2
 
-Wait for the workflow to complete — it returns
-`{ findings, positiveObservations }`
+Wait for the workflow to complete. It returns a JSON object:
 
-## Phase 3: Post-process findings
+```json
+{
+  "findings": [
+    {
+      "file": "path/to/file.go",
+      "line": 42,
+      "severity": "critical | important | suggestion",
+      "confidence": 85,
+      "title": "Short title",
+      "description": "Detailed explanation",
+      "status": "new | duplicate | partial_overlap",
+      "matchedThreadId": "thread-id",
+      "existingCoverage": "What the existing thread covers",
+      "delta": "What our finding adds beyond the existing thread",
+      "adjustedSeverity": "critical | important | suggestion",
+      "adjustedConfidence": 90
+    }
+  ],
+  "positiveObservations": ["Free-text observation"],
+  "threadVerifications": [
+    {
+      "threadId": "thread-id",
+      "file": "path/to/file.go",
+      "line": 42,
+      "originalConcern": "What the reviewer originally raised",
+      "resolution": "fixed | pushed_back | unaddressed",
+      "assessment": "Evaluation of the resolution",
+      "isAdequate": true,
+      "newIssueIntroduced": false
+    }
+  ],
+  "reviewMeta": {
+    "hasOwnResolvedThreads": true,
+    "existingThreadCount": 8,
+    "duplicateCount": 2,
+    "partialOverlapCount": 1,
+    "newCount": 5
+  }
+}
+```
 
-1. Fetch existing review comments via `pull_request_read` with method
-   `get_review_comments` — drop findings that duplicate existing comments
-   (match by file + approximate line + similar description)
-2. Identify the authenticated user via `get_me`, then fetch previous reviews by
-   this user via `pull_request_read` with method `get_reviews` — check if
-   previous review comments were addressed
-3. Present deduplicated findings to the user via AskUserQuestion:
-   - Group by severity: critical > important > suggestion
-   - Include positive observations
-   - Ask which findings to include in the review
+`line` may be absent for findings that apply to an entire file or PR.
+Each finding has a `status` from the contextualization phase:
+
+- `new` — no existing thread covers this issue
+- `duplicate` — an existing thread fully covers the same concern
+- `partial_overlap` — an existing thread touches the same area but our
+  finding adds something; `delta` describes the addition and
+  `adjustedSeverity`/`adjustedConfidence` rescore the incremental value
+
+`threadVerifications` is non-empty when `hasOwnResolvedThreads` is true
+(we left comments in a previous review that have since been resolved).
+Each entry assesses whether the author addressed the concern.
+
+## Phase 3: Present findings
+
+The workflow returns classified findings and thread verifications.
+Present them to the user via AskUserQuestion using the template below.
+
+### Score resolution
+
+For each finding, use the effective severity and confidence:
+
+- If `adjustedSeverity` is present, use it; otherwise use `severity`
+- If `adjustedConfidence` is present, use it; otherwise use `confidence`
+
+### Presentation template
+
+Build the AskUserQuestion body using this structure. Omit any section
+that has no items. `[:{line}]` means include `:{line}` only when line
+is present; omit the colon and line number for file-level findings.
+
+```
+## Review Summary
+
+{reviewMeta.existingThreadCount} existing thread(s) on this PR.
+{reviewMeta.newCount} new finding(s), {reviewMeta.partialOverlapCount}
+partial overlap(s), {reviewMeta.duplicateCount} duplicate(s).
+
+---
+
+## New Findings
+
+{for each finding where status = "new", grouped by effective severity}
+
+### Critical
+
+1. **[critical/{effectiveConfidence}]** `{file}[:{line}]` — {title}
+   {description}
+
+### Important
+
+2. **[important/{effectiveConfidence}]** `{file}[:{line}]` — {title}
+   {description}
+
+### Suggestions
+
+3. **[suggestion/{effectiveConfidence}]** `{file}[:{line}]` — {title}
+   {description}
+
+---
+
+## Partial Overlaps
+
+{for each finding where status = "partial_overlap"}
+
+4. **[{effectiveSeverity}/{effectiveConfidence}]** `{file}[:{line}]`
+   — {title}
+   Existing comment covers: {existingCoverage}
+   Our addition: {delta}
+
+---
+
+## Duplicates (will not post unless selected)
+
+{for each finding where status = "duplicate"}
+
+5. `{file}[:{line}]` — {existingCoverage}
+   Independently flagged the same issue.
+
+---
+
+## Previous Review Status
+
+{for each threadVerification, only if threadVerifications is non-empty}
+
+- {icon} `{file}:{line}` — {originalConcern}
+  {assessment}
+
+Icons:
+  fixed + adequate:        ✅ Resolved
+  fixed + inadequate:      ⚠️ Fix incomplete
+  fixed + newIssue:        🔴 Fix introduced new issue: {newIssueDescription}
+  pushed_back + adequate:  ✅ Author disagrees — reasoning valid
+  pushed_back + inadequate:⚠️ Author disagrees — {assessment}
+  unaddressed:             ❌ Still unresolved
+
+---
+
+## Positive Observations
+
+{for each positiveObservation}
+
+- {observation}
+```
+
+### Final prompt
+
+Number findings sequentially across all sections (new, partial overlaps,
+duplicates) so each has a unique number. After the template, ask:
+"Which findings should I include in the review? Select by number
+(e.g. 1,3,5), or reply 'all new' / 'all new + overlaps' / 'none'."
 
 ## Phase 4: Post review (after user approval)
 
