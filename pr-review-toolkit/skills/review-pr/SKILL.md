@@ -89,6 +89,8 @@ Wait for the workflow to complete. It returns a JSON object:
       "confidence": 85,
       "title": "Short title",
       "description": "Detailed explanation",
+      "verificationStatus": "verified | unverified",
+      "verificationRationale": "What was checked and confirmed",
       "status": "new | duplicate | partial_overlap",
       "matchedThreadId": "thread-id",
       "existingCoverage": "What the existing thread covers",
@@ -121,22 +123,17 @@ Wait for the workflow to complete. It returns a JSON object:
 ```
 
 `line` may be absent for findings that apply to an entire file or PR.
-Each finding has a `status` from the contextualization phase:
-
-- `new` — no existing thread covers this issue
-- `duplicate` — an existing thread fully covers the same concern
-- `partial_overlap` — an existing thread touches the same area but our
-  finding adds something; `delta` describes the addition and
-  `adjustedSeverity`/`adjustedConfidence` rescore the incremental value
-
-`threadVerifications` is non-empty when `hasOwnResolvedThreads` is true
-(we left comments in a previous review that have since been resolved).
-Each entry assesses whether the author addressed the concern.
+False positives are filtered before this output — remaining findings have
+`verificationStatus` of `verified` or `unverified` (verifier unavailable).
+`threadVerifications` is non-empty only when `hasOwnResolvedThreads` is
+true, meaning we left comments in a previous review that have since been
+resolved.
 
 ## Phase 3: Present findings
 
 The workflow returns classified findings and thread verifications.
-Present them to the user via AskUserQuestion using the template below.
+Present them to the user in two steps: text output first, then a
+selection prompt.
 
 ### Score resolution
 
@@ -145,99 +142,147 @@ For each finding, use the effective severity and confidence:
 - If `adjustedSeverity` is present, use it; otherwise use `severity`
 - If `adjustedConfidence` is present, use it; otherwise use `confidence`
 
-### Presentation template
+### Step 1: Output findings as text
 
-Build the AskUserQuestion body using this structure. Omit any section
-that has no items. `[:{line}]` means include `:{line}` only when line
-is present; omit the colon and line number for file-level findings.
+Output findings as plain text before any selection prompt. This step
+is mandatory — do not skip or compress it into AskUserQuestion. Omit
+any section that has no items. `[:{line}]` means include `:{line}`
+only when line is present.
 
 ```
-## Review Summary
+## PR Review: owner/repo#123
 
-{reviewMeta.existingThreadCount} existing thread(s) on this PR.
-{reviewMeta.newCount} new finding(s), {reviewMeta.partialOverlapCount}
-partial overlap(s), {reviewMeta.duplicateCount} duplicate(s).
+{for each severity in [critical, important, suggestion]}
+### {Severity} Issues
 
----
+{for each finding where status = "new" and effective severity = {severity}}
 
-## New Findings
-
-{for each finding where status = "new", grouped by effective severity}
-
-### Critical
-
-1. **[critical/{effectiveConfidence}]** `{file}[:{line}]` — {title}
+N. `{file}[:{line}]` -- **{title}**
    {description}
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
-### Important
+{end for}
 
-2. **[important/{effectiveConfidence}]** `{file}[:{line}]` — {title}
-   {description}
-
-### Suggestions
-
-3. **[suggestion/{effectiveConfidence}]** `{file}[:{line}]` — {title}
-   {description}
-
----
-
-## Partial Overlaps
+### Partial Overlaps
 
 {for each finding where status = "partial_overlap"}
 
-4. **[{effectiveSeverity}/{effectiveConfidence}]** `{file}[:{line}]`
-   — {title}
-   Existing comment covers: {existingCoverage}
-   Our addition: {delta}
+4. `{file}[:{line}]` -- **{title}**
+   Extends existing review comment: {existingCoverage}.
+   New insight: {delta}.
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
----
+{if any findings have status = "duplicate"}
+_N findings omitted as duplicates of existing review threads._
+{end if}
 
-## Duplicates (will not post unless selected)
-
-{for each finding where status = "duplicate"}
-
-5. `{file}[:{line}]` — {existingCoverage}
-   Independently flagged the same issue.
-
----
-
-## Previous Review Status
-
-{for each threadVerification, only if threadVerifications is non-empty}
-
-- {icon} `{file}:{line}` — {originalConcern}
-  {assessment}
-
-Icons:
-  fixed + adequate:        ✅ Resolved
-  fixed + inadequate:      ⚠️ Fix incomplete
-  fixed + newIssue:        🔴 Fix introduced new issue: {newIssueDescription}
-  pushed_back + adequate:  ✅ Author disagrees — reasoning valid
-  pushed_back + inadequate:⚠️ Author disagrees — {assessment}
-  unaddressed:             ❌ Still unresolved
-
----
-
-## Positive Observations
+### Strengths
 
 {for each positiveObservation}
 
 - {observation}
+
+### Previous Review Status
+
+{for each threadVerification, only if threadVerifications is non-empty}
+
+{if fixed + adequate}Resolved{else if fixed + inadequate}Fix incomplete{else if fixed + newIssue}Fix introduced new issue: {newIssueDescription}{else if pushed_back + adequate}Author disagrees -- reasoning valid{else if pushed_back + inadequate}Author disagrees -- {assessment}{else if unaddressed}Still unresolved{end if} `{file}:{line}` -- {originalConcern}
+   {assessment}
 ```
 
-### Final prompt
+### Step 2: Recommendation
 
-Number findings sequentially across all sections (new, partial overlaps,
-duplicates) so each has a unique number. After the template, ask:
-"Which findings should I include in the review? Select by number
-(e.g. 1,3,5), or reply 'all new' / 'all new + overlaps' / 'none'."
+After presenting the findings, analyze each one and recommend which to
+include in the posted review. For each numbered finding, output a
+one-line recommendation:
 
-## Phase 4: Post review (after user approval)
+```
+## Recommendations
+
+1. **Include** -- nil pointer panic is a real crash risk in the error path
+2. **Skip** -- sync.Pool is a performance optimization, not a correctness
+   issue; low value as a review comment on this PR
+```
+
+Consider these factors when making recommendations:
+
+- **Severity and verification status** — verified critical/important
+  findings are strong includes; overstated suggestions are candidates
+  to skip
+- **Signal-to-noise ratio** — a review with 3 strong findings is more
+  useful than one with 10 of mixed quality; fewer, higher-impact
+  comments make a better review
+- **PR context** — a suggestion that's valid but tangential to the PR's
+  purpose is noise; a finding central to what the PR is doing is signal
+- **Actionability** — include findings the author can act on; skip
+  findings that are observations without a clear next step
+
+### Step 3: Selection prompt
+
+Number findings sequentially across all actionable sections (new and
+partial overlaps) so each has a unique number. After the recommendations,
+ask via AskUserQuestion:
+
+> "Which findings should I include in the review? Enter numbers
+> (e.g. 1,3,5), 'all', 'none', or 'recommended' to accept my
+> recommendations above."
+
+Free-text response, not option buttons.
+
+## Phase 4: Draft and preview comments
+
+After the user selects findings, draft and preview the exact GitHub
+comments before posting.
+
+### Step 1: Draft each comment
+
+For each approved finding, generate the exact text that will be posted
+as a GitHub review comment. Comments should be:
+
+- Written in first-person, natural voice (as if the user wrote them)
+- No boilerplate headers, severity tags, or "AI-generated" markers
+
+### Step 2: Present draft comments for approval
+
+Output all drafted comments grouped by file:
+
+```
+## Draft Review Comments
+
+### path/to/file.go
+
+**Line 42:**
+> Comment text exactly as it will be posted.
+
+**Line 128:**
+> Comment text exactly as it will be posted.
+
+---
+
+Review event: **REQUEST_CHANGES** / **COMMENT**
+(REQUEST_CHANGES if any critical findings selected, COMMENT otherwise)
+```
+
+Then ask via AskUserQuestion:
+
+> "Ready to post these comments? Reply 'post', 'edit N' to modify a
+> specific comment, or 'cancel'."
+
+Free-text response, not option buttons.
+
+### Step 3: Handle edits
+
+If the user replies "edit N", show the current text of comment N and
+let them provide a replacement. Re-present the updated comment set and
+repeat the approval prompt. Loop until the user replies 'post' or
+'cancel'.
+
+## Phase 5: Post review
 
 1. Create a pending review: `pull_request_review_write` with method `create`
 2. For each approved finding with a file and line number:
-   - Call `add_comment_to_pending_review` with the file, line, and a
-     natural-language comment written as if by the user
+   - Call `add_comment_to_pending_review` with the file, line, and the
+     drafted comment text from Phase 4
    - Use `subjectType: "LINE"` and `side: "RIGHT"`
 3. Write the review body as a brief summary of the review. Include any approved
    findings that lack a file or line number as inline items in the body.

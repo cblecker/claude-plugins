@@ -44,7 +44,15 @@ structure.
 
 - Use kebab-case for all names
 - Use `${CLAUDE_PLUGIN_ROOT}` for portable paths in hooks/MCP configs
-- When editing plugin files (other than README.md or CLAUDE.md), bump the version in that plugin's `.claude-plugin/plugin.json`
+- When editing plugin files (other than README.md or CLAUDE.md), bump the version in
+  that plugin's `.claude-plugin/plugin.json` following semver:
+  - **patch**: bug fixes, typo corrections, minor wording changes
+  - **minor**: new skills, commands, hooks, agents, or backward-compatible behavior changes
+  - **major**: breaking changes (renamed/removed skills, changed hook behavior, restructured plugin)
+- Only bump once per PR branch. Before bumping, check `git diff main -- <plugin>/.claude-plugin/plugin.json`
+  to see if the version was already bumped. Skip if it was, unless the accumulated
+  changes now warrant a higher semver level (e.g., patch already bumped but a new
+  skill was added — upgrade to minor)
 - Use plugin-dev skills: `/plugin-dev:create-plugin`, `/plugin-dev:skill-reviewer`, `/plugin-dev:plugin-validator`
 
 ## Documentation
