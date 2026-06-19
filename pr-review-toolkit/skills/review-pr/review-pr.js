@@ -2,7 +2,8 @@ export const meta = {
   name: 'review-pr',
   description: 'Comprehensive PR review with parallel specialized agents',
   phases: [
-    { title: 'Analyze', detail: 'Run specialized review agents on PR changes' }
+    { title: 'Analyze', detail: 'Run specialized review agents on PR changes' },
+    { title: 'Contextualize', detail: 'Classify findings against existing review threads' }
   ]
 }
 
@@ -30,6 +31,88 @@ const FINDING_SCHEMA = {
     }
   },
   required: ['findings', 'positiveObservations']
+}
+
+const THREAD_SCHEMA = {
+  type: 'object',
+  properties: {
+    threads: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          file: { type: 'string' },
+          line: { type: 'number' },
+          author: { type: 'string' },
+          body: { type: 'string' },
+          isResolved: { type: 'boolean' },
+          replies: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                author: { type: 'string' },
+                body: { type: 'string' }
+              },
+              required: ['author', 'body']
+            }
+          }
+        },
+        required: ['id', 'file', 'author', 'body', 'isResolved']
+      }
+    },
+    myUsername: { type: 'string' }
+  },
+  required: ['threads', 'myUsername']
+}
+
+const CLASSIFICATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    classifications: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          findingIndex: { type: 'number' },
+          status: { type: 'string', enum: ['new', 'duplicate', 'partial_overlap'] },
+          matchedThreadId: { type: 'string' },
+          existingCoverage: { type: 'string' },
+          delta: { type: 'string' },
+          adjustedSeverity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
+          adjustedConfidence: { type: 'number', minimum: 0, maximum: 100 }
+        },
+        required: ['findingIndex', 'status']
+      }
+    }
+  },
+  required: ['classifications']
+}
+
+const VERIFICATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    verifications: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          threadId: { type: 'string' },
+          file: { type: 'string' },
+          line: { type: 'number' },
+          originalConcern: { type: 'string' },
+          resolution: { type: 'string', enum: ['fixed', 'pushed_back', 'unaddressed'] },
+          assessment: { type: 'string' },
+          isAdequate: { type: 'boolean' },
+          newIssueIntroduced: { type: 'boolean' },
+          newIssueDescription: { type: 'string' }
+        },
+        required: ['threadId', 'file', 'originalConcern', 'resolution', 'assessment', 'isAdequate', 'newIssueIntroduced']
+      }
+    }
+  },
+  required: ['verifications']
 }
 
 const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
@@ -74,15 +157,6 @@ The patches from the GitHub API are the authoritative set of changes. Do not inf
 const PROMPTS = {
   'code-reviewer': `You are an expert code reviewer specializing in modern software development across multiple languages and frameworks. Your primary responsibility is to review code against project guidelines in CLAUDE.md with high precision to minimize false positives.
 
-## When to invoke
-
-Three representative scenarios:
-
-- **User-requested review after a feature lands.** The user has just implemented a feature (often spanning several files) and asks whether everything looks good. Run a review of the recent diff and report findings.
-- **Proactive review of newly-written code.** The assistant has just written new code (e.g. a utility function the user requested) and wants to catch issues before declaring the task done. Spawn this agent on the freshly written files.
-- **Pre-PR sanity check.** The user signals they're ready to open a pull request. Run a review of the full diff first to avoid round-trips on the PR itself.
-
-
 ## Review Scope
 
 Review the PR diff collected in the setup section below.
@@ -116,7 +190,7 @@ Start by listing what you're reviewing. For each high-confidence issue provide:
 - Specific CLAUDE.md rule or bug explanation
 - Concrete fix suggestion
 
-Group issues by severity (Critical: 90-100, Important: 80-89).
+Group issues by severity (critical, important, suggestion). Within each group, list highest confidence first.
 
 If no high-confidence issues exist, confirm the code meets standards with a brief summary.
 
@@ -133,6 +207,7 @@ You operate under these non-negotiable rules:
 3. **Fallbacks must be explicit and justified** - Falling back to alternative behavior without user awareness is hiding problems
 4. **Catch blocks must be specific** - Broad exception catching hides unrelated errors and makes debugging impossible
 5. **Mock/fake implementations belong only in tests** - Production code falling back to mocks indicates architectural problems
+6. **Never recommend suppressing the symptom** - Do not suggest disabling tests, adding broad catches, or bypassing errors as fixes
 
 ## Your Review Process
 
@@ -153,9 +228,8 @@ Systematically locate:
 For every error handling location, ask:
 
 **Logging Quality:**
-- Is the error logged with appropriate severity (logError for production issues)?
+- Is the error logged with appropriate severity?
 - Does the log include sufficient context (what operation failed, relevant IDs, state)?
-- Is there an error ID from constants/errorIds.ts for Sentry tracking?
 - Would this log help someone debug the issue 6 months from now?
 
 **User Feedback:**
@@ -202,66 +276,22 @@ Look for patterns that hide errors:
 - Fallback chains that try multiple approaches without explaining why
 - Retry logic that exhausts attempts without informing the user
 
-### 5. Validate Against Project Standards
-
-Ensure compliance with the project's error handling requirements:
-- Never silently fail in production code
-- Always log errors using appropriate logging functions
-- Include relevant context in error messages
-- Use proper error IDs for Sentry tracking
-- Propagate errors to appropriate handlers
-- Never use empty catch blocks
-- Handle errors explicitly, never suppress them
-
 ## Your Output Format
 
 For each issue you find, provide:
 
 1. **Location**: File path and line number(s)
-2. **Severity**: CRITICAL (silent failure, broad catch), HIGH (poor error message, unjustified fallback), MEDIUM (missing context, could be more specific)
+2. **Severity**: critical (silent failure, broad catch), important (poor error message, unjustified fallback), or suggestion (missing context, could be more specific)
 3. **Issue Description**: What's wrong and why it's problematic
 4. **Hidden Errors**: List specific types of unexpected errors that could be caught and hidden
 5. **User Impact**: How this affects the user experience and debugging
 6. **Recommendation**: Specific code changes needed to fix the issue
-7. **Example**: Show what the corrected code should look like
 
-## Your Tone
+Check the project's CLAUDE.md for project-specific error handling patterns, logging functions, and error tracking conventions.
 
-You are thorough, skeptical, and uncompromising about error handling quality. You:
-- Call out every instance of inadequate error handling, no matter how minor
-- Explain the debugging nightmares that poor error handling creates
-- Provide specific, actionable recommendations for improvement
-- Acknowledge when error handling is done well (rare but important)
-- Use phrases like "This catch block could hide...", "Users will be confused when...", "This fallback masks the real problem..."
-- Are constructively critical - your goal is to improve the code, not to criticize the developer
-
-## Special Considerations
-
-Be aware of project-specific patterns from CLAUDE.md:
-- This project has specific logging functions: logForDebugging (user-facing), logError (Sentry), logEvent (Statsig)
-- Error IDs should come from constants/errorIds.ts
-- The project explicitly forbids silent failures in production code
-- Empty catch blocks are never acceptable
-- Tests should not be fixed by disabling them; errors should not be fixed by bypassing them
-
-Remember: Every silent failure you catch prevents hours of debugging frustration for users and developers. Be thorough, be skeptical, and never let an error slip through unnoticed.
-
-## Structured Output Requirements
-
-When returning findings via the StructuredOutput tool, use these exact field values:
-- severity: "critical" (silent failures, broad catches hiding errors, missing error propagation), "important" (poor error messages, unjustified fallbacks, missing context), or "suggestion" (minor improvements to logging or specificity)
-- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`,
+Rate confidence 0-100. Only report findings with confidence >= 50.`,
 
   'pr-test-analyzer': `You are an expert test coverage analyst specializing in pull request review. Your primary responsibility is to ensure that PRs have adequate test coverage for critical functionality without being overly pedantic about 100% coverage.
-
-## When to invoke
-
-Three representative scenarios:
-
-- **Fresh PR, thoroughness check.** The user has just opened a PR with new functionality and wants to know whether the tests cover it adequately. Analyze the diff and report critical gaps.
-- **PR updated with new logic.** A PR has been pushed with new validation, parsing, or business logic. Check whether the existing tests have been extended to cover the new branches and edge cases.
-- **Pre-ready double-check.** Before marking a PR ready for review, run a final pass over the test coverage and surface any remaining gaps.
-
 
 **Your Core Responsibilities:**
 
@@ -324,22 +354,9 @@ Structure your analysis as:
 
 You are thorough but pragmatic, focusing on tests that provide real value in catching bugs and preventing regressions rather than achieving metrics. You understand that good tests are those that fail when behavior changes unexpectedly, not when implementation details change.
 
-## Structured Output Requirements
-
-When returning findings via the StructuredOutput tool, use these exact field values:
-- severity: "critical" (missing tests for code that could cause data loss, security issues, or system failures), "important" (missing coverage for business logic or error scenarios), or "suggestion" (nice-to-have coverage improvements)
-- confidence: integer 0-100 indicating how certain you are this gap is real and impactful (only report findings with confidence >= 50)`,
+Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`,
 
   'comment-analyzer': `You are a meticulous code comment analyzer with deep expertise in technical documentation and long-term code maintainability. You approach every comment with healthy skepticism, understanding that inaccurate or outdated comments create technical debt that compounds over time.
-
-## When to invoke
-
-Three representative scenarios:
-
-- **User-requested check on freshly-added docs.** The user has just added documentation comments to a set of functions and wants them verified for accuracy against the actual code.
-- **Proactive check after generating documentation.** The assistant has just authored detailed documentation (e.g. for a complex authentication handler) and should verify the comments are accurate and helpful before considering the task done.
-- **Pre-PR sweep for comment changes.** Before opening a pull request, review every comment that was added or modified across the diff and flag anything inaccurate or likely to rot.
-
 
 Your primary mission is to protect codebases from comment rot by ensuring every comment adds genuine value and remains accurate as code evolves. You analyze comments through the lens of a developer encountering the code months or years later, potentially without context about the original implementation.
 
@@ -401,23 +418,9 @@ Your analysis output should be structured as:
 
 Remember: You are the guardian against technical debt from poor documentation. Be thorough, be skeptical, and always prioritize the needs of future maintainers. Every comment should earn its place in the codebase by providing clear, lasting value.
 
-IMPORTANT: You analyze and provide feedback only. Do not modify code or comments directly. Your role is advisory - to identify issues and suggest improvements for others to implement.
-
-## Structured Output Requirements
-
-When returning findings via the StructuredOutput tool, use these exact field values:
-- severity: "critical" (factually incorrect comments that will mislead maintainers), "important" (outdated, incomplete, or ambiguous comments that need revision), or "suggestion" (comments that could be improved or removed for clarity)
-- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`,
+Rate each finding: severity as critical/important/suggestion, confidence 0-100. Only report findings with confidence >= 50.`,
 
   'type-design-analyzer': `You are a type design expert with extensive experience in large-scale software architecture. Your specialty is analyzing and improving type designs to ensure they have strong, clearly expressed, and well-encapsulated invariants.
-
-## When to invoke
-
-Two representative scenarios:
-
-- **New type introduced.** The user has just authored a new type (e.g. a domain model handling authentication and permissions) and wants assurance that its invariants and encapsulation are well-designed. Review the type and rate it on the four axes.
-- **PR adding several new types.** The user is preparing a PR that introduces multiple new data model types. Review every newly-added type in the diff for design quality.
-
 
 **Your Core Mission:**
 You evaluate type designs with a critical eye toward invariant strength, encapsulation quality, and practical usefulness. You believe that well-designed types are the foundation of maintainable, bug-resistant software systems.
@@ -521,11 +524,7 @@ Always consider:
 
 Think deeply about each type's role in the larger system. Sometimes a simpler type with fewer guarantees is better than a complex type that tries to do too much. Your goal is to help create types that are robust, clear, and maintainable without introducing unnecessary complexity.
 
-## Structured Output Requirements
-
-When returning findings via the StructuredOutput tool, use these exact field values:
-- severity: "critical" (types that allow invalid states or have broken invariants), "important" (weak encapsulation, missing validation, or unclear invariant expression), or "suggestion" (design improvements that would strengthen the type)
-- confidence: integer 0-100 indicating how certain you are this is a real issue (only report findings with confidence >= 50)`
+Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
 }
 
 // Main execution
@@ -559,4 +558,150 @@ allFindings.sort((a, b) => {
   return (b.confidence || 0) - (a.confidence || 0)
 })
 
-return { findings: allFindings, positiveObservations: allPositive }
+// Contextualize findings against existing review threads
+phase('Contextualize')
+log('Fetching existing review threads')
+
+const fetchPrompt = `Fetch the authenticated user login via \`get_me\`, and all review comment threads via \`pull_request_read\` with method \`get_review_comments\` for ${config.owner}/${config.repo} PR #${config.pullNumber}. Paginate if needed to get all threads. For each thread, populate \`id\` (the thread node ID), \`author\` (the GitHub login of the first comment's author, matching the format returned by \`get_me\`), \`isResolved\`, and include the thread's replies. Return \`threads\` and \`myUsername\` as structured output.`
+
+const threadData = await agent(fetchPrompt, {
+  label: 'fetch-threads',
+  schema: THREAD_SCHEMA,
+  phase: 'Contextualize'
+})
+
+const threads = (threadData && threadData.threads) || []
+const myUsername = (threadData && threadData.myUsername) || ''
+
+if (threads.length === 0) {
+  log('No existing review threads — all ' + allFindings.length + ' finding(s) are new')
+  const enriched = allFindings.map(f => Object.assign({}, f, { status: 'new' }))
+  return {
+    findings: enriched,
+    positiveObservations: allPositive,
+    threadVerifications: [],
+    reviewMeta: {
+      hasOwnResolvedThreads: false,
+      existingThreadCount: 0,
+      duplicateCount: 0,
+      partialOverlapCount: 0,
+      newCount: allFindings.length
+    }
+  }
+}
+
+log('Found ' + threads.length + ' existing thread(s) — classifying findings and verifying resolved threads')
+
+const findingsJson = JSON.stringify(allFindings)
+const threadsJson = JSON.stringify(threads)
+
+const classifyPrompt = `You are comparing code review findings against existing review comment threads on a PR.
+
+## Existing review threads
+
+${threadsJson}
+
+## Our findings
+
+${findingsJson}
+
+For each finding (by its index in the array), classify it:
+- "new": no existing thread covers this issue
+- "duplicate": an existing thread fully covers the same concern — same file, same logical concern (not just physical proximity), same fundamental problem. Provide matchedThreadId and existingCoverage (brief summary of what the thread already says).
+- "partial_overlap": an existing thread touches the same area but our finding adds something the thread missed. Provide matchedThreadId, existingCoverage, delta (what we found that others missed), and rescore with adjustedSeverity and adjustedConfidence reflecting the incremental value of our finding.
+
+Be precise: two comments about the same file are not duplicates unless they identify the same problem. A thread about error handling on line 42 is not a duplicate of a finding about a race condition on line 45.
+
+For partial overlaps, increase adjustedConfidence if our finding caught something critical that the existing thread only tangentially mentioned. Decrease it if the existing thread mostly covers the issue and our finding only adds a minor nuance.`
+
+const myResolvedThreads = threads.filter(t => t.isResolved && t.author === myUsername)
+
+const contextualizeAgents = [
+  () => agent(classifyPrompt, {
+    label: 'classify-findings',
+    schema: CLASSIFICATION_SCHEMA,
+    phase: 'Contextualize'
+  })
+]
+
+if (myResolvedThreads.length > 0) {
+  const resolvedJson = JSON.stringify(myResolvedThreads)
+  const verifyPrompt = `You are verifying whether previous review comments have been addressed on ${config.owner}/${config.repo} PR #${config.pullNumber}.
+
+The following review threads were left by the current user (${myUsername}) and have been marked as resolved:
+
+${resolvedJson}
+
+${diffPreamble()}
+
+For each resolved thread, determine how it was resolved:
+- "fixed": the author pushed code changes to address the concern. Check the diff to verify the fix is complete and doesn't introduce a new issue.
+- "pushed_back": the author replied with reasoning for why the current code is correct or why the change isn't needed. Evaluate whether the pushback is technically valid.
+- "unaddressed": the thread was resolved but the underlying issue remains in the code — neither fixed nor convincingly argued against.
+
+Set isAdequate to true if the resolution satisfactorily addresses the original concern. Set newIssueIntroduced to true if a fix attempt created a new problem, and describe it in newIssueDescription.`
+
+  contextualizeAgents.push(() => agent(verifyPrompt, {
+    label: 'verify-threads',
+    schema: VERIFICATION_SCHEMA,
+    phase: 'Contextualize',
+    effort: 'high'
+  }))
+}
+
+const contextResults = await parallel(contextualizeAgents)
+const classificationResult = contextResults[0]
+const verificationResult = contextResults.length > 1 ? contextResults[1] : null
+
+const classMap = {}
+const classifications = (classificationResult && classificationResult.classifications) || []
+classifications.forEach(c => {
+  if (!Number.isInteger(c.findingIndex) || c.findingIndex < 0 || c.findingIndex >= allFindings.length) return
+  if (c.status === 'duplicate' && !c.matchedThreadId) {
+    classMap[c.findingIndex] = { findingIndex: c.findingIndex, status: 'new' }
+  } else if (c.status === 'partial_overlap' && (!c.matchedThreadId || !c.delta)) {
+    classMap[c.findingIndex] = { findingIndex: c.findingIndex, status: 'new' }
+  } else {
+    classMap[c.findingIndex] = c
+  }
+})
+
+let duplicateCount = 0
+let partialOverlapCount = 0
+let newCount = 0
+
+const enrichedFindings = allFindings.map((f, i) => {
+  const c = classMap[i]
+  if (!c) {
+    newCount++
+    return Object.assign({}, f, { status: 'new' })
+  }
+  if (c.status === 'duplicate') duplicateCount++
+  else if (c.status === 'partial_overlap') partialOverlapCount++
+  else newCount++
+
+  const enriched = Object.assign({}, f, { status: c.status })
+  if (c.matchedThreadId) enriched.matchedThreadId = c.matchedThreadId
+  if (c.existingCoverage) enriched.existingCoverage = c.existingCoverage
+  if (c.delta) enriched.delta = c.delta
+  if (c.adjustedSeverity) enriched.adjustedSeverity = c.adjustedSeverity
+  if (c.adjustedConfidence != null) enriched.adjustedConfidence = c.adjustedConfidence
+  return enriched
+})
+
+const verifications = (verificationResult && verificationResult.verifications) || []
+
+log('Contextualize complete: ' + newCount + ' new, ' + duplicateCount + ' duplicate(s), ' + partialOverlapCount + ' partial overlap(s), ' + verifications.length + ' thread(s) verified')
+
+return {
+  findings: enrichedFindings,
+  positiveObservations: allPositive,
+  threadVerifications: verifications,
+  reviewMeta: {
+    hasOwnResolvedThreads: myResolvedThreads.length > 0,
+    existingThreadCount: threads.length,
+    duplicateCount: duplicateCount,
+    partialOverlapCount: partialOverlapCount,
+    newCount: newCount
+  }
+}
