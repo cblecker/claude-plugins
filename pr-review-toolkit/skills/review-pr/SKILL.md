@@ -170,7 +170,7 @@ only when line is present.
 
 1. `{file}[:{line}]` -- **{title}**
    {description}
-   _Verified: {verificationRationale}_
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
 ### Important Issues
 
@@ -178,7 +178,7 @@ only when line is present.
 
 2. `{file}[:{line}]` -- **{title}**
    {description}
-   _Verified: {verificationRationale}_
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
 ### Suggestions
 
@@ -186,7 +186,7 @@ only when line is present.
 
 3. `{file}[:{line}]` -- **{title}**
    {description}
-   _Verified: {verificationRationale}_
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
 ### Partial Overlaps
 
@@ -195,7 +195,7 @@ only when line is present.
 4. `{file}[:{line}]` -- **{title}**
    Extends existing review comment: {existingCoverage}.
    New insight: {delta}.
-   _Verified: {verificationRationale}_
+   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
 
 ### Strengths
 
@@ -224,7 +224,8 @@ Key formatting rules:
 - **No `[severity/confidence]` tags** — severity is conveyed by section
   header; confidence is implicit (low-confidence findings were filtered
   during analysis; false positives were removed by verification)
-- **Verification line in italics** per finding — shows what was checked
+- **Verification line in italics** only for verified findings — omit
+  entirely when `verificationStatus` is `unverified`
 - **Only actionable findings are numbered** — Strengths and Previous
   Review Status are informational only
 - **Duplicates omitted** — if any, add a one-line note: "N findings
