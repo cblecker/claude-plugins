@@ -1,11 +1,67 @@
 export const meta = {
   name: 'review-pr',
-  description: 'Comprehensive PR review with parallel specialized agents',
+  description: 'Comprehensive PR review board with shared PR context',
   phases: [
-    { title: 'Analyze', detail: 'Run specialized review agents on PR changes' },
-    { title: 'Verify', detail: 'Independently verify each finding against the diff' },
-    { title: 'Contextualize', detail: 'Classify findings against existing review threads' }
+    { title: 'Collect', detail: 'Collect PR metadata, changed files, and review threads' },
+    { title: 'Analyze', detail: 'Run specialized review agents from shared PR context' },
+    { title: 'Synthesize', detail: 'Build a grouped review board' }
   ]
+}
+
+const PR_METADATA_SCHEMA = {
+  type: 'object',
+  properties: {
+    pr: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        number: { type: 'number' },
+        title: { type: 'string' },
+        body: { type: 'string' },
+        author: { type: 'string' },
+        baseRef: { type: 'string' },
+        headSha: { type: 'string' },
+        changedFiles: { type: 'number' },
+        additions: { type: 'number' },
+        deletions: { type: 'number' },
+        state: { type: 'string' },
+        reviewDecision: { type: 'string' }
+      },
+      required: ['owner', 'repo', 'number', 'title', 'author', 'baseRef', 'headSha', 'changedFiles', 'additions', 'deletions']
+    }
+  },
+  required: ['pr']
+}
+
+const FILE_PAGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    page: { type: 'number' },
+    files: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          status: { type: 'string' },
+          additions: { type: 'number' },
+          deletions: { type: 'number' },
+          category: {
+            type: 'string',
+            enum: ['source', 'tests', 'docs', 'config', 'ci', 'generated', 'vendor', 'lockfile', 'binary', 'other']
+          },
+          signals: {
+            type: 'array',
+            items: { type: 'string' }
+          },
+          patchAvailable: { type: 'boolean' }
+        },
+        required: ['path', 'status', 'additions', 'deletions', 'category', 'signals', 'patchAvailable']
+      }
+    }
+  },
+  required: ['page', 'files']
 }
 
 const FINDING_SCHEMA = {
@@ -34,18 +90,6 @@ const FINDING_SCHEMA = {
   required: ['findings', 'positiveObservations']
 }
 
-const VERIFY_SCHEMA = {
-  type: 'object',
-  properties: {
-    verification: {
-      type: 'string',
-      enum: ['verified', 'false_positive']
-    },
-    rationale: { type: 'string' }
-  },
-  required: ['verification', 'rationale']
-}
-
 const THREAD_SCHEMA = {
   type: 'object',
   properties: {
@@ -55,7 +99,7 @@ const THREAD_SCHEMA = {
         type: 'object',
         properties: {
           id: { type: 'string' },
-          file: { type: 'string' },
+          path: { type: 'string' },
           line: { type: 'number' },
           author: { type: 'string' },
           body: { type: 'string' },
@@ -72,60 +116,113 @@ const THREAD_SCHEMA = {
             }
           }
         },
-        required: ['id', 'file', 'author', 'body', 'isResolved']
+        required: ['id', 'path', 'author', 'body', 'isResolved']
       }
+    }
+  },
+  required: ['threads']
+}
+
+const BOARD_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    lens: { type: 'string' },
+    title: { type: 'string' },
+    severity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
+    confidence: { type: 'number', minimum: 0, maximum: 100 },
+    location: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        line: { type: 'number' }
+      },
+      required: ['path']
     },
-    myUsername: { type: 'string' }
+    claim: { type: 'string' },
+    evidence: { type: 'string' },
+    whyItMatters: { type: 'string' },
+    suggestedFix: { type: 'string' },
+    existingReviewOverlap: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['none', 'possible_plus_one', 'partial_overlap', 'already_covered']
+        },
+        threadId: { type: 'string' },
+        rationale: { type: 'string' }
+      },
+      required: ['status', 'rationale']
+    },
+    sourceAgent: { type: 'string' }
   },
-  required: ['threads', 'myUsername']
+  required: ['id', 'lens', 'title', 'severity', 'confidence', 'location', 'claim', 'evidence', 'whyItMatters', 'suggestedFix', 'existingReviewOverlap', 'sourceAgent']
 }
 
-const CLASSIFICATION_SCHEMA = {
+const REVIEW_BOARD_SCHEMA = {
   type: 'object',
   properties: {
-    classifications: {
+    recommendedToPost: {
       type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          findingIndex: { type: 'number' },
-          status: { type: 'string', enum: ['new', 'duplicate', 'partial_overlap'] },
-          matchedThreadId: { type: 'string' },
-          existingCoverage: { type: 'string' },
-          delta: { type: 'string' },
-          adjustedSeverity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
-          adjustedConfidence: { type: 'number', minimum: 0, maximum: 100 }
+      items: BOARD_ITEM_SCHEMA
+    },
+    possiblePlusOnes: {
+      type: 'array',
+      items: BOARD_ITEM_SCHEMA
+    },
+    partialOverlaps: {
+      type: 'array',
+      items: BOARD_ITEM_SCHEMA
+    },
+    discussionOnly: {
+      type: 'array',
+      items: BOARD_ITEM_SCHEMA
+    },
+    alreadyCovered: {
+      type: 'array',
+      items: BOARD_ITEM_SCHEMA
+    },
+    discarded: {
+      type: 'array',
+      items: BOARD_ITEM_SCHEMA
+    },
+    positiveObservations: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    actionPlan: {
+      type: 'object',
+      properties: {
+        critical: {
+          type: 'array',
+          items: { type: 'string' }
         },
-        required: ['findingIndex', 'status']
-      }
+        important: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        suggestions: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        recommendedNextAction: { type: 'string' }
+      },
+      required: ['critical', 'important', 'suggestions', 'recommendedNextAction']
+    },
+    coverageSummary: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string' },
+        largePrNotes: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      },
+      required: ['scope', 'largePrNotes']
     }
   },
-  required: ['classifications']
-}
-
-const VERIFICATION_SCHEMA = {
-  type: 'object',
-  properties: {
-    verifications: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          threadId: { type: 'string' },
-          file: { type: 'string' },
-          line: { type: 'number' },
-          originalConcern: { type: 'string' },
-          resolution: { type: 'string', enum: ['fixed', 'pushed_back', 'unaddressed'] },
-          assessment: { type: 'string' },
-          isAdequate: { type: 'boolean' },
-          newIssueIntroduced: { type: 'boolean' },
-          newIssueDescription: { type: 'string' }
-        },
-        required: ['threadId', 'file', 'originalConcern', 'resolution', 'assessment', 'isAdequate', 'newIssueIntroduced']
-      }
-    }
-  },
-  required: ['verifications']
+  required: ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded', 'positiveObservations', 'actionPlan', 'coverageSummary']
 }
 
 let config = {}
@@ -146,39 +243,6 @@ function sortFindings(arr) {
     if (sevDiff !== 0) return sevDiff
     return (b.confidence || 0) - (a.confidence || 0)
   })
-}
-
-function diffPreamble() {
-  const filterRules = `Filter out files not relevant to your review:
-   - Skip paths starting with \`vendor/\`
-   - Skip generated files matching: \`zz_generated*\`, \`*_generated.go\`, \`*.pb.go\`, \`*_string.go\`, \`bindata.go\`, \`*.sum\``
-
-  if (config.isLocal) {
-    return `## Setup — verify checkout and collect diff
-
-Before reviewing, verify you are looking at the correct data and collect the diff yourself.
-
-1. Run \`git rev-parse HEAD\` and confirm the output matches the expected head SHA: ${config.headSha}. If it does not match, report an error and stop.
-2. Run \`git diff --name-status origin/${config.baseRef}...HEAD\` to get the list of changed files with their statuses.
-3. ${filterRules}
-4. Run \`git diff origin/${config.baseRef}...HEAD -- <file1> <file2> ...\` with the remaining files to get the actual patches to review.
-
-The diffs are authoritative merge-base comparisons — the same comparison GitHub uses for the PR. Do not infer deletions or additions beyond what is shown in the diffs.
-
-`
-  }
-  return `## Setup — collect diff via GitHub
-
-Before reviewing, collect the PR diff yourself.
-
-1. Call \`pull_request_read\` with method \`get_files\` for ${config.owner}/${config.repo} PR #${config.pullNumber} to get the list of changed files with their statuses. Paginate with \`perPage: 100\` if needed.
-2. ${filterRules}
-3. Use each file's \`patch\` from \`get_files\` as the authoritative review diff.
-4. Only if \`patch\` is missing (large, binary, or truncated), use \`get_file_contents\` for extra context and avoid line-specific findings for that file.
-
-The patches from the GitHub API are the authoritative set of changes. Do not infer deletions or additions beyond what is shown.
-
-`
 }
 
 // Agent prompts derived from Anthropic's pr-review-toolkit plugin
@@ -558,16 +622,9 @@ Think deeply about each type's role in the larger system. Sometimes a simpler ty
 Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
 }
 
-const STANDARDIZATION_SUFFIX = `Format each finding's description as: what the issue is, why it matters, and (if applicable) a concrete fix. 2-4 sentences. Write in a neutral technical voice — do not reference yourself, your role, or your review methodology.`
+const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. Format each finding description as: what the issue is, why it matters, and a concrete fix when applicable. Use 2-4 sentences in a neutral technical voice. Do not reference yourself, your role, or your review methodology.`
 
-// Main execution
-phase('Analyze')
-
-const selected = Array.isArray(config.agents)
-  ? config.agents.filter(name => typeof PROMPTS[name] === 'string')
-  : []
-if (selected.indexOf('code-reviewer') === -1) selected.unshift('code-reviewer')
-log('Running ' + selected.length + ' review agents: ' + selected.join(', '))
+const PAGE_SIZE = 100
 
 const AGENT_OPTS = {
   'code-reviewer':         { model: 'opus', effort: 'max' },
@@ -577,232 +634,408 @@ const AGENT_OPTS = {
   'type-design-analyzer':  { effort: 'high' }
 }
 
+const LENS_NAMES = {
+  'code-reviewer': 'code',
+  'silent-failure-hunter': 'error-handling',
+  'pr-test-analyzer': 'tests',
+  'comment-analyzer': 'comments',
+  'type-design-analyzer': 'type-design'
+}
+
+function asNumber(value, fallback) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function uniq(values) {
+  const seen = {}
+  const out = []
+  ;(values || []).forEach(value => {
+    if (!value || seen[value]) return
+    seen[value] = true
+    out.push(value)
+  })
+  return out
+}
+
+function categorizePath(path) {
+  const p = String(path || '').toLowerCase()
+  if (!p) return 'other'
+  if (p.indexOf('vendor/') === 0 || p.indexOf('/vendor/') !== -1 || p.indexOf('third_party/') === 0 || p.indexOf('/third_party/') !== -1) return 'vendor'
+  if (p.indexOf('generated') !== -1 || p.indexOf('zz_generated') !== -1 || p.endsWith('.pb.go') || p.endsWith('.pb.ts') || p.endsWith('.pb.js') || p.endsWith('_generated.go') || p.endsWith('_string.go')) return 'generated'
+  if (p.endsWith('go.sum') || p.endsWith('package-lock.json') || p.endsWith('yarn.lock') || p.endsWith('pnpm-lock.yaml') || p.endsWith('cargo.lock') || p.endsWith('gemfile.lock') || p.endsWith('poetry.lock')) return 'lockfile'
+  if (p.indexOf('.github/workflows/') === 0 || p.indexOf('/.github/workflows/') !== -1 || p.indexOf('ci/') === 0 || p.indexOf('/ci/') !== -1) return 'ci'
+  if (p.endsWith('.md') || p.endsWith('.mdx') || p.endsWith('.rst') || p.indexOf('docs/') === 0 || p.indexOf('/docs/') !== -1) return 'docs'
+  if (p.endsWith('.json') || p.endsWith('.yaml') || p.endsWith('.yml') || p.endsWith('.toml') || p.endsWith('.ini') || p.endsWith('.cfg') || p.endsWith('.conf')) return 'config'
+  if (p.indexOf('test/') !== -1 || p.indexOf('tests/') !== -1 || p.indexOf('__tests__/') !== -1 || p.endsWith('_test.go') || p.endsWith('.test.ts') || p.endsWith('.test.tsx') || p.endsWith('.spec.ts') || p.endsWith('.spec.tsx') || p.endsWith('_test.py')) return 'tests'
+  if (/\.(go|ts|tsx|js|jsx|py|rs|java|kt|kts|c|cc|cpp|h|hpp|cs|rb|php|swift)$/.test(p)) return 'source'
+  if (/\.(png|jpg|jpeg|gif|webp|pdf|zip|gz|tar|tgz|ico|woff|woff2|ttf)$/.test(p)) return 'binary'
+  return 'other'
+}
+
+function signalsForFile(file) {
+  const p = String(file.path || '').toLowerCase()
+  const signals = Array.isArray(file.signals) ? file.signals.slice() : []
+  const category = file.category || categorizePath(file.path)
+  if (category === 'source') signals.push('source')
+  if (category === 'tests') signals.push('tests')
+  if (category === 'docs') signals.push('comments')
+  if (category === 'config' || category === 'ci') signals.push('config')
+  if (p.indexOf('error') !== -1 || p.indexOf('exception') !== -1 || p.indexOf('fallback') !== -1 || p.indexOf('retry') !== -1 || p.indexOf('handler') !== -1) signals.push('error-handling')
+  if (/\.(ts|tsx|go|rs|java|kt|cs)$/.test(p) || p.indexOf('types') !== -1 || p.indexOf('model') !== -1 || p.indexOf('schema') !== -1 || p.indexOf('interface') !== -1) signals.push('types')
+  if (p.indexOf('api') !== -1 || p.indexOf('client') !== -1 || p.indexOf('server') !== -1 || p.indexOf('controller') !== -1 || p.indexOf('route') !== -1) signals.push('public-api')
+  return uniq(signals)
+}
+
+function normalizePr(prResult) {
+  const raw = prResult && prResult.pr ? prResult.pr : {}
+  return {
+    owner: raw.owner || config.owner || '',
+    repo: raw.repo || config.repo || '',
+    number: asNumber(raw.number, asNumber(config.pullNumber, 0)),
+    title: raw.title || '',
+    body: raw.body || '',
+    author: raw.author || '',
+    baseRef: raw.baseRef || config.baseRef || '',
+    headSha: raw.headSha || config.headSha || '',
+    changedFiles: asNumber(raw.changedFiles, asNumber(config.changedFiles, 0)),
+    additions: asNumber(raw.additions, 0),
+    deletions: asNumber(raw.deletions, 0),
+    state: raw.state || '',
+    reviewDecision: raw.reviewDecision || ''
+  }
+}
+
+function mergeFilePages(pageResults) {
+  const byPath = {}
+  ;(pageResults || []).filter(Boolean).forEach((pageResult, pageIndex) => {
+    const page = asNumber(pageResult.page, pageIndex + 1)
+    ;(pageResult.files || []).forEach(file => {
+      if (!file || !file.path) return
+      const category = file.category || categorizePath(file.path)
+      byPath[file.path] = {
+        path: file.path,
+        status: file.status || 'modified',
+        additions: asNumber(file.additions, 0),
+        deletions: asNumber(file.deletions, 0),
+        category: category,
+        signals: signalsForFile(Object.assign({}, file, { category: category })),
+        patchAvailable: Boolean(file.patchAvailable),
+        page: page,
+        perPage: PAGE_SIZE,
+        threadCount: 0
+      }
+    })
+  })
+  return Object.keys(byPath).sort().map(path => byPath[path])
+}
+
+function buildSummary(pr, files, threads) {
+  const categories = {}
+  const signalCounts = {}
+  files.forEach(file => {
+    categories[file.category] = (categories[file.category] || 0) + 1
+    ;(file.signals || []).forEach(signal => {
+      signalCounts[signal] = (signalCounts[signal] || 0) + 1
+    })
+  })
+  const threadCounts = {}
+  threads.forEach(thread => {
+    if (!thread.path) return
+    threadCounts[thread.path] = (threadCounts[thread.path] || 0) + 1
+  })
+  files.forEach(file => {
+    file.threadCount = threadCounts[file.path] || 0
+  })
+
+  const changed = pr.changedFiles || files.length
+  const churn = (pr.additions || 0) + (pr.deletions || 0)
+  const scale = changed > 250 || churn > 20000
+    ? 'very_large'
+    : changed > 75 || churn > 5000
+      ? 'large'
+      : changed > 20 || churn > 1000
+        ? 'medium'
+        : 'small'
+
+  const riskAreas = []
+  if (signalCounts['error-handling']) riskAreas.push('error-handling')
+  if (signalCounts['types']) riskAreas.push('type-design')
+  if (signalCounts['public-api']) riskAreas.push('public-api')
+  if ((categories.source || 0) > 0 && (categories.tests || 0) === 0) riskAreas.push('tests')
+  if ((categories.config || 0) > 0 || (categories.ci || 0) > 0) riskAreas.push('config-or-ci')
+
+  return {
+    scale: scale,
+    categories: categories,
+    signals: signalCounts,
+    riskAreas: riskAreas,
+    changedFileCount: changed,
+    collectedFileCount: files.length,
+    existingThreadCount: threads.length,
+    additions: pr.additions || 0,
+    deletions: pr.deletions || 0
+  }
+}
+
+function selectReviewers(files, summary) {
+  if (Array.isArray(config.agents) && config.agents.length > 0) {
+    const explicit = config.agents.filter(name => typeof PROMPTS[name] === 'string')
+    if (explicit.indexOf('code-reviewer') === -1) explicit.unshift('code-reviewer')
+    return explicit
+  }
+
+  const selected = ['code-reviewer']
+  const categories = summary.categories || {}
+  const signals = summary.signals || {}
+
+  if ((categories.source || 0) > 0) selected.push('pr-test-analyzer')
+  if (signals['error-handling']) selected.push('silent-failure-hunter')
+  if ((categories.docs || 0) > 0 || signals.comments) selected.push('comment-analyzer')
+  if (signals.types) selected.push('type-design-analyzer')
+
+  return uniq(selected).filter(name => typeof PROMPTS[name] === 'string')
+}
+
+function contextForPrompt(prContext) {
+  return JSON.stringify({
+    pr: prContext.pr,
+    summary: prContext.summary,
+    files: prContext.files,
+    threads: prContext.threads
+  })
+}
+
+function analysisPrompt(name, prContext) {
+  return PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Include positive observations when they help the final review board.`
+}
+
+function boardItemFromFinding(finding, index) {
+  const location = { path: finding.file || finding.path || 'PR' }
+  if (finding.line != null) location.line = asNumber(finding.line, 0)
+  return {
+    id: 'F' + (index + 1),
+    lens: finding.lens || finding.sourceAgent || 'review',
+    title: finding.title || 'Review finding',
+    severity: finding.severity || 'suggestion',
+    confidence: asNumber(finding.confidence, 0),
+    location: location,
+    claim: finding.title || 'Review finding',
+    evidence: finding.description || '',
+    whyItMatters: finding.description || '',
+    suggestedFix: '',
+    existingReviewOverlap: {
+      status: 'none',
+      threadId: '',
+      rationale: 'No existing review overlap was classified.'
+    },
+    sourceAgent: finding.sourceAgent || ''
+  }
+}
+
+function fallbackBoard(findings, positives, prContext) {
+  const recommendedToPost = []
+  const discussionOnly = []
+  const discarded = []
+
+  findings.forEach((finding, index) => {
+    const item = boardItemFromFinding(finding, index)
+    if ((item.severity === 'critical' || item.severity === 'important') && item.confidence >= 80) {
+      recommendedToPost.push(item)
+    } else if (item.confidence >= 50) {
+      discussionOnly.push(item)
+    } else {
+      discarded.push(item)
+    }
+  })
+
+  return {
+    recommendedToPost: recommendedToPost,
+    possiblePlusOnes: [],
+    partialOverlaps: [],
+    discussionOnly: discussionOnly,
+    alreadyCovered: [],
+    discarded: discarded,
+    positiveObservations: positives,
+    actionPlan: {
+      critical: recommendedToPost.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
+      important: recommendedToPost.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
+      suggestions: discussionOnly.map(item => item.id + ': ' + item.title),
+      recommendedNextAction: recommendedToPost.length > 0 ? 'draft recommended findings' : 'review discussion-only findings'
+    },
+    coverageSummary: {
+      scope: coverageScope(prContext),
+      largePrNotes: largePrNotes(prContext)
+    }
+  }
+}
+
+function coverageScope(prContext) {
+  const summary = prContext.summary || {}
+  const categories = summary.categories || {}
+  const categoryText = Object.keys(categories).sort().map(key => key + ': ' + categories[key]).join(', ')
+  return 'Collected ' + (summary.collectedFileCount || 0) + ' changed file(s) across ' + (prContext.filePageCount || 0) + ' page(s), with ' + (summary.existingThreadCount || 0) + ' existing review thread(s). Categories: ' + (categoryText || 'none') + '.'
+}
+
+function largePrNotes(prContext) {
+  const summary = prContext.summary || {}
+  const notes = []
+  if (summary.scale === 'large' || summary.scale === 'very_large') {
+    notes.push('Large PR: reviewers received the complete manifest and focused detailed patch reads on high-signal files.')
+  }
+  const lowSignal = (summary.categories && ((summary.categories.vendor || 0) + (summary.categories.generated || 0) + (summary.categories.lockfile || 0))) || 0
+  if (lowSignal > 0) notes.push(lowSignal + ' vendor/generated/lockfile file(s) were kept visible in the manifest but deprioritized for detailed review.')
+  return notes
+}
+
+function finalizeBoard(board, findings, positives, prContext) {
+  const finalBoard = board || fallbackBoard(findings, positives, prContext)
+  const sections = ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded']
+  let nextId = 1
+  sections.forEach(section => {
+    if (!Array.isArray(finalBoard[section])) finalBoard[section] = []
+    finalBoard[section].forEach(item => {
+      if (!item.id) item.id = 'F' + nextId
+      if (!item.location) item.location = { path: 'PR' }
+      if (!item.existingReviewOverlap) {
+        item.existingReviewOverlap = { status: 'none', threadId: '', rationale: '' }
+      }
+      nextId++
+    })
+  })
+  if (!Array.isArray(finalBoard.positiveObservations)) finalBoard.positiveObservations = positives
+  if (!finalBoard.actionPlan) {
+    finalBoard.actionPlan = {
+      critical: [],
+      important: [],
+      suggestions: [],
+      recommendedNextAction: 'review board'
+    }
+  }
+  if (!finalBoard.coverageSummary) {
+    finalBoard.coverageSummary = {
+      scope: coverageScope(prContext),
+      largePrNotes: largePrNotes(prContext)
+    }
+  }
+
+  finalBoard.pr = prContext.pr
+  finalBoard.summary = prContext.summary
+  finalBoard.reviewMeta = {
+    selectedReviewers: prContext.selectedReviewers,
+    totalFindings: findings.length,
+    existingThreadCount: prContext.threads.length,
+    changedFileCount: prContext.summary.changedFileCount,
+    collectedFileCount: prContext.summary.collectedFileCount,
+    filePageCount: prContext.filePageCount
+  }
+  return finalBoard
+}
+
+phase('Collect')
+log('Collecting PR metadata for ' + config.owner + '/' + config.repo + '#' + config.pullNumber)
+
+const metadataPrompt = `Use GitHub read tools only. Fetch PR metadata with pull_request_read method get for ${config.owner}/${config.repo} PR #${config.pullNumber}. Return title, body, author login, base ref, head SHA, changed file count, additions, deletions, state, and review decision if available. Do not call any GitHub write tools.`
+
+const prResult = await agent(metadataPrompt, {
+  label: 'collect-pr-metadata',
+  schema: PR_METADATA_SCHEMA,
+  phase: 'Collect',
+  model: 'haiku',
+  effort: 'low'
+})
+
+const pr = normalizePr(prResult)
+const filePageCount = Math.max(1, Math.ceil((pr.changedFiles || 1) / PAGE_SIZE))
+const filePages = []
+for (let page = 1; page <= filePageCount; page++) filePages.push(page)
+
+log('Fetching changed files across ' + filePageCount + ' page(s)')
+const filePageResults = await parallel(filePages.map(page => () => {
+  const prompt = `Use GitHub read tools only. Call pull_request_read with method get_files for ${pr.owner}/${pr.repo} PR #${pr.number}, page ${page}, perPage ${PAGE_SIZE}. Return exactly the files from this page. Do not fetch other pages. Do not include raw patches in the response. Map GitHub's filename field to path. Set patchAvailable to true when the API entry has a non-empty patch. Categorize each file and add compact signals from the path/status/patch metadata only. Do not call any GitHub write tools.`
+  return agent(prompt, {
+    label: 'collect-files-page-' + page,
+    schema: FILE_PAGE_SCHEMA,
+    phase: 'Collect',
+    model: 'haiku',
+    effort: 'low'
+  })
+}))
+
+let files = mergeFilePages(filePageResults)
+if (pr.changedFiles === 0) pr.changedFiles = files.length
+
+log('Fetching review threads')
+const threadPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
+
+const threadData = await agent(threadPrompt, {
+  label: 'collect-review-threads',
+  schema: THREAD_SCHEMA,
+  phase: 'Collect',
+  model: 'haiku',
+  effort: 'low'
+})
+
+const threads = (threadData && Array.isArray(threadData.threads)) ? threadData.threads : []
+const summary = buildSummary(pr, files, threads)
+const prContext = {
+  pr: pr,
+  files: files,
+  threads: threads,
+  summary: summary,
+  filePageCount: filePageCount
+}
+
+phase('Analyze')
+const selected = selectReviewers(files, summary)
+prContext.selectedReviewers = selected
+log('Running ' + selected.length + ' review agent(s): ' + selected.join(', '))
+
 const results = await parallel(selected.map(name => () => {
-  const prompt = PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + '\n\n' + diffPreamble()
   const overrides = AGENT_OPTS[name] || {}
   const opts = Object.assign(
     { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'high' },
     overrides
   )
-  return agent(prompt, opts)
+  return agent(analysisPrompt(name, prContext), opts)
 }))
 
 let allFindings = []
 const allPositive = []
-results.filter(Boolean).forEach(r => {
-  if (r.findings) allFindings.push(...r.findings)
-  if (r.positiveObservations) allPositive.push(...r.positiveObservations)
+selected.forEach((name, index) => {
+  const result = results[index]
+  if (!result) return
+  if (Array.isArray(result.findings)) {
+    allFindings.push(...result.findings.map(finding => Object.assign({}, finding, {
+      lens: LENS_NAMES[name] || name,
+      sourceAgent: name
+    })))
+  }
+  if (Array.isArray(result.positiveObservations)) {
+    allPositive.push(...result.positiveObservations)
+  }
 })
-
 sortFindings(allFindings)
 
-// Verify each finding against the diff
-phase('Verify')
-log('Verifying ' + allFindings.length + ' finding(s)')
+phase('Synthesize')
+log('Synthesizing review board from ' + allFindings.length + ' finding(s)')
 
-const verifyResults = await parallel(allFindings.map(finding => () => {
-  const verifyPrompt = `You are an adversarial code review verifier. Your job is to independently verify or refute a finding from a code review.
-
-## The finding
-
-- File: ${finding.file}${finding.line ? ':' + finding.line : ''}
-- Severity: ${finding.severity}
-- Title: ${finding.title}
-- Description: ${finding.description}
-
-${diffPreamble()}
-
-## Your task
-
-1. Locate the exact code referenced by this finding in the diff
-2. Confirm the issue actually exists at the stated location
-3. Check whether the described impact is real
-4. Attempt to disprove the finding — look for reasons it might be wrong
-
-Default to skepticism. If the finding cannot be confirmed in the diff, mark it as false_positive.`
-
-  return agent(verifyPrompt, {
-    label: 'verify:' + finding.file + (finding.line ? ':' + finding.line : ''),
-    schema: VERIFY_SCHEMA,
-    phase: 'Verify',
-    model: 'sonnet',
-    effort: 'high'
-  })
-}))
-
-const verifiedFindings = []
-let falsePositiveCount = 0
-let verificationErrorCount = 0
-allFindings.forEach((finding, i) => {
-  const v = verifyResults[i]
-  if (!v) {
-    verificationErrorCount++
-    verifiedFindings.push(Object.assign({}, finding, {
-      verificationStatus: 'unverified',
-      verificationRationale: 'Verification unavailable — finding retained without independent verification.'
-    }))
-    return
-  }
-  if (v.verification === 'false_positive') {
-    falsePositiveCount++
-    return
-  }
-  verifiedFindings.push(Object.assign({}, finding, {
-    verificationStatus: 'verified',
-    verificationRationale: v.rationale
-  }))
-})
-
-sortFindings(verifiedFindings)
-
-allFindings = verifiedFindings
-log('Verification complete: ' + verifiedFindings.length + ' confirmed, ' + falsePositiveCount + ' filtered, ' + verificationErrorCount + ' verifier error(s)')
-
-// Contextualize findings against existing review threads
-phase('Contextualize')
-log('Fetching existing review threads')
-
-const fetchPrompt = `Fetch the authenticated user login via \`get_me\`, and all review comment threads via \`pull_request_read\` with method \`get_review_comments\` for ${config.owner}/${config.repo} PR #${config.pullNumber}. Paginate if needed to get all threads. For each thread, populate \`id\` (the thread node ID), \`author\` (the GitHub login of the first comment's author, matching the format returned by \`get_me\`), \`isResolved\`, and include the thread's replies.`
-
-const threadData = await agent(fetchPrompt, {
-  label: 'fetch-threads',
-  schema: THREAD_SCHEMA,
-  phase: 'Contextualize',
-  model: 'haiku',
-  effort: 'low'
-})
-
-const threads = (threadData && threadData.threads) || []
-const myUsername = (threadData && threadData.myUsername) || ''
-
-if (threads.length === 0) {
-  log('No existing review threads — all ' + allFindings.length + ' finding(s) are new')
-  const enriched = allFindings.map(f => Object.assign({}, f, { status: 'new' }))
-  return {
-    findings: enriched,
-    positiveObservations: allPositive,
-    threadVerifications: [],
-    reviewMeta: {
-      hasOwnResolvedThreads: false,
-      existingThreadCount: 0,
-      duplicateCount: 0,
-      partialOverlapCount: 0,
-      newCount: allFindings.length
-    }
-  }
+const synthesisInput = {
+  pr: prContext.pr,
+  summary: prContext.summary,
+  threads: prContext.threads,
+  findings: allFindings,
+  positiveObservations: allPositive
 }
 
-log('Found ' + threads.length + ' existing thread(s) — classifying findings and verifying resolved threads')
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings worth drafting as PR comments.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nPreserve specialist evidence. Classify against existing review threads by logical concern, not just file proximity. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
 
-const findingsJson = JSON.stringify(allFindings)
-const threadsJson = JSON.stringify(threads)
-
-const classifyPrompt = `You are comparing code review findings against existing review comment threads on a PR.
-
-## Existing review threads
-
-${threadsJson}
-
-## Our findings
-
-${findingsJson}
-
-For each finding (by its index in the array), classify it:
-- "new": no existing thread covers this issue
-- "duplicate": an existing thread fully covers the same concern — same file, same logical concern (not just physical proximity), same fundamental problem. Provide matchedThreadId and existingCoverage (brief summary of what the thread already says).
-- "partial_overlap": an existing thread touches the same area but our finding adds something the thread missed. Provide matchedThreadId, existingCoverage, delta (what we found that others missed), and rescore with adjustedSeverity and adjustedConfidence reflecting the incremental value — higher if we caught something critical the thread only tangentially mentioned, lower if the thread mostly covers it.
-
-Be precise: two comments about the same file are not duplicates unless they identify the same problem. A thread about error handling on line 42 is not a duplicate of a finding about a race condition on line 45.`
-
-const myResolvedThreads = threads.filter(t => t.isResolved && t.author === myUsername)
-
-const contextualizeAgents = [
-  () => agent(classifyPrompt, {
-    label: 'classify-findings',
-    schema: CLASSIFICATION_SCHEMA,
-    phase: 'Contextualize',
-    effort: 'high'
-  })
-]
-
-if (myResolvedThreads.length > 0) {
-  const resolvedJson = JSON.stringify(myResolvedThreads)
-  const verifyPrompt = `You are verifying whether previous review comments have been addressed on ${config.owner}/${config.repo} PR #${config.pullNumber}.
-
-The following review threads were left by the current user (${myUsername}) and have been marked as resolved:
-
-${resolvedJson}
-
-${diffPreamble()}
-
-For each resolved thread, determine how it was resolved:
-- "fixed": the author pushed code changes to address the concern. Check the diff to verify the fix is complete and doesn't introduce a new issue.
-- "pushed_back": the author replied with reasoning for why the current code is correct or why the change isn't needed. Evaluate whether the pushback is technically valid.
-- "unaddressed": the thread was resolved but the underlying issue remains in the code — neither fixed nor convincingly argued against.
-
-Set isAdequate to true if the resolution satisfactorily addresses the original concern. Set newIssueIntroduced to true if a fix attempt created a new problem, and describe it in newIssueDescription.`
-
-  contextualizeAgents.push(() => agent(verifyPrompt, {
-    label: 'verify-threads',
-    schema: VERIFICATION_SCHEMA,
-    phase: 'Contextualize',
-    effort: 'high'
-  }))
-}
-
-const contextResults = await parallel(contextualizeAgents)
-const classificationResult = contextResults[0]
-const verificationResult = contextResults.length > 1 ? contextResults[1] : null
-
-const classMap = {}
-const classifications = (classificationResult && classificationResult.classifications) || []
-classifications.forEach(c => {
-  if (!Number.isInteger(c.findingIndex) || c.findingIndex < 0 || c.findingIndex >= allFindings.length) return
-  if (c.status === 'duplicate' && !c.matchedThreadId) {
-    classMap[c.findingIndex] = { findingIndex: c.findingIndex, status: 'new' }
-  } else if (c.status === 'partial_overlap' && (!c.matchedThreadId || !c.delta)) {
-    classMap[c.findingIndex] = { findingIndex: c.findingIndex, status: 'new' }
-  } else {
-    classMap[c.findingIndex] = c
-  }
+const synthesized = await agent(synthPrompt, {
+  label: 'synthesize-review-board',
+  schema: REVIEW_BOARD_SCHEMA,
+  phase: 'Synthesize',
+  model: 'opus',
+  effort: 'high'
 })
 
-let duplicateCount = 0
-let partialOverlapCount = 0
-let newCount = 0
-
-const enrichedFindings = allFindings.map((f, i) => {
-  const c = classMap[i]
-  if (!c) {
-    newCount++
-    return Object.assign({}, f, { status: 'new' })
-  }
-  if (c.status === 'duplicate') duplicateCount++
-  else if (c.status === 'partial_overlap') partialOverlapCount++
-  else newCount++
-
-  const enriched = Object.assign({}, f, { status: c.status })
-  if (c.matchedThreadId) enriched.matchedThreadId = c.matchedThreadId
-  if (c.existingCoverage) enriched.existingCoverage = c.existingCoverage
-  if (c.delta) enriched.delta = c.delta
-  if (c.adjustedSeverity) enriched.adjustedSeverity = c.adjustedSeverity
-  if (c.adjustedConfidence != null) enriched.adjustedConfidence = c.adjustedConfidence
-  return enriched
-})
-
-const verifications = (verificationResult && verificationResult.verifications) || []
-
-log('Contextualize complete: ' + newCount + ' new, ' + duplicateCount + ' duplicate(s), ' + partialOverlapCount + ' partial overlap(s), ' + verifications.length + ' thread(s) verified')
-
-return {
-  findings: enrichedFindings,
-  positiveObservations: allPositive,
-  threadVerifications: verifications,
-  reviewMeta: {
-    hasOwnResolvedThreads: myResolvedThreads.length > 0,
-    existingThreadCount: threads.length,
-    duplicateCount: duplicateCount,
-    partialOverlapCount: partialOverlapCount,
-    newCount: newCount
-  }
-}
+return finalizeBoard(synthesized, allFindings, allPositive, prContext)

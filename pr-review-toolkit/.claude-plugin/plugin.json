@@ -1,7 +1,7 @@
 {
   "name": "pr-review-toolkit",
-  "version": "1.4.1",
-  "description": "Comprehensive PR review using parallel workflow agents",
+  "version": "1.5.0",
+  "description": "Comprehensive PR review board using shared workflow context",
   "author": {
     "name": "cblecker",
     "email": "admin@toph.ca"
