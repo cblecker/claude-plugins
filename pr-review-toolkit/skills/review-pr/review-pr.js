@@ -128,7 +128,16 @@ const VERIFICATION_SCHEMA = {
   required: ['verifications']
 }
 
-const config = args || {}
+let config = {}
+if (typeof args === 'string') {
+  try {
+    config = JSON.parse(args)
+  } catch (err) {
+    throw new Error('review-pr workflow expected JSON args string: ' + err.message)
+  }
+} else {
+  config = args || {}
+}
 
 const SEVERITY_ORDER = { critical: 0, important: 1, suggestion: 2 }
 function sortFindings(arr) {
