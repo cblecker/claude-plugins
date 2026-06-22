@@ -481,3 +481,67 @@ Start conservative:
 
 Then split prompts, schemas, and reusable agents once the runtime behavior is
 verified.
+
+## Capability Spike Results
+
+Tested 2026-06-22 against `openshift/hypershift#8704` (509 changed files,
++37,976/-153,784 lines, 33 review threads).
+
+### Answered From Documentation
+
+1. **Workflow JS cannot import sibling modules.** No filesystem or Node.js API
+   access. Prompts and schemas must be embedded as string literals.
+2. **Workflow JS cannot read bundled files.** Same constraint. Content must be
+   passed via `args` or embedded directly.
+3. **`${CLAUDE_SKILL_DIR}` is not available inside workflows.** The skill
+   resolves it for `scriptPath`, but the workflow script only receives `args`.
+4. **Reliable `agent()` options:** `label`, `phase`, `schema`, `model`,
+   `effort`, `isolation`, `agentType`. No `tools` or `allowedTools` parameter
+   exists. The current `review-pr.js` already uses all tested options
+   successfully.
+5. **Structured-output failure returns `null`.** Handle with
+   `.filter(Boolean)`.
+6. **No per-agent tool constraints from workflows.** Agents inherit the session
+   tool allowlist. Read-only enforcement must use the skill's `allowed-tools`
+   frontmatter and prompt instructions.
+
+### Answered Empirically
+
+7. **`args` arrives as a JSON string, not a parsed object.** Despite the docs
+   saying to pass actual JSON values, the runtime serializes them. Use
+   `typeof args === 'string' ? JSON.parse(args) : (args || {})`.
+
+8. **Structured-output response size is the bottleneck, not workflow variable
+   capacity.** The file collector agent successfully fetched all 509 files
+   across 6 API pages but could only fit 17 file entries in its structured
+   output response. Thread collection (33 threads, 1 page) worked without
+   truncation. Data that made it into workflow variables survived round-trip
+   to downstream agents without corruption.
+
+### Design Implications
+
+The structured-output truncation finding shapes the collection phase design:
+
+- **File collection must be paginated at the workflow level.** Use
+  `pipeline()` or `parallel()` to spawn one collector agent per API page,
+  each returning a small batch. The workflow script merges batches in
+  variables.
+- **Thread collection can use a single agent** for typical PRs (up to ~50
+  threads). Very large review threads may need similar pagination.
+- **Compact schemas help.** The file collector excluded raw patch content and
+  still hit the limit at 509 entries. For very large PRs, consider returning
+  only filename, status, and category per file, then fetching patches
+  separately for high-signal files.
+- **Workflow variable capacity is adequate.** The merged file manifest and
+  thread index can be stored as workflow variables and passed to downstream
+  agents without data loss.
+
+### Unchanged Assumptions
+
+The conservative initial layout remains correct:
+
+- one skill, one bundled workflow JS file
+- embedded prompts and schemas
+- read-only GitHub MCP analysis
+- review board output only
+- no posting from workflow
