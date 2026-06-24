@@ -29,6 +29,19 @@ The workflow does not draft or post comments. Drafting happens in the skill
 conversation after the user selects findings. Posting requires an exact preview
 and explicit final approval.
 
+The control flow is:
+
+```text
+skill command -> Workflow(review-pr.js) -> workflow agent() calls
+collection agents -> pr-review-github-collector -> GitHub MCP reads
+specialist agents -> pr-review-analysis-readonly -> read-only repo/MCP inspection
+```
+
+The workflow script owns pagination, retries, validation, and merging. Spawned
+collection agents only perform focused GitHub reads and return structured
+output. Specialist agents may inspect repository files and use available
+read-only MCP tools to verify findings.
+
 ## Review Agents
 
 | Agent | When it runs | What it does |
@@ -84,6 +97,15 @@ Analysis requires these read capabilities:
 The workflow and workflow-spawned agents must use read tools only. They are
 explicitly instructed not to call write tools, draft pending reviews, submit
 reviews, add comments, or resolve threads.
+
+Collection agents run through the bundled `pr-review-github-collector` agent
+type. That agent allows GitHub PR reads and disallows shell, local file, web, and
+file mutation tools so large MCP responses do not lead to generated Python,
+`jq`, `gh`, or other ad-hoc parsing scripts.
+
+Specialist reviewers run through `pr-review-analysis-readonly`, which blocks
+shell and mutation tools while allowing read-only repository inspection and
+read-only MCP tools.
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
