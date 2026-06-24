@@ -681,7 +681,7 @@ Map each finding to severity (critical/important/suggestion) and confidence (0-1
 const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, possible_plus_one, partial_overlap, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
 const FILE_PAGE_SIZE = 10
-const FILE_RETRY_PAGE_SIZES = [5, 1]
+const FILE_SINGLE_PAGE_RETRIES = 2
 // Workflow agent() calls cannot pass per-call tool allowlists, so phase-specific
 // plugin agent types define the tool boundary for spawned agents.
 const GITHUB_COLLECTOR_AGENT_TYPE = 'pr-review-toolkit:pr-review-github-collector'
@@ -1118,10 +1118,10 @@ function normalizePr(prResult) {
 }
 
 function mergeFilePages(pageResults, perPage) {
-  const resultPerPage = perPage || FILE_PAGE_SIZE
   const byPath = {}
   ;(pageResults || []).filter(Boolean).forEach((pageResult, pageIndex) => {
     const page = asNumber(pageResult.page, pageIndex + 1)
+    const resultPerPage = asNumber(pageResult.perPage, perPage || FILE_PAGE_SIZE)
     ;(pageResult.files || []).forEach(file => {
       if (!file || !file.path) return
       const category = file.category || categorizePath(file.path)
@@ -1173,22 +1173,36 @@ function fileManifestErrorMessage(expectedTotal, actualTotal, pageResults) {
   return message
 }
 
-function expectedFilesForPage(total, page, perPage) {
-  const remaining = total - ((page - 1) * perPage)
-  return Math.max(0, Math.min(perPage, remaining))
-}
+function filePageResultIssues(pageResults, expectedTotal, pageCount, perPage) {
+  if (!expectedTotal) return []
 
-function validateFilePageResults(pageResults, expectedTotal, pageCount, perPage) {
-  if (!expectedTotal) return
-
+  const issues = []
   for (let page = 1; page <= pageCount; page++) {
     const expected = expectedFilesForPage(expectedTotal, page, perPage || FILE_PAGE_SIZE)
     const result = (pageResults || []).find(item => asNumber(item && item.page, 0) === page)
     const actual = result && Array.isArray(result.files) ? result.files.length : 0
     if (actual !== expected) {
-      throw new Error('Changed-file collection incomplete on page ' + page + ': expected ' + expected + ', got ' + actual + '. The structured output may have been truncated.')
+      issues.push({
+        page: page,
+        expected: expected,
+        actual: actual
+      })
     }
   }
+  return issues
+}
+
+function filePageIssueSummary(issues) {
+  const issueList = issues || []
+  if (!issueList.length) return ''
+  return issueList.slice(0, 5).map(issue => {
+    return 'page ' + issue.page + ' expected ' + issue.expected + ', got ' + issue.actual
+  }).join('; ') + (issueList.length > 5 ? '; ...' : '')
+}
+
+function expectedFilesForPage(total, page, perPage) {
+  const remaining = total - ((page - 1) * perPage)
+  return Math.max(0, Math.min(perPage, remaining))
 }
 
 function collectFilePage(pr, page, perPage, effort, labelSuffix) {
@@ -1205,7 +1219,9 @@ Return structured output only:
 - patchAvailable is true only when the visible API entry has a non-empty patch
 - omit patch text
 
-If the tool result is too large, truncated, unavailable, or saved to a local file, do not inspect the saved file. Return page ${page} with an empty files array so the workflow can retry with a smaller page size.
+If the patch body is too large or truncated but filename, status, additions, and deletions are visible, still return the file metadata. The manifest does not need the patch body. Set patchAvailable to true when a non-empty patch field is visible, even if that patch content is truncated.
+If the tool result is unavailable or saved to a local file, do not inspect the saved file. Return page ${page} with an empty files array so the workflow can retry with a single-file read.
+Return an empty files array only when the file metadata itself is not visible or the GitHub read failed.
 
 Do not fetch other pages, reuse another page's data, infer missing files, or renumber pages.`
   return agent(prompt, {
@@ -1219,7 +1235,31 @@ Do not fetch other pages, reuse another page's data, infer missing files, or ren
 }
 
 async function collectFilePages(pr, filePages, perPage, effort, labelSuffix) {
-  return parallel(filePages.map(page => () => collectFilePage(pr, page, perPage, effort, labelSuffix)))
+  const results = await parallel(filePages.map(page => () => collectFilePage(pr, page, perPage, effort, labelSuffix)))
+  return (results || []).map(result => result ? Object.assign({}, result, { perPage: perPage }) : result)
+}
+
+function filePageNumbersForIssues(issues, sourcePerPage, total) {
+  const pages = []
+  const seen = {}
+  ;(issues || []).forEach(issue => {
+    const start = ((issue.page - 1) * sourcePerPage) + 1
+    const end = Math.min(issue.page * sourcePerPage, total || start)
+    for (let page = start; page <= end; page++) {
+      if (seen[page]) continue
+      seen[page] = true
+      pages.push(page)
+    }
+  })
+  return pages.sort((a, b) => a - b)
+}
+
+function missingSingleFilePages(pageResults, pages) {
+  return (pages || []).filter(page => {
+    const result = (pageResults || []).find(item => asNumber(item && item.page, 0) === page)
+    const actual = result && Array.isArray(result.files) ? result.files.length : 0
+    return actual !== 1
+  })
 }
 
 function filePagesFor(total, perPage) {
@@ -1229,13 +1269,40 @@ function filePagesFor(total, perPage) {
   return { pageCount: pageCount, pages: pages }
 }
 
-async function collectFileManifestAttempt(pr, perPage, effort, labelSuffix) {
-  const pagination = filePagesFor(pr.changedFiles, perPage)
-  log('Fetching changed files across ' + pagination.pageCount + ' page(s) with perPage ' + perPage)
-  const pageResults = await collectFilePages(pr, pagination.pages, perPage, effort, labelSuffix)
-  validateFilePageResults(pageResults, pr.changedFiles, pagination.pageCount, perPage)
+async function collectCompleteFileManifest(pr) {
+  const pagination = filePagesFor(pr.changedFiles, FILE_PAGE_SIZE)
+  log('Fetching changed files across ' + pagination.pageCount + ' page(s) with perPage ' + FILE_PAGE_SIZE)
+  const primaryResults = await collectFilePages(pr, pagination.pages, FILE_PAGE_SIZE, 'high', '')
+  const primaryIssues = filePageResultIssues(primaryResults, pr.changedFiles, pagination.pageCount, FILE_PAGE_SIZE)
+  const primaryIssuePages = {}
+  primaryIssues.forEach(issue => {
+    primaryIssuePages[issue.page] = true
+  })
+  let recoveryResults = []
 
-  const files = mergeFilePages(pageResults, perPage)
+  if (primaryIssues.length) {
+    const singlePages = filePageNumbersForIssues(primaryIssues, FILE_PAGE_SIZE, pr.changedFiles)
+    log('Changed-file collection incomplete on ' + primaryIssues.length + ' page(s): ' + filePageIssueSummary(primaryIssues) + '. Recovering ' + singlePages.length + ' file slot(s) with perPage 1.')
+
+    let remainingPages = singlePages
+    for (let attempt = 1; attempt <= FILE_SINGLE_PAGE_RETRIES && remainingPages.length; attempt++) {
+      const attemptResults = await collectFilePages(pr, remainingPages, 1, 'high', '-recover-' + attempt)
+      recoveryResults = recoveryResults.concat(attemptResults)
+      remainingPages = missingSingleFilePages(attemptResults, remainingPages)
+      if (remainingPages.length && attempt < FILE_SINGLE_PAGE_RETRIES) {
+        log('Single-file recovery attempt ' + attempt + ' still missing ' + remainingPages.length + ' file slot(s); retrying.')
+      }
+    }
+
+    if (remainingPages.length) {
+      throw new Error('Changed-file collection incomplete after single-file recovery: missing file slot(s) ' + remainingPages.slice(0, 10).join(', ') + (remainingPages.length > 10 ? ', ...' : '') + '. The GitHub MCP result may be unavailable before file metadata is visible.')
+    }
+  }
+
+  const pageResults = primaryResults
+    .filter(result => !primaryIssuePages[asNumber(result && result.page, 0)])
+    .concat(recoveryResults)
+  const files = mergeFilePages(pageResults, FILE_PAGE_SIZE)
   if (pr.changedFiles && files.length !== pr.changedFiles) {
     throw new Error(fileManifestErrorMessage(pr.changedFiles, files.length, pageResults))
   }
@@ -1244,33 +1311,8 @@ async function collectFileManifestAttempt(pr, perPage, effort, labelSuffix) {
     files: files,
     pageResults: pageResults,
     pageCount: pagination.pageCount,
-    perPage: perPage
+    perPage: FILE_PAGE_SIZE
   }
-}
-
-async function collectCompleteFileManifest(pr) {
-  const attempts = [{ perPage: FILE_PAGE_SIZE, effort: 'high', labelSuffix: '' }]
-    .concat(FILE_RETRY_PAGE_SIZES.map(perPage => ({
-      perPage: perPage,
-      effort: 'high',
-      labelSuffix: '-retry-' + perPage
-    })))
-  let lastError = null
-
-  for (let i = 0; i < attempts.length; i++) {
-    const attempt = attempts[i]
-    try {
-      return await collectFileManifestAttempt(pr, attempt.perPage, attempt.effort, attempt.labelSuffix)
-    } catch (err) {
-      lastError = err
-      if (i < attempts.length - 1) {
-        const next = attempts[i + 1]
-        log('Changed-file collection attempt failed: ' + err.message + '. Retrying with perPage ' + next.perPage + ' and effort ' + next.effort + '.')
-      }
-    }
-  }
-
-  throw lastError
 }
 
 function buildSummary(pr, files, threads) {
