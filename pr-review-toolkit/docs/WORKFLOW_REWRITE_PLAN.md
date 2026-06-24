@@ -507,11 +507,11 @@ Tested 2026-06-22 against `openshift/hypershift#8704` (509 changed files,
 
 ### Answered Empirically
 
-7. **`args` arrives as a JSON string, not a parsed object.** Despite the docs
+1. **`args` arrives as a JSON string, not a parsed object.** Despite the docs
    saying to pass actual JSON values, the runtime serializes them. Use
    `typeof args === 'string' ? JSON.parse(args) : (args || {})`.
 
-8. **Structured-output response size is the bottleneck, not workflow variable
+2. **Structured-output response size is the bottleneck, not workflow variable
    capacity.** The file collector agent successfully fetched all 509 files
    across 6 API pages but could only fit 17 file entries in its structured
    output response. Thread collection (33 threads, 1 page) worked without
