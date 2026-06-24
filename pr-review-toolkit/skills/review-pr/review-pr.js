@@ -288,6 +288,10 @@ if (typeof args === 'string') {
   config = args || {}
 }
 
+if (!config.owner || !config.repo || !config.pullNumber) {
+  throw new Error('review-pr requires args: owner, repo, pullNumber')
+}
+
 const SEVERITY_ORDER = { critical: 0, important: 1, suggestion: 2 }
 function sortFindings(arr) {
   arr.sort((a, b) => {
@@ -843,7 +847,7 @@ function findingKey(item) {
   const location = item.location || {}
   const path = location.path || 'PR'
   const line = location.line != null ? ':' + asNumber(location.line, 0) : ''
-  const keywords = textTokens((item.claim || '') + ' ' + (item.title || '')).slice(0, 10)
+  const keywords = textTokens((item.claim || '') + ' ' + (item.title || '')).slice(0, 20)
   return path + line + '|' + (keywords.length > 0 ? keywords.join('-') : compactText(item.title || item.id || 'finding'))
 }
 
@@ -1310,6 +1314,8 @@ function finalizeBoard(board, findings, positives, prContext) {
     }
   }
 
+  // These fields intentionally extend the synthesizer schema; the skill
+  // presents them as part of the final review board contract.
   finalBoard.pr = prContext.pr
   finalBoard.summary = prContext.summary
   finalBoard.reviewMeta = {
@@ -1396,7 +1402,10 @@ let allFindings = []
 const allPositive = []
 selected.forEach((name, index) => {
   const result = results[index]
-  if (!result) return
+  if (!result) {
+    log('Warning: ' + name + ' produced no findings (agent may have failed)')
+    return
+  }
   if (Array.isArray(result.findings)) {
     allFindings.push(...result.findings.map(finding => Object.assign({}, finding, {
       lens: REVIEWERS[name].lens || name,
@@ -1420,7 +1429,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, possible_plus_one, partial_overlap, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, possible_plus_one, partial_overlap, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',
