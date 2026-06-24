@@ -684,8 +684,8 @@ const FILE_PAGE_SIZE = 10
 const FILE_RETRY_PAGE_SIZES = [5, 1]
 // Workflow agent() calls cannot pass per-call tool allowlists, so phase-specific
 // plugin agent types define the tool boundary for spawned agents.
-const GITHUB_COLLECTOR_AGENT_TYPE = 'pr-review-github-collector'
-const ANALYSIS_AGENT_TYPE = 'pr-review-analysis-readonly'
+const GITHUB_COLLECTOR_AGENT_TYPE = 'pr-review-toolkit:pr-review-github-collector'
+const ANALYSIS_AGENT_TYPE = 'pr-review-toolkit:pr-review-analysis-readonly'
 
 // Workflow scripts cannot import sibling prompt files, so reviewer prompt
 // content stays embedded while orchestration reads through this registry.
