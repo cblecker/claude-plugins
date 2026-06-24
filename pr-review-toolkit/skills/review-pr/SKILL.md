@@ -1,291 +1,209 @@
 ---
 name: review-pr
 description: >-
-  Conduct a comprehensive PR review with scored findings and post
-  as line-level review comments
+  Conduct a comprehensive PR review and return an interactive review board
 disable-model-invocation: true
 arguments: [pr-url]
 argument-hint: <github-pr-url>
 allowed-tools:
   - Workflow
-  - Bash(git rev-parse *)
-  - Bash(git fetch *)
-  - Bash(git diff --name-status *)
+  - AskUserQuestion
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
-  - AskUserQuestion
 ---
 
 # PR Review: $pr-url
 
 ## Constraints
 
-Do not generate ad-hoc scripts to process data. Use only the tools listed
-in allowed-tools. Workflow return values and MCP results are structured
-JSON — read them directly, do not shell out to parse or format them.
+Use only the tools listed in `allowed-tools`. Do not generate ad-hoc scripts to
+process GitHub data. Workflow return values and MCP responses are structured
+JSON; read them directly.
 
-## Phase 1: Collect PR metadata
+The bundled workflow and workflow-spawned agents are analysis-only. They must
+use GitHub read tools only and must not draft pending reviews, add comments,
+submit reviews, resolve threads, or call GitHub write tools.
 
-Parse `$pr-url` to extract owner, repo, and PR number from the GitHub URL
-pattern `https://github.com/{owner}/{repo}/pull/{number}`.
+The skill conversation may draft comment text after the user selects findings.
+GitHub write tools may be used only after an exact preview and explicit final
+posting approval from the user.
 
-### Step 1 — Get PR details and determine locality
+## Launch Analysis Workflow
 
-1. Call `pull_request_read` with method `get` to get PR details. Extract:
-   - `head.sha` (headSha)
-   - `base.ref` (baseRef)
-2. Run `git rev-parse HEAD` to get the local HEAD SHA. If it matches
-   `head.sha`, set `isLocal` to true; otherwise false.
-3. Run `git fetch origin <baseRef>` to ensure the merge-base is available
-   locally for agents.
+Parse `$pr-url` to extract owner, repo, and PR number from:
 
-Note: `base.sha` from the API is the current tip of the base branch (it
-updates as the base branch advances), not the merge-base. We pass
-`baseRef` (the branch name) instead, and use three-dot syntax
-(`origin/<baseRef>...HEAD`) which computes the merge-base implicitly —
-matching what GitHub uses for the PR diff.
-
-### Step 2 — Select review agents
-
-1. Get the list of changed files with statuses:
-   - If `isLocal` is true: run `git diff --name-status origin/<baseRef>...HEAD`
-     (cheap — filenames only, no patches).
-   - If `isLocal` is false: call `pull_request_read` with method `get_files`
-     for the PR. Use only the filename and status from each entry.
-2. `code-reviewer` always runs. For each optional agent, decide whether to
-   include it based on the changed file list and the agent's role:
-
-   | Agent | Role | Include when |
-   |-------|------|-------------|
-   | `silent-failure-hunter` | Audits error handling for silent failures, broad catches, swallowed errors | Changes touch code with error handling, try/catch, fallback logic, or result types |
-   | `pr-test-analyzer` | Evaluates test coverage gaps for new/changed functionality | Changes include functional code that should have corresponding tests |
-   | `comment-analyzer` | Verifies comment accuracy and flags misleading/stale documentation | Changes add or modify comments, docstrings, or documentation files |
-   | `type-design-analyzer` | Reviews type invariants, encapsulation, and design in typed languages | Changes introduce or modify type definitions in typed languages (Go, TypeScript, Rust, Java, etc.) |
-
-3. Use judgment — a PR that only renames a config key doesn't need a type
-   design review even if it touches a `.go` file. A PR adding a new API
-   endpoint with no tests warrants `pr-test-analyzer` even if no test files
-   changed.
-
-## Phase 2: Run review workflow
+```text
+https://github.com/{owner}/{repo}/pull/{number}
+```
 
 Invoke the Workflow tool with:
 
 - `scriptPath`: `${CLAUDE_SKILL_DIR}/review-pr.js`
 - `args`:
-  - `owner`, `repo`, `pullNumber`, `headSha`, `baseRef`, `isLocal`
-  - `agents`: array of selected agent names from Step 2
+  - `owner`
+  - `repo`
+  - `pullNumber`
 
-Wait for the workflow to complete. It returns a JSON object:
+The workflow owns PR collection, reviewer selection, specialist analysis, and
+review-board synthesis. Do not prefetch PR metadata, changed files, diffs, or
+review threads in the skill conversation.
+
+The workflow returns a review board with this shape:
 
 ```json
 {
-  "findings": [
-    {
-      "file": "path/to/file.go",
-      "line": 42,
-      "severity": "critical | important | suggestion",
-      "confidence": 85,
-      "title": "Short title",
-      "description": "Detailed explanation",
-      "verificationStatus": "verified | unverified",
-      "verificationRationale": "What was checked and confirmed",
-      "status": "new | duplicate | partial_overlap",
-      "matchedThreadId": "thread-id",
-      "existingCoverage": "What the existing thread covers",
-      "delta": "What our finding adds beyond the existing thread",
-      "adjustedSeverity": "critical | important | suggestion",
-      "adjustedConfidence": 90
-    }
-  ],
-  "positiveObservations": ["Free-text observation"],
-  "threadVerifications": [
-    {
-      "threadId": "thread-id",
-      "file": "path/to/file.go",
-      "line": 42,
-      "originalConcern": "What the reviewer originally raised",
-      "resolution": "fixed | pushed_back | unaddressed",
-      "assessment": "Evaluation of the resolution",
-      "isAdequate": true,
-      "newIssueIntroduced": false
-    }
-  ],
-  "reviewMeta": {
-    "hasOwnResolvedThreads": true,
-    "existingThreadCount": 8,
-    "duplicateCount": 2,
-    "partialOverlapCount": 1,
-    "newCount": 5
-  }
+  "recommendedToPost": [],
+  "possiblePlusOnes": [],
+  "partialOverlaps": [],
+  "discussionOnly": [],
+  "alreadyCovered": [],
+  "discarded": [],
+  "positiveObservations": [],
+  "actionPlan": {
+    "critical": [],
+    "important": [],
+    "suggestions": [],
+    "recommendedNextAction": "review recommended postable findings"
+  },
+  "coverageSummary": {
+    "scope": "Collected source, tests, docs, and existing review threads.",
+    "largePrNotes": []
+  },
+  "pr": {
+    "owner": "org",
+    "repo": "repo",
+    "number": 123
+  },
+  "summary": {},
+  "reviewMeta": {}
 }
 ```
 
-`line` may be absent for findings that apply to an entire file or PR.
-False positives are filtered before this output — remaining findings have
-`verificationStatus` of `verified` or `unverified` (verifier unavailable).
-`threadVerifications` is non-empty only when `hasOwnResolvedThreads` is
-true, meaning we left comments in a previous review that have since been
-resolved.
+## Present Review Board
 
-## Phase 3: Present findings
+Present the review board before drafting or posting anything. Keep it concise,
+but do not hide important groups.
 
-The workflow returns classified findings and thread verifications.
-Present them to the user in two steps: text output first, then a
-selection prompt.
+Use this order:
 
-### Score resolution
+1. Review heading: `owner/repo#number` and PR title when available.
+2. Coverage summary:
+   - `coverageSummary.scope`
+   - `coverageSummary.largePrNotes`, if present
+   - selected reviewers and file/thread counts from `reviewMeta`
+3. Action plan:
+   - critical
+   - important
+   - suggestions
+   - recommended next action
+4. Findings grouped by outcome:
+   - recommended to post
+   - possible plus-ones
+   - partial overlaps
+   - worth discussing, not posting
+   - already covered
+   - discarded or weak findings, summarized if long
+5. Positive observations.
 
-For each finding, use the effective severity and confidence:
+For each finding shown in detail, include:
 
-- If `adjustedSeverity` is present, use it; otherwise use `severity`
-- If `adjustedConfidence` is present, use it; otherwise use `confidence`
+- stable id
+- location
+- lens
+- title
+- confidence
+- claim
+- evidence
+- why it matters
+- suggested fix or next step
+- existing review overlap rationale when present
 
-### Step 1: Output findings as text
+## Ask What To Do Next
 
-Output findings as plain text before any selection prompt. This step
-is mandatory — do not skip or compress it into AskUserQuestion. Omit
-any section that has no items. `[:{line}]` means include `:{line}`
-only when line is present.
+After presenting the board, ask with `AskUserQuestion`:
 
-```
-## PR Review: owner/repo#123
-
-{for each severity in [critical, important, suggestion]}
-### {Severity} Issues
-
-{for each finding where status = "new" and effective severity = {severity}}
-
-N. `{file}[:{line}]` -- **{title}**
-   {description}
-   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
-
-{end for}
-
-### Partial Overlaps
-
-{for each finding where status = "partial_overlap"}
-
-4. `{file}[:{line}]` -- **{title}**
-   Extends existing review comment: {existingCoverage}.
-   New insight: {delta}.
-   {if verificationStatus = "verified"}_Verified: {verificationRationale}_{end if}
-
-{if any findings have status = "duplicate"}
-_N findings omitted as duplicates of existing review threads._
-{end if}
-
-### Strengths
-
-{for each positiveObservation}
-
-- {observation}
-
-### Previous Review Status
-
-{for each threadVerification, only if threadVerifications is non-empty}
-
-{if fixed + adequate}Resolved{else if fixed + inadequate}Fix incomplete{else if fixed + newIssue}Fix introduced new issue: {newIssueDescription}{else if pushed_back + adequate}Author disagrees -- reasoning valid{else if pushed_back + inadequate}Author disagrees -- {assessment}{else if unaddressed}Still unresolved{end if} `{file}:{line}` -- {originalConcern}
-   {assessment}
+```text
+What should we do next? You can reply with commands like "draft recommended",
+"draft F1 F3", "plus-one F2", "explain F4", "challenge F5", "show covered",
+"skip F6", "post selected", or "cancel".
 ```
 
-### Step 2: Recommendation
+Use a free-text response, not option buttons. Interpret natural language
+flexibly, but preserve the review board ids as the stable selection handles.
 
-After presenting the findings, analyze each one and recommend which to
-include in the posted review. For each numbered finding, output a
-one-line recommendation:
+Support these actions:
 
-```
-## Recommendations
+- `draft recommended`: draft all `recommendedToPost` findings.
+- `draft F1 F3`: draft selected findings.
+- `plus-one F2`: draft a concise endorsement for an overlap finding.
+- `skip F4`: mark a finding as intentionally omitted in the conversation.
+- `explain F5`: explain the evidence, uncertainty, and tradeoffs.
+- `challenge F6`: reassess the finding using the board evidence and state any
+  uncertainty plainly.
+- `show covered`: show `alreadyCovered` and relevant overlap rationale.
+- `cancel`: stop without drafting or posting.
+- `post selected`: only continue if there is already an approved preview;
+  otherwise draft and preview first.
 
-1. **Include** -- nil pointer panic is a real crash risk in the error path
-2. **Skip** -- sync.Pool is a performance optimization, not a correctness
-   issue; low value as a review comment on this PR
-```
+## Draft Selected Comments
 
-Consider these factors when making recommendations:
+Draft comments only in the conversation. Do not call GitHub write tools during
+drafting.
 
-- **Severity and verification status** — verified critical/important
-  findings are strong includes; overstated suggestions are candidates
-  to skip
-- **Signal-to-noise ratio** — a review with 3 strong findings is more
-  useful than one with 10 of mixed quality; fewer, higher-impact
-  comments make a better review
-- **PR context** — a suggestion that's valid but tangential to the PR's
-  purpose is noise; a finding central to what the PR is doing is signal
-- **Actionability** — include findings the author can act on; skip
-  findings that are observations without a clear next step
+Drafts should:
 
-### Step 3: Selection prompt
+- sound like the user wrote them
+- be concise and actionable
+- avoid boilerplate, severity labels, and AI markers
+- include enough context for the PR author to act
+- avoid duplicating comments already covered elsewhere
+- distinguish blocking concerns from optional suggestions
 
-Number findings sequentially across all actionable sections (new and
-partial overlaps) so each has a unique number. After the recommendations,
-ask via AskUserQuestion:
+For possible plus-ones and partial overlaps, make the overlap explicit. Draft a
+plus-one only when the finding's `existingReviewOverlap` indicates that an
+endorsement or additional detail is useful.
 
-> "Which findings should I include in the review? Enter numbers
-> (e.g. 1,3,5), 'all', 'none', or 'recommended' to accept my
-> recommendations above."
+Prefer line comments for findings with a concrete changed-file location. Put
+findings without a valid line location in the review body.
 
-Free-text response, not option buttons.
+Choose the proposed review event from the selected findings:
 
-## Phase 4: Draft and preview comments
+- `REQUEST_CHANGES` only when at least one selected finding is a serious
+  correctness or blocking concern.
+- `COMMENT` for non-blocking feedback, suggestions, plus-ones, or discussion.
 
-After the user selects findings, draft and preview the exact GitHub
-comments before posting.
+## Preview And Confirm
 
-### Step 1: Draft each comment
+Before posting, show an exact preview:
 
-For each approved finding, generate the exact text that will be posted
-as a GitHub review comment. Comments should be:
+- each line comment with finding id, path, line, and body
+- review body text for non-line findings
+- proposed review event: `COMMENT` or `REQUEST_CHANGES`
+- any selected findings intentionally omitted from posting
 
-- Written in first-person, natural voice (as if the user wrote them)
-- No boilerplate headers, severity tags, or "AI-generated" markers
+Ask for explicit final approval with `AskUserQuestion`. Accept approval only
+when the user clearly confirms posting the preview, such as "post this",
+"approved", or "submit". If the user requests edits or removals, update the
+preview and ask for approval again.
 
-### Step 2: Present draft comments for approval
+## Post Approved Review
 
-Output all drafted comments grouped by file:
+Use GitHub write tools only in this final approved step.
 
-```
-## Draft Review Comments
+If the approved preview has line comments:
 
-### path/to/file.go
+1. Create a pending review with
+   `mcp__plugin_github_github__pull_request_review_write`.
+2. Add approved line comments with
+   `mcp__plugin_github_github__add_comment_to_pending_review`.
+3. Submit the pending review with
+   `mcp__plugin_github_github__pull_request_review_write` using the approved
+   event and review body.
 
-**Line 42:**
-> Comment text exactly as it will be posted.
+If the approved preview has only review-body text, submit the review body with
+`mcp__plugin_github_github__pull_request_review_write` using the approved event.
 
-**Line 128:**
-> Comment text exactly as it will be posted.
-
----
-
-Review event: **REQUEST_CHANGES** / **COMMENT**
-(REQUEST_CHANGES if any critical findings selected, COMMENT otherwise)
-```
-
-Then ask via AskUserQuestion:
-
-> "Ready to post these comments? Reply 'post', 'edit N' to modify a
-> specific comment, or 'cancel'."
-
-Free-text response, not option buttons.
-
-### Step 3: Handle edits
-
-If the user replies "edit N", show the current text of comment N and
-let them provide a replacement. Re-present the updated comment set and
-repeat the approval prompt. Loop until the user replies 'post' or
-'cancel'.
-
-## Phase 5: Post review
-
-1. Create a pending review: `pull_request_review_write` with method `create`
-2. For each approved finding with a file and line number:
-   - Call `add_comment_to_pending_review` with the file, line, and the
-     drafted comment text from Phase 4
-   - Use `subjectType: "LINE"` and `side: "RIGHT"`
-3. Write the review body as a brief summary of the review. Include any approved
-   findings that lack a file or line number as inline items in the body.
-4. Submit: `pull_request_review_write` with method `submit_pending`
-   - Event: `REQUEST_CHANGES` if any critical findings were approved
-   - Event: `COMMENT` otherwise
+If a line comment cannot be added because the location is invalid for the PR
+diff, move that text into the review body, show the revised preview, and ask for
+approval again before posting.
