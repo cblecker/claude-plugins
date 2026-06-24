@@ -694,6 +694,8 @@ const LENS_NAMES = {
   'type-design-analyzer': 'type-design'
 }
 
+const BOARD_SECTIONS = ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded']
+
 function asNumber(value, fallback) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
@@ -773,6 +775,251 @@ function overlapFromFinding(finding) {
     status: status,
     threadId: threadIds[0] || '',
     rationale: postability.rationale || 'No existing review overlap was classified.'
+  }
+}
+
+function compactText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function textTokens(value) {
+  const stopWords = {
+    a: true,
+    an: true,
+    and: true,
+    are: true,
+    as: true,
+    be: true,
+    by: true,
+    for: true,
+    from: true,
+    in: true,
+    is: true,
+    it: true,
+    of: true,
+    on: true,
+    or: true,
+    that: true,
+    the: true,
+    this: true,
+    to: true,
+    with: true
+  }
+  return compactText(value).split(/\s+/).filter(token => token.length > 2 && !stopWords[token])
+}
+
+function tokenOverlap(left, right) {
+  const leftTokens = uniq(textTokens(left))
+  const rightTokens = uniq(textTokens(right))
+  if (leftTokens.length === 0 || rightTokens.length === 0) return 0
+
+  const rightSet = {}
+  rightTokens.forEach(token => {
+    rightSet[token] = true
+  })
+
+  let overlap = 0
+  leftTokens.forEach(token => {
+    if (rightSet[token]) overlap++
+  })
+  return overlap / Math.min(leftTokens.length, rightTokens.length)
+}
+
+function findingKey(item) {
+  const location = item.location || {}
+  const path = location.path || 'PR'
+  const line = location.line != null ? ':' + asNumber(location.line, 0) : ''
+  const keywords = textTokens((item.claim || '') + ' ' + (item.title || '')).slice(0, 10)
+  return path + line + '|' + (keywords.length > 0 ? keywords.join('-') : compactText(item.title || item.id || 'finding'))
+}
+
+function combinedItemText(item) {
+  return [
+    item.title,
+    item.claim,
+    item.evidence,
+    item.whyItMatters,
+    item.suggestedFix
+  ].filter(Boolean).join('\n')
+}
+
+function threadText(thread) {
+  const replies = (thread.replies || []).map(reply => reply && reply.body).filter(Boolean)
+  return [thread.body].concat(replies).filter(Boolean).join('\n')
+}
+
+function combineText(left, right) {
+  const parts = []
+  ;[left, right].forEach(value => {
+    const text = String(value || '').trim()
+    if (!text) return
+    if (parts.some(existing => existing === text || existing.indexOf(text) !== -1)) return
+    parts.push(text)
+  })
+  return parts.join('\n\n')
+}
+
+function bestSeverity(left, right) {
+  return (SEVERITY_ORDER[left] ?? 3) <= (SEVERITY_ORDER[right] ?? 3) ? left : right
+}
+
+function bestOverlap(left, right) {
+  const order = { none: 0, possible_plus_one: 1, partial_overlap: 2, already_covered: 3 }
+  const leftStatus = (left && left.status) || 'none'
+  const rightStatus = (right && right.status) || 'none'
+  const selected = (order[rightStatus] > order[leftStatus]) ? right : left
+  if (!selected) return { status: 'none', threadId: '', rationale: '' }
+
+  return {
+    status: selected.status || 'none',
+    threadId: selected.threadId || '',
+    rationale: combineText(left && left.rationale, right && right.rationale)
+  }
+}
+
+function mergeBoardItem(base, next) {
+  return {
+    id: base.id || next.id,
+    lens: uniq(String(base.lens || '').split(', ').concat(String(next.lens || '').split(', '))).join(', '),
+    title: base.title || next.title,
+    severity: bestSeverity(base.severity, next.severity),
+    confidence: Math.max(asNumber(base.confidence, 0), asNumber(next.confidence, 0)),
+    location: base.location || next.location || { path: 'PR' },
+    claim: base.claim || next.claim || base.title || next.title || 'Review finding',
+    evidence: combineText(base.evidence, next.evidence),
+    whyItMatters: combineText(base.whyItMatters, next.whyItMatters),
+    suggestedFix: combineText(base.suggestedFix, next.suggestedFix),
+    existingReviewOverlap: bestOverlap(base.existingReviewOverlap, next.existingReviewOverlap),
+    sourceAgent: uniq(String(base.sourceAgent || '').split(', ').concat(String(next.sourceAgent || '').split(', '))).join(', ')
+  }
+}
+
+function inferThreadOverlap(item, threads) {
+  const existing = item.existingReviewOverlap || {}
+  if (existing.status && existing.status !== 'none') return existing
+
+  const location = item.location || {}
+  const itemText = combinedItemText(item)
+  let best = null
+  ;(threads || []).forEach(thread => {
+    if (!thread || !thread.path || thread.path !== location.path) return
+    const sameLine = location.line != null && thread.line != null && asNumber(location.line, -1) === asNumber(thread.line, -2)
+    const nearLine = location.line != null && thread.line != null && Math.abs(asNumber(location.line, 0) - asNumber(thread.line, 999999)) <= 8
+    const overlap = tokenOverlap(itemText, threadText(thread))
+    const score = overlap + (sameLine ? 1 : nearLine ? 0.5 : 0)
+    if (!best || score > best.score) {
+      best = { thread: thread, overlap: overlap, sameLine: sameLine, nearLine: nearLine, score: score }
+    }
+  })
+
+  if (!best || best.score < 0.35) {
+    return {
+      status: 'none',
+      threadId: existing.threadId || '',
+      rationale: existing.rationale || 'No existing review overlap was classified.'
+    }
+  }
+
+  const status = best.thread.isResolved && best.overlap >= 0.25
+    ? 'already_covered'
+    : best.sameLine && best.overlap >= 0.2
+      ? 'possible_plus_one'
+      : 'partial_overlap'
+
+  return {
+    status: status,
+    threadId: best.thread.id || '',
+    rationale: 'Inferred overlap with an existing review thread on ' + location.path + (best.thread.line != null ? ':' + best.thread.line : '') + '.'
+  }
+}
+
+function routeSection(item, preferredSection, recommendation) {
+  const overlap = item.existingReviewOverlap || {}
+  if (preferredSection === 'discarded' || recommendation === 'discard') return 'discarded'
+  if (overlap.status === 'already_covered' || recommendation === 'already_covered') return 'alreadyCovered'
+  if (overlap.status === 'partial_overlap' || recommendation === 'partial_overlap') return 'partialOverlaps'
+  if (overlap.status === 'possible_plus_one' || recommendation === 'possible_plus_one') return 'possiblePlusOnes'
+  if (recommendation === 'discussion_only') return 'discussionOnly'
+  if (recommendation === 'recommended_to_post') return 'recommendedToPost'
+  if (BOARD_SECTIONS.indexOf(preferredSection) !== -1) return preferredSection
+  if (asNumber(item.confidence, 0) < 50) return 'discarded'
+  if ((item.severity === 'critical' || item.severity === 'important') && asNumber(item.confidence, 0) >= 80) return 'recommendedToPost'
+  return 'discussionOnly'
+}
+
+function bestRecommendation(left, right) {
+  const order = {
+    discard: 0,
+    already_covered: 1,
+    discussion_only: 2,
+    partial_overlap: 3,
+    possible_plus_one: 4,
+    recommended_to_post: 5
+  }
+  const leftScore = Object.prototype.hasOwnProperty.call(order, left) ? order[left] : -1
+  const rightScore = Object.prototype.hasOwnProperty.call(order, right) ? order[right] : -1
+  return rightScore > leftScore ? right : left
+}
+
+function mergeBoardEntries(entries) {
+  const byKey = {}
+  const order = []
+  ;(entries || []).forEach(entry => {
+    if (!entry || !entry.item) return
+    const key = findingKey(entry.item)
+    if (!byKey[key]) {
+      byKey[key] = entry
+      order.push(key)
+      return
+    }
+    byKey[key] = {
+      item: mergeBoardItem(byKey[key].item, entry.item),
+      section: byKey[key].section || entry.section,
+      recommendation: bestRecommendation(byKey[key].recommendation, entry.recommendation)
+    }
+  })
+  return order.map(key => byKey[key])
+}
+
+function normalizeBoardSections(board, prContext) {
+  const entries = []
+  BOARD_SECTIONS.forEach(section => {
+    ;(board[section] || []).forEach(item => {
+      if (!item) return
+      item.existingReviewOverlap = inferThreadOverlap(item, prContext.threads)
+      entries.push({ item: item, section: section })
+    })
+  })
+
+  const normalized = {}
+  BOARD_SECTIONS.forEach(section => {
+    normalized[section] = []
+  })
+
+  mergeBoardEntries(entries).forEach(entry => {
+    const section = routeSection(entry.item, entry.section, entry.recommendation)
+    normalized[section].push(entry.item)
+  })
+
+  BOARD_SECTIONS.forEach(section => {
+    sortFindings(normalized[section])
+    board[section] = normalized[section]
+  })
+}
+
+function actionPlanForBoard(board) {
+  const actionable = board.recommendedToPost.concat(board.possiblePlusOnes, board.partialOverlaps)
+  return {
+    critical: actionable.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
+    important: actionable.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
+    suggestions: actionable.filter(item => item.severity === 'suggestion').concat(board.discussionOnly).map(item => item.id + ': ' + item.title),
+    recommendedNextAction: board.recommendedToPost.length > 0
+      ? 'review recommended postable findings'
+      : (board.possiblePlusOnes.length + board.partialOverlaps.length) > 0
+        ? 'review overlap findings before posting'
+        : board.discussionOnly.length > 0
+          ? 'review discussion-only findings'
+          : 'no postable findings identified'
   }
 }
 
@@ -957,56 +1204,41 @@ function boardItemFromFinding(finding, index) {
 }
 
 function fallbackBoard(findings, positives, prContext) {
-  const recommendedToPost = []
-  const possiblePlusOnes = []
-  const partialOverlaps = []
-  const discussionOnly = []
-  const alreadyCovered = []
-  const discarded = []
-
-  findings.forEach((finding, index) => {
-    const item = boardItemFromFinding(finding, index)
-    const recommendation = postabilityRecommendation(finding)
-    if (recommendation === 'recommended_to_post') {
-      recommendedToPost.push(item)
-    } else if (recommendation === 'possible_plus_one') {
-      possiblePlusOnes.push(item)
-    } else if (recommendation === 'partial_overlap') {
-      partialOverlaps.push(item)
-    } else if (recommendation === 'discussion_only') {
-      discussionOnly.push(item)
-    } else if (recommendation === 'already_covered') {
-      alreadyCovered.push(item)
-    } else if (recommendation === 'discard') {
-      discarded.push(item)
-    } else if ((item.severity === 'critical' || item.severity === 'important') && item.confidence >= 80) {
-      recommendedToPost.push(item)
-    } else if (item.confidence >= 50) {
-      discussionOnly.push(item)
-    } else {
-      discarded.push(item)
-    }
-  })
-
-  return {
-    recommendedToPost: recommendedToPost,
-    possiblePlusOnes: possiblePlusOnes,
-    partialOverlaps: partialOverlaps,
-    discussionOnly: discussionOnly,
-    alreadyCovered: alreadyCovered,
-    discarded: discarded,
+  const board = {
+    recommendedToPost: [],
+    possiblePlusOnes: [],
+    partialOverlaps: [],
+    discussionOnly: [],
+    alreadyCovered: [],
+    discarded: [],
     positiveObservations: positives,
     actionPlan: {
-      critical: recommendedToPost.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
-      important: recommendedToPost.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
-      suggestions: discussionOnly.map(item => item.id + ': ' + item.title),
-      recommendedNextAction: recommendedToPost.length > 0 ? 'review recommended postable findings' : 'review discussion-only findings'
+      critical: [],
+      important: [],
+      suggestions: [],
+      recommendedNextAction: 'review board'
     },
     coverageSummary: {
       scope: coverageScope(prContext),
       largePrNotes: largePrNotes(prContext)
     }
   }
+
+  const entries = findings.map((finding, index) => {
+    const item = boardItemFromFinding(finding, index)
+    item.existingReviewOverlap = inferThreadOverlap(item, prContext.threads)
+    return {
+      item: item,
+      recommendation: postabilityRecommendation(finding)
+    }
+  })
+
+  mergeBoardEntries(entries).forEach(entry => {
+    board[routeSection(entry.item, '', entry.recommendation)].push(entry.item)
+  })
+  BOARD_SECTIONS.forEach(section => sortFindings(board[section]))
+  board.actionPlan = actionPlanForBoard(board)
+  return board
 }
 
 function coverageScope(prContext) {
@@ -1029,28 +1261,34 @@ function largePrNotes(prContext) {
 
 function finalizeBoard(board, findings, positives, prContext) {
   const finalBoard = board || fallbackBoard(findings, positives, prContext)
-  const sections = ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded']
-  let nextId = 1
-  sections.forEach(section => {
+  BOARD_SECTIONS.forEach(section => {
     if (!Array.isArray(finalBoard[section])) finalBoard[section] = []
+  })
+  normalizeBoardSections(finalBoard, prContext)
+
+  let nextId = 1
+  BOARD_SECTIONS.forEach(section => {
     finalBoard[section].forEach(item => {
-      if (!item.id) item.id = 'F' + nextId
+      item.id = 'F' + nextId
+      if (!item.lens) item.lens = 'review'
+      if (!item.title) item.title = 'Review finding'
+      if (!item.severity) item.severity = 'suggestion'
+      item.confidence = asNumber(item.confidence, 0)
       if (!item.location) item.location = { path: 'PR' }
+      if (!item.claim) item.claim = item.title
+      if (!item.evidence) item.evidence = ''
+      if (!item.whyItMatters) item.whyItMatters = ''
+      if (!item.suggestedFix) item.suggestedFix = ''
       if (!item.existingReviewOverlap) {
         item.existingReviewOverlap = { status: 'none', threadId: '', rationale: '' }
       }
+      if (!item.existingReviewOverlap.rationale) item.existingReviewOverlap.rationale = ''
+      if (!item.sourceAgent) item.sourceAgent = ''
       nextId++
     })
   })
   if (!Array.isArray(finalBoard.positiveObservations)) finalBoard.positiveObservations = positives
-  if (!finalBoard.actionPlan) {
-    finalBoard.actionPlan = {
-      critical: [],
-      important: [],
-      suggestions: [],
-      recommendedNextAction: 'review board'
-    }
-  }
+  finalBoard.actionPlan = actionPlanForBoard(finalBoard)
   if (!finalBoard.coverageSummary) {
     finalBoard.coverageSummary = {
       scope: coverageScope(prContext),
@@ -1167,7 +1405,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nUse each specialist's postability recommendation as an input, not a command. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. Classify against existing review threads by logical concern, not just file proximity. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, possible_plus_one, partial_overlap, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',
