@@ -1274,6 +1274,10 @@ async function collectCompleteFileManifest(pr) {
   log('Fetching changed files across ' + pagination.pageCount + ' page(s) with perPage ' + FILE_PAGE_SIZE)
   const primaryResults = await collectFilePages(pr, pagination.pages, FILE_PAGE_SIZE, 'high', '')
   const primaryIssues = filePageResultIssues(primaryResults, pr.changedFiles, pagination.pageCount, FILE_PAGE_SIZE)
+  const primaryIssuePages = {}
+  primaryIssues.forEach(issue => {
+    primaryIssuePages[issue.page] = true
+  })
   let recoveryResults = []
 
   if (primaryIssues.length) {
@@ -1285,7 +1289,7 @@ async function collectCompleteFileManifest(pr) {
       const attemptResults = await collectFilePages(pr, remainingPages, 1, 'high', '-recover-' + attempt)
       recoveryResults = recoveryResults.concat(attemptResults)
       remainingPages = missingSingleFilePages(attemptResults, remainingPages)
-      if (remainingPages.length) {
+      if (remainingPages.length && attempt < FILE_SINGLE_PAGE_RETRIES) {
         log('Single-file recovery attempt ' + attempt + ' still missing ' + remainingPages.length + ' file slot(s); retrying.')
       }
     }
@@ -1295,7 +1299,9 @@ async function collectCompleteFileManifest(pr) {
     }
   }
 
-  const pageResults = primaryResults.concat(recoveryResults)
+  const pageResults = primaryResults
+    .filter(result => !primaryIssuePages[asNumber(result && result.page, 0)])
+    .concat(recoveryResults)
   const files = mergeFilePages(pageResults, FILE_PAGE_SIZE)
   if (pr.changedFiles && files.length !== pr.changedFiles) {
     throw new Error(fileManifestErrorMessage(pr.changedFiles, files.length, pageResults))
@@ -1305,9 +1311,7 @@ async function collectCompleteFileManifest(pr) {
     files: files,
     pageResults: pageResults,
     pageCount: pagination.pageCount,
-    perPage: FILE_PAGE_SIZE,
-    complete: true,
-    pageIssues: []
+    perPage: FILE_PAGE_SIZE
   }
 }
 
