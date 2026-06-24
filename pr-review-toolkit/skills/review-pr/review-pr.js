@@ -301,7 +301,7 @@ function sortFindings(arr) {
 // (https://github.com/anthropics/claude-plugins-official), Apache-2.0 licensed.
 // YAML frontmatter stripped; prompts embedded as string literals for Workflow use.
 
-const PROMPTS = {
+const REVIEWER_PROMPTS = {
   'code-reviewer': `You are an expert code reviewer specializing in modern software development across multiple languages and frameworks. Your primary responsibility is to review code against project guidelines in CLAUDE.md with high precision to minimize false positives.
 
 ## Review Scope
@@ -678,20 +678,34 @@ const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For 
 
 const PAGE_SIZE = 100
 
-const AGENT_OPTS = {
-  'code-reviewer':         { model: 'opus', effort: 'max' },
-  'silent-failure-hunter': { effort: 'high' },
-  'pr-test-analyzer':      { effort: 'high' },
-  'comment-analyzer':      { effort: 'high' },
-  'type-design-analyzer':  { effort: 'high' }
-}
-
-const LENS_NAMES = {
-  'code-reviewer': 'code',
-  'silent-failure-hunter': 'error-handling',
-  'pr-test-analyzer': 'tests',
-  'comment-analyzer': 'comments',
-  'type-design-analyzer': 'type-design'
+// Workflow scripts cannot import sibling prompt files, so reviewer prompt
+// content stays embedded while orchestration reads through this registry.
+const REVIEWERS = {
+  'code-reviewer': {
+    lens: 'code',
+    prompt: REVIEWER_PROMPTS['code-reviewer'],
+    options: { model: 'opus', effort: 'max' }
+  },
+  'silent-failure-hunter': {
+    lens: 'error-handling',
+    prompt: REVIEWER_PROMPTS['silent-failure-hunter'],
+    options: { effort: 'high' }
+  },
+  'pr-test-analyzer': {
+    lens: 'tests',
+    prompt: REVIEWER_PROMPTS['pr-test-analyzer'],
+    options: { effort: 'high' }
+  },
+  'comment-analyzer': {
+    lens: 'comments',
+    prompt: REVIEWER_PROMPTS['comment-analyzer'],
+    options: { effort: 'high' }
+  },
+  'type-design-analyzer': {
+    lens: 'type-design',
+    prompt: REVIEWER_PROMPTS['type-design-analyzer'],
+    options: { effort: 'high' }
+  }
 }
 
 const BOARD_SECTIONS = ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded']
@@ -1156,7 +1170,7 @@ function buildSummary(pr, files, threads) {
 
 function selectReviewers(files, summary) {
   if (Array.isArray(config.agents) && config.agents.length > 0) {
-    const explicit = config.agents.filter(name => typeof PROMPTS[name] === 'string')
+    const explicit = config.agents.filter(name => REVIEWERS[name])
     if (explicit.indexOf('code-reviewer') === -1) explicit.unshift('code-reviewer')
     return explicit
   }
@@ -1170,7 +1184,7 @@ function selectReviewers(files, summary) {
   if ((categories.docs || 0) > 0 || signals.comments) selected.push('comment-analyzer')
   if (signals.types) selected.push('type-design-analyzer')
 
-  return uniq(selected).filter(name => typeof PROMPTS[name] === 'string')
+  return uniq(selected).filter(name => REVIEWERS[name])
 }
 
 function contextForPrompt(prContext) {
@@ -1183,7 +1197,7 @@ function contextForPrompt(prContext) {
 }
 
 function analysisPrompt(name, prContext) {
-  return PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
+  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
 }
 
 function boardItemFromFinding(finding, index) {
@@ -1369,7 +1383,8 @@ prContext.selectedReviewers = selected
 log('Running ' + selected.length + ' review agent(s): ' + selected.join(', '))
 
 const results = await parallel(selected.map(name => () => {
-  const overrides = AGENT_OPTS[name] || {}
+  const reviewer = REVIEWERS[name]
+  const overrides = reviewer.options || {}
   const opts = Object.assign(
     { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'high' },
     overrides
@@ -1384,7 +1399,7 @@ selected.forEach((name, index) => {
   if (!result) return
   if (Array.isArray(result.findings)) {
     allFindings.push(...result.findings.map(finding => Object.assign({}, finding, {
-      lens: LENS_NAMES[name] || name,
+      lens: REVIEWERS[name].lens || name,
       sourceAgent: name
     })))
   }
