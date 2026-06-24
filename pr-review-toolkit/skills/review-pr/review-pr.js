@@ -681,6 +681,11 @@ Map each finding to severity (critical/important/suggestion) and confidence (0-1
 const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, possible_plus_one, partial_overlap, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
 const FILE_PAGE_SIZE = 10
+const FILE_RETRY_PAGE_SIZES = [5, 1]
+// Workflow agent() calls cannot pass per-call tool allowlists, so phase-specific
+// plugin agent types define the tool boundary for spawned agents.
+const GITHUB_COLLECTOR_AGENT_TYPE = 'pr-review-github-collector'
+const ANALYSIS_AGENT_TYPE = 'pr-review-analysis-readonly'
 
 // Workflow scripts cannot import sibling prompt files, so reviewer prompt
 // content stays embedded while orchestration reads through this registry.
@@ -1112,7 +1117,8 @@ function normalizePr(prResult) {
   }
 }
 
-function mergeFilePages(pageResults) {
+function mergeFilePages(pageResults, perPage) {
+  const resultPerPage = perPage || FILE_PAGE_SIZE
   const byPath = {}
   ;(pageResults || []).filter(Boolean).forEach((pageResult, pageIndex) => {
     const page = asNumber(pageResult.page, pageIndex + 1)
@@ -1128,7 +1134,7 @@ function mergeFilePages(pageResults) {
         signals: signalsForFile(Object.assign({}, file, { category: category })),
         patchAvailable: Boolean(file.patchAvailable),
         page: page,
-        perPage: FILE_PAGE_SIZE,
+        perPage: resultPerPage,
         threadCount: 0
       }
     })
@@ -1136,22 +1142,135 @@ function mergeFilePages(pageResults) {
   return Object.keys(byPath).sort().map(path => byPath[path])
 }
 
+function duplicateFilePageSummary(pageResults) {
+  const pathPages = {}
+  ;(pageResults || []).filter(Boolean).forEach((pageResult, pageIndex) => {
+    const page = asNumber(pageResult.page, pageIndex + 1)
+    ;(pageResult.files || []).forEach(file => {
+      if (!file || !file.path) return
+      if (!pathPages[file.path]) pathPages[file.path] = []
+      if (pathPages[file.path].indexOf(page) === -1) pathPages[file.path].push(page)
+    })
+  })
+
+  const duplicatePaths = Object.keys(pathPages).filter(path => pathPages[path].length > 1)
+  const duplicatePages = uniq(duplicatePaths.flatMap(path => pathPages[path])).sort((a, b) => a - b)
+  return {
+    duplicatePathCount: duplicatePaths.length,
+    duplicatePages: duplicatePages,
+    examples: duplicatePaths.slice(0, 5).map(path => path + ' on pages ' + pathPages[path].join(', '))
+  }
+}
+
+function fileManifestErrorMessage(expectedTotal, actualTotal, pageResults) {
+  const duplicateSummary = duplicateFilePageSummary(pageResults)
+  let message = 'Changed-file manifest incomplete: expected ' + expectedTotal + ', got ' + actualTotal
+  if (duplicateSummary.duplicatePathCount) {
+    message += '. Duplicate paths appeared across file pages: ' + duplicateSummary.duplicatePathCount
+    message += '; affected pages: ' + duplicateSummary.duplicatePages.join(', ')
+    message += '; examples: ' + duplicateSummary.examples.join('; ')
+  }
+  return message
+}
+
 function expectedFilesForPage(total, page, perPage) {
   const remaining = total - ((page - 1) * perPage)
   return Math.max(0, Math.min(perPage, remaining))
 }
 
-function validateFilePageResults(pageResults, expectedTotal, pageCount) {
+function validateFilePageResults(pageResults, expectedTotal, pageCount, perPage) {
   if (!expectedTotal) return
 
   for (let page = 1; page <= pageCount; page++) {
-    const expected = expectedFilesForPage(expectedTotal, page, FILE_PAGE_SIZE)
+    const expected = expectedFilesForPage(expectedTotal, page, perPage || FILE_PAGE_SIZE)
     const result = (pageResults || []).find(item => asNumber(item && item.page, 0) === page)
     const actual = result && Array.isArray(result.files) ? result.files.length : 0
     if (actual !== expected) {
       throw new Error('Changed-file collection incomplete on page ' + page + ': expected ' + expected + ', got ' + actual + '. The structured output may have been truncated.')
     }
   }
+}
+
+function collectFilePage(pr, page, perPage, effort, labelSuffix) {
+  const prompt = `Collect one changed-file page.
+
+Call exactly once: pull_request_read(method=get_files, owner=${pr.owner}, repo=${pr.repo}, pullNumber=${pr.number}, page=${page}, perPage=${perPage}).
+
+Return structured output only:
+- page: exactly ${page}
+- files: exactly the visible files from that API response
+- map filename to path
+- include status, additions, deletions
+- category and signals must come from path/status metadata only
+- patchAvailable is true only when the visible API entry has a non-empty patch
+- omit patch text
+
+If the tool result is too large, truncated, unavailable, or saved to a local file, do not inspect the saved file. Return page ${page} with an empty files array so the workflow can retry with a smaller page size.
+
+Do not fetch other pages, reuse another page's data, infer missing files, or renumber pages.`
+  return agent(prompt, {
+    label: 'collect-files-page-' + page + (labelSuffix || ''),
+    schema: FILE_PAGE_SCHEMA,
+    phase: 'Collect',
+    agentType: GITHUB_COLLECTOR_AGENT_TYPE,
+    model: 'haiku',
+    effort: effort || 'high'
+  })
+}
+
+async function collectFilePages(pr, filePages, perPage, effort, labelSuffix) {
+  return parallel(filePages.map(page => () => collectFilePage(pr, page, perPage, effort, labelSuffix)))
+}
+
+function filePagesFor(total, perPage) {
+  const pageCount = Math.max(1, Math.ceil((total || 1) / perPage))
+  const pages = []
+  for (let page = 1; page <= pageCount; page++) pages.push(page)
+  return { pageCount: pageCount, pages: pages }
+}
+
+async function collectFileManifestAttempt(pr, perPage, effort, labelSuffix) {
+  const pagination = filePagesFor(pr.changedFiles, perPage)
+  log('Fetching changed files across ' + pagination.pageCount + ' page(s) with perPage ' + perPage)
+  const pageResults = await collectFilePages(pr, pagination.pages, perPage, effort, labelSuffix)
+  validateFilePageResults(pageResults, pr.changedFiles, pagination.pageCount, perPage)
+
+  const files = mergeFilePages(pageResults, perPage)
+  if (pr.changedFiles && files.length !== pr.changedFiles) {
+    throw new Error(fileManifestErrorMessage(pr.changedFiles, files.length, pageResults))
+  }
+
+  return {
+    files: files,
+    pageResults: pageResults,
+    pageCount: pagination.pageCount,
+    perPage: perPage
+  }
+}
+
+async function collectCompleteFileManifest(pr) {
+  const attempts = [{ perPage: FILE_PAGE_SIZE, effort: 'high', labelSuffix: '' }]
+    .concat(FILE_RETRY_PAGE_SIZES.map(perPage => ({
+      perPage: perPage,
+      effort: 'high',
+      labelSuffix: '-retry-' + perPage
+    })))
+  let lastError = null
+
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i]
+    try {
+      return await collectFileManifestAttempt(pr, attempt.perPage, attempt.effort, attempt.labelSuffix)
+    } catch (err) {
+      lastError = err
+      if (i < attempts.length - 1) {
+        const next = attempts[i + 1]
+        log('Changed-file collection attempt failed: ' + err.message + '. Retrying with perPage ' + next.perPage + ' and effort ' + next.effort + '.')
+      }
+    }
+  }
+
+  throw lastError
 }
 
 function buildSummary(pr, files, threads) {
@@ -1231,7 +1350,7 @@ function contextForPrompt(prContext) {
 }
 
 function analysisPrompt(name, prContext) {
-  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
+  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. If the matching file is not present on its recorded page, check at most three nearby pages with the same perPage before proceeding without the raw patch.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
 }
 
 function boardItemFromFinding(finding, index) {
@@ -1368,32 +1487,15 @@ const prResult = await agent(metadataPrompt, {
   label: 'collect-pr-metadata',
   schema: PR_METADATA_SCHEMA,
   phase: 'Collect',
+  agentType: GITHUB_COLLECTOR_AGENT_TYPE,
   model: 'haiku',
   effort: 'low'
 })
 
 const pr = normalizePr(prResult)
-const filePageCount = Math.max(1, Math.ceil((pr.changedFiles || 1) / FILE_PAGE_SIZE))
-const filePages = []
-for (let page = 1; page <= filePageCount; page++) filePages.push(page)
-
-log('Fetching changed files across ' + filePageCount + ' page(s)')
-const filePageResults = await parallel(filePages.map(page => () => {
-  const prompt = `Use GitHub read tools only. Call pull_request_read with method get_files for ${pr.owner}/${pr.repo} PR #${pr.number}, page ${page}, perPage ${FILE_PAGE_SIZE}. Return exactly the files from this page. Do not fetch other pages. Do not include raw patches in the response. Map GitHub's filename field to path. Set patchAvailable to true when the API entry has a non-empty patch. Categorize each file and add compact signals from the path/status/patch metadata only. Do not call any GitHub write tools.`
-  return agent(prompt, {
-    label: 'collect-files-page-' + page,
-    schema: FILE_PAGE_SCHEMA,
-    phase: 'Collect',
-    model: 'haiku',
-    effort: 'low'
-  })
-}))
-
-validateFilePageResults(filePageResults, pr.changedFiles, filePageCount)
-let files = mergeFilePages(filePageResults)
-if (pr.changedFiles && files.length !== pr.changedFiles) {
-  throw new Error('Changed-file manifest incomplete: expected ' + pr.changedFiles + ', got ' + files.length)
-}
+const fileManifest = await collectCompleteFileManifest(pr)
+let files = fileManifest.files
+const filePageCount = fileManifest.pageCount
 if (pr.changedFiles === 0) pr.changedFiles = files.length
 
 log('Fetching review threads')
@@ -1403,8 +1505,9 @@ const threadData = await agent(threadPrompt, {
   label: 'collect-review-threads',
   schema: THREAD_SCHEMA,
   phase: 'Collect',
+  agentType: GITHUB_COLLECTOR_AGENT_TYPE,
   model: 'haiku',
-  effort: 'low'
+  effort: 'high'
 })
 
 const threads = (threadData && Array.isArray(threadData.threads)) ? threadData.threads : []
@@ -1426,7 +1529,7 @@ const results = await parallel(selected.map(name => () => {
   const reviewer = REVIEWERS[name]
   const overrides = reviewer.options || {}
   const opts = Object.assign(
-    { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', effort: 'high' },
+    { label: name, schema: FINDING_SCHEMA, phase: 'Analyze', agentType: ANALYSIS_AGENT_TYPE, effort: 'high' },
     overrides
   )
   return agent(analysisPrompt(name, prContext), opts)
@@ -1473,6 +1576,7 @@ const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',
   schema: REVIEW_BOARD_SCHEMA,
   phase: 'Synthesize',
+  agentType: ANALYSIS_AGENT_TYPE,
   model: 'opus',
   effort: 'high'
 })
