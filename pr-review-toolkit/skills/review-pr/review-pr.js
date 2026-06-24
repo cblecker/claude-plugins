@@ -72,14 +72,66 @@ const FINDING_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          file: { type: 'string' },
-          line: { type: 'number' },
+          location: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              line: { type: 'number' }
+            },
+            required: ['path']
+          },
           severity: { type: 'string', enum: ['critical', 'important', 'suggestion'] },
           confidence: { type: 'number', minimum: 0, maximum: 100 },
           title: { type: 'string' },
-          description: { type: 'string' }
+          claim: { type: 'string' },
+          evidence: {
+            type: 'object',
+            properties: {
+              summary: { type: 'string' },
+              details: {
+                type: 'array',
+                items: { type: 'string' }
+              },
+              references: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    path: { type: 'string' },
+                    line: { type: 'number' },
+                    threadId: { type: 'string' },
+                    detail: { type: 'string' }
+                  },
+                  required: ['detail']
+                }
+              }
+            },
+            required: ['summary', 'details']
+          },
+          reasoning: { type: 'string' },
+          whyItMatters: { type: 'string' },
+          suggestedFix: { type: 'string' },
+          postability: {
+            type: 'object',
+            properties: {
+              recommendation: {
+                type: 'string',
+                enum: ['recommended_to_post', 'possible_plus_one', 'partial_overlap', 'discussion_only', 'already_covered', 'discard']
+              },
+              rationale: { type: 'string' },
+              existingThreadIds: {
+                type: 'array',
+                items: { type: 'string' }
+              },
+              caveats: {
+                type: 'array',
+                items: { type: 'string' }
+              }
+            },
+            required: ['recommendation', 'rationale', 'existingThreadIds', 'caveats']
+          }
         },
-        required: ['file', 'severity', 'confidence', 'title', 'description']
+        required: ['location', 'severity', 'confidence', 'title', 'claim', 'evidence', 'reasoning', 'whyItMatters', 'suggestedFix', 'postability']
       }
     },
     positiveObservations: {
@@ -622,7 +674,7 @@ Think deeply about each type's role in the larger system. Sometimes a simpler ty
 Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
 }
 
-const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. Format each finding description as: what the issue is, why it matters, and a concrete fix when applicable. Use 2-4 sentences in a neutral technical voice. Do not reference yourself, your role, or your review methodology.`
+const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, possible_plus_one, partial_overlap, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
 const PAGE_SIZE = 100
 
@@ -645,6 +697,83 @@ const LENS_NAMES = {
 function asNumber(value, fallback) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function firstString(values, fallback) {
+  for (const value of values || []) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return fallback
+}
+
+function candidateLocation(finding) {
+  const rawLocation = finding.location || {}
+  const location = {
+    path: firstString([rawLocation.path, finding.file, finding.path], 'PR')
+  }
+  const line = rawLocation.line != null ? rawLocation.line : finding.line
+  if (line != null) location.line = asNumber(line, 0)
+  return location
+}
+
+function evidenceText(finding) {
+  const evidence = finding.evidence
+  const parts = []
+
+  if (typeof evidence === 'string') {
+    parts.push(evidence)
+  } else if (evidence) {
+    if (evidence.summary) parts.push(evidence.summary)
+    ;(evidence.details || []).forEach(detail => {
+      if (detail) parts.push(detail)
+    })
+    ;(evidence.references || []).forEach(ref => {
+      if (!ref || !ref.detail) return
+      const refLocation = firstString([
+        ref.threadId ? 'thread ' + ref.threadId : '',
+        ref.path ? ref.path + (ref.line != null ? ':' + ref.line : '') : ''
+      ], '')
+      parts.push(refLocation ? refLocation + ': ' + ref.detail : ref.detail)
+    })
+  }
+
+  if (finding.description) parts.push(finding.description)
+  return parts.join('\n')
+}
+
+function whyItMattersText(finding) {
+  const whyItMatters = firstString([finding.whyItMatters, finding.impact], '')
+  const reasoning = firstString([finding.reasoning], '')
+  if (!reasoning) return whyItMatters
+  if (!whyItMatters) return reasoning
+  if (whyItMatters.indexOf(reasoning) !== -1) return whyItMatters
+  return whyItMatters + '\n\nSpecialist reasoning: ' + reasoning
+}
+
+function postabilityRecommendation(finding) {
+  const postability = finding.postability || {}
+  return postability.recommendation || ''
+}
+
+function overlapFromFinding(finding) {
+  if (finding.existingReviewOverlap) return finding.existingReviewOverlap
+
+  const postability = finding.postability || {}
+  const recommendation = postability.recommendation || ''
+  const threadIds = Array.isArray(postability.existingThreadIds) ? postability.existingThreadIds : []
+  const status = recommendation === 'possible_plus_one'
+    ? 'possible_plus_one'
+    : recommendation === 'partial_overlap'
+      ? 'partial_overlap'
+      : recommendation === 'already_covered'
+        ? 'already_covered'
+        : 'none'
+
+  return {
+    status: status,
+    threadId: threadIds[0] || '',
+    rationale: postability.rationale || 'No existing review overlap was classified.'
+  }
 }
 
 function uniq(values) {
@@ -807,40 +936,50 @@ function contextForPrompt(prContext) {
 }
 
 function analysisPrompt(name, prContext) {
-  return PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Include positive observations when they help the final review board.`
+  return PROMPTS[name] + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. Do not call any GitHub write tools. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. Avoid loading every page again.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
 }
 
 function boardItemFromFinding(finding, index) {
-  const location = { path: finding.file || finding.path || 'PR' }
-  if (finding.line != null) location.line = asNumber(finding.line, 0)
   return {
     id: 'F' + (index + 1),
     lens: finding.lens || finding.sourceAgent || 'review',
     title: finding.title || 'Review finding',
     severity: finding.severity || 'suggestion',
     confidence: asNumber(finding.confidence, 0),
-    location: location,
-    claim: finding.title || 'Review finding',
-    evidence: finding.description || '',
-    whyItMatters: finding.description || '',
-    suggestedFix: '',
-    existingReviewOverlap: {
-      status: 'none',
-      threadId: '',
-      rationale: 'No existing review overlap was classified.'
-    },
+    location: candidateLocation(finding),
+    claim: finding.claim || finding.title || 'Review finding',
+    evidence: evidenceText(finding),
+    whyItMatters: whyItMattersText(finding),
+    suggestedFix: finding.suggestedFix || '',
+    existingReviewOverlap: overlapFromFinding(finding),
     sourceAgent: finding.sourceAgent || ''
   }
 }
 
 function fallbackBoard(findings, positives, prContext) {
   const recommendedToPost = []
+  const possiblePlusOnes = []
+  const partialOverlaps = []
   const discussionOnly = []
+  const alreadyCovered = []
   const discarded = []
 
   findings.forEach((finding, index) => {
     const item = boardItemFromFinding(finding, index)
-    if ((item.severity === 'critical' || item.severity === 'important') && item.confidence >= 80) {
+    const recommendation = postabilityRecommendation(finding)
+    if (recommendation === 'recommended_to_post') {
+      recommendedToPost.push(item)
+    } else if (recommendation === 'possible_plus_one') {
+      possiblePlusOnes.push(item)
+    } else if (recommendation === 'partial_overlap') {
+      partialOverlaps.push(item)
+    } else if (recommendation === 'discussion_only') {
+      discussionOnly.push(item)
+    } else if (recommendation === 'already_covered') {
+      alreadyCovered.push(item)
+    } else if (recommendation === 'discard') {
+      discarded.push(item)
+    } else if ((item.severity === 'critical' || item.severity === 'important') && item.confidence >= 80) {
       recommendedToPost.push(item)
     } else if (item.confidence >= 50) {
       discussionOnly.push(item)
@@ -851,17 +990,17 @@ function fallbackBoard(findings, positives, prContext) {
 
   return {
     recommendedToPost: recommendedToPost,
-    possiblePlusOnes: [],
-    partialOverlaps: [],
+    possiblePlusOnes: possiblePlusOnes,
+    partialOverlaps: partialOverlaps,
     discussionOnly: discussionOnly,
-    alreadyCovered: [],
+    alreadyCovered: alreadyCovered,
     discarded: discarded,
     positiveObservations: positives,
     actionPlan: {
       critical: recommendedToPost.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
       important: recommendedToPost.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
       suggestions: discussionOnly.map(item => item.id + ': ' + item.title),
-      recommendedNextAction: recommendedToPost.length > 0 ? 'draft recommended findings' : 'review discussion-only findings'
+      recommendedNextAction: recommendedToPost.length > 0 ? 'review recommended postable findings' : 'review discussion-only findings'
     },
     coverageSummary: {
       scope: coverageScope(prContext),
@@ -1028,7 +1167,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings worth drafting as PR comments.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nPreserve specialist evidence. Classify against existing review threads by logical concern, not just file proximity. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nUse each specialist's postability recommendation as an input, not a command. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. Classify against existing review threads by logical concern, not just file proximity. Keep IDs stable and concise (F1, F2, ...). Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',
