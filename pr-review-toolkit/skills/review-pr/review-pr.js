@@ -310,7 +310,7 @@ const REVIEWER_PROMPTS = {
 
 ## Review Scope
 
-Review the PR diff collected in the setup section below.
+Review the shared PR context provided below. Use the focused patch access instructions when raw diff details are needed for high-signal files.
 
 ## Core Review Responsibilities
 
@@ -680,7 +680,7 @@ Map each finding to severity (critical/important/suggestion) and confidence (0-1
 
 const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, possible_plus_one, partial_overlap, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
-const PAGE_SIZE = 100
+const FILE_PAGE_SIZE = 10
 
 // Workflow scripts cannot import sibling prompt files, so reviewer prompt
 // content stays embedded while orchestration reads through this registry.
@@ -726,13 +726,22 @@ function firstString(values, fallback) {
   return fallback
 }
 
+function firstLineNumber(values) {
+  for (const value of values || []) {
+    if (value == null || (typeof value === 'string' && !value.trim())) continue
+    const parsed = Number(value)
+    if (Number.isInteger(parsed) && parsed > 0) return parsed
+  }
+  return undefined
+}
+
 function candidateLocation(finding) {
   const rawLocation = finding.location || {}
   const location = {
     path: firstString([rawLocation.path, finding.file, finding.path], 'PR')
   }
-  const line = rawLocation.line != null ? rawLocation.line : finding.line
-  if (line != null) location.line = asNumber(line, 0)
+  const line = firstLineNumber([rawLocation.line, finding.line])
+  if (line != null) location.line = line
   return location
 }
 
@@ -924,13 +933,16 @@ function inferThreadOverlap(item, threads) {
     const sameLine = location.line != null && thread.line != null && asNumber(location.line, -1) === asNumber(thread.line, -2)
     const nearLine = location.line != null && thread.line != null && Math.abs(asNumber(location.line, 0) - asNumber(thread.line, 999999)) <= 8
     const overlap = tokenOverlap(itemText, threadText(thread))
-    const score = overlap + (sameLine ? 1 : nearLine ? 0.5 : 0)
+    const minimumOverlap = sameLine ? 0.2 : nearLine ? 0.3 : 0.45
+    if (overlap < minimumOverlap) return
+
+    const score = overlap + (sameLine ? 0.1 : nearLine ? 0.05 : 0)
     if (!best || score > best.score) {
       best = { thread: thread, overlap: overlap, sameLine: sameLine, nearLine: nearLine, score: score }
     }
   })
 
-  if (!best || best.score < 0.35) {
+  if (!best) {
     return {
       status: 'none',
       threadId: existing.threadId || '',
@@ -1026,11 +1038,11 @@ function normalizeBoardSections(board, prContext) {
 }
 
 function actionPlanForBoard(board) {
-  const actionable = board.recommendedToPost.concat(board.possiblePlusOnes, board.partialOverlaps)
+  const actionable = board.recommendedToPost.concat(board.possiblePlusOnes, board.partialOverlaps, board.discussionOnly)
   return {
     critical: actionable.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
     important: actionable.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
-    suggestions: actionable.filter(item => item.severity === 'suggestion').concat(board.discussionOnly).map(item => item.id + ': ' + item.title),
+    suggestions: actionable.filter(item => item.severity === 'suggestion').map(item => item.id + ': ' + item.title),
     recommendedNextAction: board.recommendedToPost.length > 0
       ? 'review recommended postable findings'
       : (board.possiblePlusOnes.length + board.partialOverlaps.length) > 0
@@ -1116,12 +1128,30 @@ function mergeFilePages(pageResults) {
         signals: signalsForFile(Object.assign({}, file, { category: category })),
         patchAvailable: Boolean(file.patchAvailable),
         page: page,
-        perPage: PAGE_SIZE,
+        perPage: FILE_PAGE_SIZE,
         threadCount: 0
       }
     })
   })
   return Object.keys(byPath).sort().map(path => byPath[path])
+}
+
+function expectedFilesForPage(total, page, perPage) {
+  const remaining = total - ((page - 1) * perPage)
+  return Math.max(0, Math.min(perPage, remaining))
+}
+
+function validateFilePageResults(pageResults, expectedTotal, pageCount) {
+  if (!expectedTotal) return
+
+  for (let page = 1; page <= pageCount; page++) {
+    const expected = expectedFilesForPage(expectedTotal, page, FILE_PAGE_SIZE)
+    const result = (pageResults || []).find(item => asNumber(item && item.page, 0) === page)
+    const actual = result && Array.isArray(result.files) ? result.files.length : 0
+    if (actual !== expected) {
+      throw new Error('Changed-file collection incomplete on page ' + page + ': expected ' + expected + ', got ' + actual + '. The structured output may have been truncated.')
+    }
+  }
 }
 
 function buildSummary(pr, files, threads) {
@@ -1343,13 +1373,13 @@ const prResult = await agent(metadataPrompt, {
 })
 
 const pr = normalizePr(prResult)
-const filePageCount = Math.max(1, Math.ceil((pr.changedFiles || 1) / PAGE_SIZE))
+const filePageCount = Math.max(1, Math.ceil((pr.changedFiles || 1) / FILE_PAGE_SIZE))
 const filePages = []
 for (let page = 1; page <= filePageCount; page++) filePages.push(page)
 
 log('Fetching changed files across ' + filePageCount + ' page(s)')
 const filePageResults = await parallel(filePages.map(page => () => {
-  const prompt = `Use GitHub read tools only. Call pull_request_read with method get_files for ${pr.owner}/${pr.repo} PR #${pr.number}, page ${page}, perPage ${PAGE_SIZE}. Return exactly the files from this page. Do not fetch other pages. Do not include raw patches in the response. Map GitHub's filename field to path. Set patchAvailable to true when the API entry has a non-empty patch. Categorize each file and add compact signals from the path/status/patch metadata only. Do not call any GitHub write tools.`
+  const prompt = `Use GitHub read tools only. Call pull_request_read with method get_files for ${pr.owner}/${pr.repo} PR #${pr.number}, page ${page}, perPage ${FILE_PAGE_SIZE}. Return exactly the files from this page. Do not fetch other pages. Do not include raw patches in the response. Map GitHub's filename field to path. Set patchAvailable to true when the API entry has a non-empty patch. Categorize each file and add compact signals from the path/status/patch metadata only. Do not call any GitHub write tools.`
   return agent(prompt, {
     label: 'collect-files-page-' + page,
     schema: FILE_PAGE_SCHEMA,
@@ -1359,7 +1389,11 @@ const filePageResults = await parallel(filePages.map(page => () => {
   })
 }))
 
+validateFilePageResults(filePageResults, pr.changedFiles, filePageCount)
 let files = mergeFilePages(filePageResults)
+if (pr.changedFiles && files.length !== pr.changedFiles) {
+  throw new Error('Changed-file manifest incomplete: expected ' + pr.changedFiles + ', got ' + files.length)
+}
 if (pr.changedFiles === 0) pr.changedFiles = files.length
 
 log('Fetching review threads')
@@ -1401,14 +1435,18 @@ const results = await parallel(selected.map(name => () => {
 let allFindings = []
 const allPositive = []
 selected.forEach((name, index) => {
+  const reviewer = REVIEWERS[name]
   const result = results[index]
   if (!result) {
     log('Warning: ' + name + ' produced no findings (agent may have failed)')
     return
   }
   if (Array.isArray(result.findings)) {
+    if (result.findings.length === 0) {
+      log('Reviewer ' + name + ' (' + (reviewer.lens || name) + ') produced 0 findings')
+    }
     allFindings.push(...result.findings.map(finding => Object.assign({}, finding, {
-      lens: REVIEWERS[name].lens || name,
+      lens: reviewer.lens || name,
       sourceAgent: name
     })))
   }
