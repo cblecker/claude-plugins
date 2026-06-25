@@ -21,6 +21,7 @@ claude plugin marketplace add cblecker/claude-plugins
 | [pr-review-toolkit](./pr-review-toolkit)     | Comprehensive PR review board using shared workflow context                                      |
 | [gws](./gws)                                 | Google Workspace CLI skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, and Meet          |
 | [rh-dataverse](./rh-dataverse)               | Red Hat Dataverse MCP server                                                                    |
+| [sandbox-ssh-fix](./sandbox-ssh-fix)         | Fixes git-over-SSH in the Claude Code sandbox on macOS by replacing the broken BSD nc SOCKS5 proxy |
 
 ## License
 

@@ -32,6 +32,11 @@
       "name": "rh-dataverse",
       "source": "./rh-dataverse",
       "strict": true
+    },
+    {
+      "name": "sandbox-ssh-fix",
+      "source": "./sandbox-ssh-fix",
+      "strict": true
     }
   ]
 }
