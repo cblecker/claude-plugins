@@ -292,6 +292,10 @@ if (!config.owner || !config.repo || !config.pullNumber) {
   throw new Error('review-pr requires args: owner, repo, pullNumber')
 }
 
+const localGitManifest = Array.isArray(config.localGitManifest) ? config.localGitManifest : null
+const fullDiff = typeof config.fullDiff === 'string' ? config.fullDiff : null
+const configSources = config.sources || null
+
 const SEVERITY_ORDER = { critical: 0, important: 1, suggestion: 2 }
 function sortFindings(arr) {
   arr.sort((a, b) => {
@@ -1279,6 +1283,8 @@ async function collectCompleteFileManifest(pr) {
     primaryIssuePages[issue.page] = true
   })
   let recoveryResults = []
+  let recoveryAttempts = 0
+  let recoveredFileSlots = 0
 
   if (primaryIssues.length) {
     const singlePages = filePageNumbersForIssues(primaryIssues, FILE_PAGE_SIZE, pr.changedFiles)
@@ -1286,6 +1292,7 @@ async function collectCompleteFileManifest(pr) {
 
     let remainingPages = singlePages
     for (let attempt = 1; attempt <= FILE_SINGLE_PAGE_RETRIES && remainingPages.length; attempt++) {
+      recoveryAttempts = attempt
       const attemptResults = await collectFilePages(pr, remainingPages, 1, 'high', '-recover-' + attempt)
       recoveryResults = recoveryResults.concat(attemptResults)
       remainingPages = missingSingleFilePages(attemptResults, remainingPages)
@@ -1293,6 +1300,7 @@ async function collectCompleteFileManifest(pr) {
         log('Single-file recovery attempt ' + attempt + ' still missing ' + remainingPages.length + ' file slot(s); retrying.')
       }
     }
+    recoveredFileSlots = singlePages.length - remainingPages.length
 
     if (remainingPages.length) {
       throw new Error('Changed-file collection incomplete after single-file recovery: missing file slot(s) ' + remainingPages.slice(0, 10).join(', ') + (remainingPages.length > 10 ? ', ...' : '') + '. The GitHub MCP result may be unavailable before file metadata is visible.')
@@ -1311,7 +1319,9 @@ async function collectCompleteFileManifest(pr) {
     files: files,
     pageResults: pageResults,
     pageCount: pagination.pageCount,
-    perPage: FILE_PAGE_SIZE
+    perPage: FILE_PAGE_SIZE,
+    recoveryAttempts: recoveryAttempts,
+    recoveredFileSlots: recoveredFileSlots
   }
 }
 
@@ -1391,8 +1401,38 @@ function contextForPrompt(prContext) {
   })
 }
 
+function patchInstructions(prContext) {
+  const sources = prContext.sources || {}
+
+  if (sources.fullDiffIncluded && prContext.fullDiff) {
+    return '## Diff context\n\n'
+      + 'The full merge diff is included below. Use it as your primary source for understanding what changed. '
+      + 'You may also use Read and Grep on the merged checkout to inspect unchanged context, trace cross-file effects, or verify assumptions.\n\n'
+      + 'Do not run Bash commands. Do not call GitHub write tools.\n\n'
+      + '<full-merge-diff>\n' + prContext.fullDiff + '\n</full-merge-diff>'
+  }
+
+  if (sources.manifestSource === 'local-git') {
+    return '## Diff context\n\n'
+      + 'The working tree is checked out to the merge result for this PR. Full diff text was omitted because it exceeded the size cap. '
+      + 'Use the file manifest for whole-PR awareness, then use Read and Grep on the merged checkout to inspect changed files and trace cross-file effects.\n\n'
+      + 'Do not run Bash commands. Do not call GitHub write tools.'
+  }
+
+  return '## Focused patch access\n\n'
+    + 'Use GitHub read tools only. If you need raw patch details for a focused high-signal file, '
+    + 'call pull_request_read with method get_files for that file\'s recorded page and perPage, '
+    + 'then inspect only the matching file\'s patch. If the matching file is not present on its '
+    + 'recorded page, check at most three nearby pages with the same perPage before proceeding without the raw patch.\n\n'
+    + 'Do not call any GitHub write tools.'
+}
+
 function analysisPrompt(name, prContext) {
-  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX + `\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n${contextForPrompt(prContext)}\n\n## Focused patch access\n\nUse GitHub read tools only. If you need raw patch details for a focused high-signal file, call pull_request_read with method get_files for that file's recorded page and perPage, then inspect only the matching file's patch. If the matching file is not present on its recorded page, check at most three nearby pages with the same perPage before proceeding without the raw patch.\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.`
+  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX
+    + '\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n'
+    + contextForPrompt(prContext) + '\n\n'
+    + patchInstructions(prContext)
+    + '\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.'
 }
 
 function boardItemFromFinding(finding, index) {
@@ -1452,19 +1492,33 @@ function fallbackBoard(findings, positives, prContext) {
 
 function coverageScope(prContext) {
   const summary = prContext.summary || {}
+  const sources = prContext.sources || {}
   const categories = summary.categories || {}
   const categoryText = Object.keys(categories).sort().map(key => key + ': ' + categories[key]).join(', ')
-  return 'Collected ' + (summary.collectedFileCount || 0) + ' changed file(s) across ' + (prContext.filePageCount || 0) + ' page(s), with ' + (summary.existingThreadCount || 0) + ' existing review thread(s). Categories: ' + (categoryText || 'none') + '.'
+  const sourceNote = sources.manifestSource === 'local-git'
+    ? ' from local git merge ref'
+    : ' across ' + (prContext.filePageCount || 0) + ' page(s) via GitHub API'
+  return 'Collected ' + (summary.collectedFileCount || 0) + ' changed file(s)' + sourceNote
+    + ' with ' + (summary.existingThreadCount || 0) + ' existing review thread(s). Categories: '
+    + (categoryText || 'none') + '.'
 }
 
 function largePrNotes(prContext) {
   const summary = prContext.summary || {}
+  const sources = prContext.sources || {}
   const notes = []
   if (summary.scale === 'large' || summary.scale === 'very_large') {
-    notes.push('Large PR: reviewers received the complete manifest and focused detailed patch reads on high-signal files.')
+    if (sources.fullDiffIncluded) {
+      notes.push('Large PR: reviewers received the complete manifest and full merge diff.')
+    } else if (sources.manifestSource === 'local-git') {
+      notes.push('Large PR: reviewers received the complete manifest. Full diff exceeded size cap; specialists used manifest plus Read/Grep on the merged checkout.')
+    } else {
+      notes.push('Large PR: reviewers received the complete manifest via GitHub API. Full diff was not preloaded; specialists used focused GitHub patch reads when needed.')
+    }
   }
   const lowSignal = (summary.categories && ((summary.categories.vendor || 0) + (summary.categories.generated || 0) + (summary.categories.lockfile || 0))) || 0
   if (lowSignal > 0) notes.push(lowSignal + ' vendor/generated/lockfile file(s) were kept visible in the manifest but deprioritized for detailed review.')
+  if (sources.fallbackReason) notes.push('Fell back to MCP for diff collection: ' + sources.fallbackReason)
   return notes
 }
 
@@ -1515,7 +1569,18 @@ function finalizeBoard(board, findings, positives, prContext) {
     existingThreadCount: prContext.threads.length,
     changedFileCount: prContext.summary.changedFileCount,
     collectedFileCount: prContext.summary.collectedFileCount,
-    filePageCount: prContext.filePageCount
+    filePageCount: prContext.filePageCount,
+    sources: prContext.sources || {
+      manifestSource: 'mcp',
+      patchSource: 'none',
+      mergeCommit: '',
+      baseSha: '',
+      headSha: prContext.pr.headSha || '',
+      fullDiffIncluded: false,
+      fallbackReason: '',
+      recoveryAttempts: 0,
+      recoveredFileSlots: 0
+    }
   }
   return finalBoard
 }
@@ -1535,9 +1600,54 @@ const prResult = await agent(metadataPrompt, {
 })
 
 const pr = normalizePr(prResult)
-const fileManifest = await collectCompleteFileManifest(pr)
-let files = fileManifest.files
-const filePageCount = fileManifest.pageCount
+
+let files
+let filePageCount
+let manifestSource
+let effectiveFullDiff = localGitManifest && localGitManifest.length > 0 ? fullDiff : null
+let fallbackReason = (configSources && configSources.fallbackReason) || ''
+let recoveryAttempts = 0
+let recoveredFileSlots = 0
+
+if (localGitManifest && localGitManifest.length > 0) {
+  log('Using local git manifest with ' + localGitManifest.length + ' file(s)')
+  files = localGitManifest.map(function(entry) {
+    const category = entry.category || categorizePath(entry.path)
+    return {
+      path: entry.path,
+      status: entry.status || 'modified',
+      additions: asNumber(entry.additions, 0),
+      deletions: asNumber(entry.deletions, 0),
+      category: category,
+      signals: signalsForFile({ path: entry.path, category: category, signals: entry.signals }),
+      patchAvailable: Boolean(fullDiff),
+      page: 0,
+      perPage: 0,
+      threadCount: 0
+    }
+  })
+  filePageCount = 0
+  manifestSource = 'local-git'
+
+  if (pr.changedFiles && files.length !== pr.changedFiles) {
+    fallbackReason = 'local git manifest count mismatch: expected ' + pr.changedFiles + ', got ' + files.length
+    log('Warning: ' + fallbackReason + '. Falling back to GitHub MCP file collection.')
+    const fileManifest = await collectCompleteFileManifest(pr)
+    files = fileManifest.files
+    filePageCount = fileManifest.pageCount
+    manifestSource = 'mcp'
+    effectiveFullDiff = null
+    recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
+    recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
+  }
+} else {
+  const fileManifest = await collectCompleteFileManifest(pr)
+  files = fileManifest.files
+  filePageCount = fileManifest.pageCount
+  manifestSource = 'mcp'
+  recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
+  recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
+}
 if (pr.changedFiles === 0) pr.changedFiles = files.length
 
 log('Fetching review threads')
@@ -1559,7 +1669,19 @@ const prContext = {
   files: files,
   threads: threads,
   summary: summary,
-  filePageCount: filePageCount
+  filePageCount: filePageCount,
+  fullDiff: effectiveFullDiff || null,
+  sources: {
+    manifestSource: manifestSource,
+    patchSource: effectiveFullDiff ? 'local-git' : 'none',
+    mergeCommit: (configSources && configSources.mergeCommit) || '',
+    baseSha: (configSources && configSources.baseSha) || '',
+    headSha: (configSources && configSources.headSha) || pr.headSha || '',
+    fullDiffIncluded: Boolean(effectiveFullDiff),
+    fallbackReason: fallbackReason,
+    recoveryAttempts: recoveryAttempts,
+    recoveredFileSlots: recoveredFileSlots
+  }
 }
 
 phase('Analyze')

@@ -308,9 +308,10 @@ can reliably reference the parsed PR input. Otherwise, perform the same checks
 with explicitly allowed Bash commands after parsing the PR URL. The required
 checks are identical either way.
 
-The root skill uses these read-only or checkout commands, each explicitly
-allowed in the skill frontmatter via `Bash()` scoping or wrapped by a committed
-helper with equivalent validation:
+The root skill uses these read-only or checkout commands. They are covered by
+the skill frontmatter's narrow git command patterns, injected into the prompt
+during preprocessing, or wrapped by a committed helper with equivalent
+validation:
 
 ```text
 git diff-index --quiet HEAD --              # verify clean worktree
@@ -326,32 +327,30 @@ git diff --numstat -z HEAD^1 HEAD           # manifest: line counts
 git diff --no-ext-diff --no-textconv HEAD^1 HEAD
 ```
 
-The skill's `allowed-tools` frontmatter permits only these commands plus
-the MCP tools needed for PR metadata, review interaction, and posting:
+The skill's `allowed-tools` frontmatter intentionally permits narrow git command
+patterns rather than every ref/diff variant as a separate entry. The skill
+instructions still constrain actual Bash use to the preflight and diff commands
+listed above. The MCP tools are needed for PR metadata, review interaction, and
+posting:
 
 ```yaml
 allowed-tools:
   - Workflow
   - AskUserQuestion
-  - Bash(git diff-index --quiet HEAD --)
-  - Bash(git rev-parse --show-toplevel)
-  - Bash(git remote get-url origin)
   - Bash(git fetch origin refs/pull/*/merge)
   - Bash(git checkout --detach FETCH_HEAD)
-  - Bash(git rev-parse HEAD)
-  - Bash(git rev-parse HEAD^1)
-  - Bash(git rev-parse HEAD^2)
-  - Bash(git diff --name-status -z HEAD^1 HEAD)
-  - Bash(git diff --numstat -z HEAD^1 HEAD)
-  - Bash(git diff --no-ext-diff --no-textconv HEAD^1 HEAD)
+  - Bash(git rev-parse *)
+  - Bash(git diff *)
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
 ```
 
-All other Bash commands are denied. No auto-restore of the original ref —
-preserving the current checkout keeps repository file reads aligned with the
-merged PR state.
+The repository root, worktree state, and origin URL checks may be injected into
+the skill prompt during preprocessing instead of executed as user-visible Bash
+tool calls. All other Bash commands are denied. No auto-restore of the original
+ref — preserving the current checkout keeps repository file reads aligned with
+the merged PR state.
 
 The implementation must fetch only from `origin`; it must not fetch the merge
 ref from a raw repository URL or another remote. If `origin` is missing or does
