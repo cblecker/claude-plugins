@@ -16,7 +16,9 @@ human co-review loop in the main skill conversation.
   |
   |-- Workflow: collect, analyze, synthesize
   |     |
-  |     |-- collect PR metadata, files, and review context via GitHub MCP reads
+  |     |-- collect PR metadata and review context via GitHub MCP reads
+  |     |-- collect PR diff metadata via a verified local git source when possible
+  |     |-- fall back to GitHub MCP file reads plus a bundled parser when needed
   |     |-- build a whole-PR manifest and review-thread index
   |     |-- run specialist reviewer agents as one review team
   |     |-- synthesize a review board
@@ -35,17 +37,37 @@ does not ask the user questions.
 
 ## Design Constraints
 
-- GitHub data collection uses GitHub MCP tools only.
+- GitHub MCP remains the source of truth for PR metadata, review threads,
+  authenticated user identity, and all posting operations.
+- PR diff data uses source adapters:
+  - prefer local git when the checkout is verified to match the PR head
+  - fall back to GitHub MCP `get_files` when local git is unavailable
+  - parse persisted MCP result files only through a committed deterministic
+    utility
 - The analysis workflow is read-only.
 - GitHub write tools are used only after final user approval.
 - No ad-hoc generated Python, shell, `gh`, or `jq` parsing for GitHub data.
+  Any parsing helper must be committed, deterministic, read-only, and schema
+  validated.
 - Large PRs must produce a complete manifest and honest scope summary.
+- Large PR manifest collection must not require loading complete patch bodies
+  into model context.
+- Focused patch reads must be bounded and must report truncation when capped.
+- Workflow output must record manifest source, patch source, fallback reason,
+  recovery attempts, and collected-file counts.
 - Existing review comments and bot comments must shape recommendations.
 - Specialist agents must preserve evidence-rich reasoning.
 - Comprehensive team review is the primary product surface.
 - Standalone specialist agents are not an early implementation priority.
-- The first implementation should stay close to the currently working Workflow
-  pattern until runtime capabilities are proven.
+- Do not grant broad shell or local-file access to specialist agents. Local git
+  and persisted-result parsing should run through narrow workflow/helper paths.
+- Local-git-first diff collection requires non-MCP tool access for the
+  collection/helper path: command execution, read access to the checkout, and a
+  committed helper that runs bounded read-only git operations. This access must
+  not be treated as general reviewer-agent capability.
+- Workflow-spawned agents inherit the session tool allowlist. If helper command
+  access must be allowlisted for the workflow, reviewer prompts and workflow
+  structure must keep specialist agents from using shell or local file access.
 
 ## Proposed File Layout
 
@@ -64,6 +86,8 @@ pr-review-toolkit/
     review-pr/
       SKILL.md
       review-pr.js
+      tools/
+        parse-github-files-result.js
 ```
 
 Potential later layout after the capability spike:
@@ -78,10 +102,14 @@ pr-review-toolkit/
         collectors.md
         reviewers.md
         synthesizer.md
+        local-diff.md
       schemas/
         context.js
         findings.js
         review-board.js
+      tools/
+        local-diff-provider.js
+        parse-github-files-result.js
 ```
 
 Do not split prompts or schemas into imported files until the Workflow runtime
@@ -110,6 +138,10 @@ that answers:
   allowlist?
 - How large can MCP responses and Workflow variables get before truncation or
   instability becomes a practical issue?
+- Can a committed helper be invoked without requiring generated heredoc scripts
+  or broad shell access?
+- What is the cheapest reliable path for local git manifest and focused patch
+  extraction from a verified PR worktree?
 
 The spike should avoid GitHub writes and should use no-op or read-only agents.
 
@@ -141,7 +173,8 @@ The analysis workflow should build a `PrContext` object.
       "category": "source",
       "signals": ["error-handling", "public-api"],
       "patchAvailable": true,
-      "patchExcerpt": "...",
+      "page": 12,
+      "perPage": 100,
       "threadCount": 2
     }
   ],
@@ -165,12 +198,96 @@ The analysis workflow should build a `PrContext` object.
       "generated": 18
     },
     "riskAreas": ["auth", "error-handling", "tests"]
+  },
+  "sources": {
+    "manifestSource": "local-git",
+    "patchSource": "local-git",
+    "diffRange": "origin/main...HEAD",
+    "mergeBase": "def456",
+    "fallbackReason": "",
+    "recoveryAttempts": 0,
+    "recoveredFileSlots": 0,
+    "mcpOverflowCount": 0
   }
 }
 ```
 
 The exact schema can evolve, but downstream agents should receive a complete
 manifest and enough review-thread context to reason about overlap.
+
+### Source Adapters
+
+The workflow should collect file metadata through explicit source adapters.
+Every adapter returns the same compact manifest shape.
+
+The local git adapter is intentionally preferred over GitHub MCP for diff data,
+but it needs a separate execution path. It must be implemented as a narrow
+collection/helper capability, not as broad shell or local filesystem access for
+all reviewer agents. The helper path needs permission to run committed plugin
+code and read-only git commands against the local checkout, while specialists
+should consume only the resulting manifest and bounded patch excerpts.
+
+1. **Local git adapter** is preferred when all eligibility checks pass:
+   - the working directory is inside the expected repository
+   - a remote corresponds to the PR base repository, or an accepted fork
+     relationship is identified
+   - `git rev-parse HEAD` exactly equals the PR `headSha`
+   - the base ref or merge base can be resolved locally or fetched safely
+   - the resulting file count matches PR metadata
+
+   Use defensive, read-only git commands:
+
+   ```text
+   git rev-parse HEAD
+   git remote -v
+   git merge-base <base> HEAD
+   git --no-pager diff --name-status -z --no-ext-diff --no-textconv <base>...HEAD
+   git --no-pager diff --numstat -z --no-ext-diff --no-textconv <base>...HEAD
+   git --no-pager diff --no-ext-diff --no-textconv <base>...HEAD -- <path>
+   ```
+
+   Parse `-z` output to handle spaces, tabs, renames, copies, binary files, and
+   deletes.
+
+2. **GitHub MCP adapter** is the fallback when local git is unavailable. For
+   manifest collection, use `get_files` with `perPage=100` and treat persisted
+   tool-result files as normal fallback input for the committed parser. Do not
+   ask agents to inspect the saved files directly.
+
+3. **Persisted MCP result parser** is a last-resort helper for oversized MCP
+   outputs. It should accept only explicit tool-result paths, parse one-line JSON
+   safely, strip patch bodies for manifest output, optionally return bounded
+   single-file patch snippets, and schema-validate all output.
+
+### Tool Access Model
+
+Keep tool access split by responsibility:
+
+- **Main skill conversation** uses `Workflow`, `AskUserQuestion`, GitHub MCP
+  reads for final `headSha` rechecks, and GitHub MCP writes after explicit
+  approval.
+- **PR metadata and review-context collectors** use GitHub MCP read tools.
+- **Local diff collection** uses a narrow helper execution path with read access
+  to the checkout and committed plugin code. It may run read-only git commands
+  such as `rev-parse`, `remote -v`, `merge-base`, and `diff`.
+- **MCP fallback parsing** uses the committed parser helper against explicit
+  persisted MCP result paths.
+- **Specialist reviewers and synthesizer** should ideally have no tools. If the
+  workflow runtime forces them to inherit a broader session allowlist, prompts
+  must explicitly prohibit shell, local-file, and GitHub write usage, and the
+  workflow should provide all required context up front.
+
+The unresolved implementation choice is where helper execution happens:
+
+- before launching the workflow, in the skill conversation
+- inside a dedicated collection-only workflow agent
+- through a plugin-supported helper/tool wrapper, if available
+
+Do not proceed with Phase 3a until this execution model is proven.
+
+`MAX_MCP_OUTPUT_TOKENS` is an operational escape hatch, not a design
+requirement. A larger limit can make a run succeed, but it should not be
+required for correctness.
 
 ## Candidate Finding Model
 
@@ -245,16 +362,23 @@ Inputs:
 Actions:
 
 - Fetch PR metadata.
-- Fetch changed files with pagination.
+- Determine the diff source.
+- Fetch changed-file metadata through the selected source adapter.
 - Fetch review comments and review threads with pagination.
 - Fetch relevant review/check metadata if supported by the MCP tools.
 
 Requirements:
 
-- Use GitHub MCP read tools only.
-- Collector agents should have narrow instructions.
-- Each collector task should return compact structured JSON.
+- Use GitHub MCP read tools for PR metadata and review context.
+- Prefer local git for changed-file metadata when the checkout is verified to
+  match the PR head.
+- Use GitHub MCP `get_files` as fallback. For large PRs, request `perPage=100`
+  and parse persisted tool-result files with the committed parser.
+- Collector agents and helpers should have narrow instructions.
+- Each collector task should return compact structured JSON without patch text
+  unless explicitly serving a bounded focused patch.
 - The workflow script should merge page results in variables.
+- Manifest collection must validate the merged file count against PR metadata.
 
 ### 2. Build Manifest And Indexes
 
@@ -272,6 +396,12 @@ Actions:
 - Group review comments by file.
 - Identify obvious bot reviewers such as CodeRabbit where possible.
 - Build a PR-level summary and scale assessment.
+- Attach source metadata:
+  - manifest source
+  - patch source
+  - diff range or page/perPage locators
+  - fallback reason
+  - recovery attempts and overflow count
 
 ### 3. Select Review Lenses
 
@@ -294,7 +424,7 @@ Each specialist receives:
 - complete file manifest
 - PR-level summary
 - review-thread summary
-- relevant patch excerpts or focused context
+- source-specific instructions for bounded focused patch access
 
 Specialists should:
 
@@ -304,6 +434,8 @@ Specialists should:
 - avoid final posting decisions
 - contribute to one comprehensive review rather than acting as separate
   user-facing commands
+- avoid broad local shell/file reads. Focused patches should be provided through
+  the selected source adapter or committed helper.
 
 ### 5. Synthesize Review Board
 
@@ -318,6 +450,7 @@ The synthesizer should:
 - preserve positive observations and strengths
 - produce a concise action plan with critical, important, and suggestion groups
 - produce an honest scope/coverage summary
+- preserve source provenance and truncation notes in review metadata
 
 ### 6. Return To Skill
 
@@ -383,16 +516,48 @@ No posting step should run from the analysis workflow.
 
 ### Phase 3: Centralize PR Collection
 
-- Move GitHub PR metadata, file list, and review-thread collection into a
-  dedicated collection phase.
+- Move GitHub PR metadata and review-thread collection into a dedicated
+  collection phase.
 - Stop requiring each specialist to refetch the same PR context.
 - Add file categorization and PR scale summary.
+- Split changed-file collection into source adapters:
+  - `collectLocalGitManifest`
+  - `collectMcpFileManifest`
+  - `parsePersistedMcpFileResult`
+- Record manifest source, patch source, fallback reason, and recovery metadata
+  in `reviewMeta`.
+
+### Phase 3a: Add Local Git Diff Provider
+
+- Prove the helper execution model before implementation: skill pre-step,
+  collection-only workflow agent, or plugin-supported helper wrapper.
+- Ensure helper command access does not become general specialist-reviewer tool
+  access.
+- Detect whether the current checkout is an eligible PR worktree.
+- Validate `HEAD` against PR `headSha`.
+- Resolve or fetch the base ref safely.
+- Build the manifest from `git diff --name-status -z` and
+  `git diff --numstat -z`.
+- Validate the local manifest count against GitHub PR metadata.
+- Serve bounded focused patches from local git when `patchSource` is
+  `local-git`.
+
+### Phase 3b: Add MCP Fallback Parser
+
+- Add a committed parser utility for persisted GitHub MCP `get_files` results.
+- Use `perPage=100` for MCP manifest collection when local git is unavailable.
+- Strip patch bodies for manifest output.
+- Optionally provide bounded single-file patch extraction for focused review.
+- Refuse arbitrary paths, validate schema, and report parser failures with a
+  source-specific diagnostic.
 
 ### Phase 4: Restore Rich Specialist Output
 
 - Replace the minimal finding schema with candidate findings.
 - Preserve specialist-specific evidence and reasoning.
 - Add postability recommendations.
+- Make focused patch instructions conditional on `patchSource`.
+- Mark findings that rely on truncated patch context.
 
 ### Phase 5: Add Review Board Synthesis
 
@@ -426,6 +591,7 @@ After the capability spike proves the best file-loading strategy:
 
 - Update `README.md`.
 - Document required GitHub MCP tools and permission expectations.
+- Document local git eligibility checks and the persisted-result parser.
 - Validate on representative PRs.
 
 ## Validation Matrix
@@ -434,12 +600,20 @@ Test with:
 
 - small PR with no existing review comments
 - small PR with existing human review comments
+- local PR worktree where `HEAD` matches PR `headSha`
+- nonlocal PR where `HEAD` does not match PR `headSha`
+- fork PR with a base repo remote and a fork head
+- stale or missing base ref
+- dirty worktree
 - PR with CodeRabbit comments that already cover some findings
 - PR with partial-overlap findings
 - PR with only discussion-only recommendations
 - PR with plus-one recommendations
 - large PR with hundreds of files
 - large PR dominated by vendor/generated changes
+- large PR with single-file patches that exceed default MCP result limits
+- PR with renames, copies, deletes, binary files, and paths containing spaces or
+  tabs
 - PR with missing test coverage
 - PR with error-handling changes
 - PR with comment/doc changes
@@ -449,7 +623,13 @@ Test with:
 For each test, verify:
 
 - no generated parsing scripts are used
-- GitHub data comes from MCP tools
+- GitHub metadata, review threads, identity, and writes come from MCP tools
+- diff metadata comes from the expected source adapter
+- local git/helper command access is limited to the collection path
+- specialist reviewers do not use shell, local-file, or GitHub write tools
+- source provenance appears in `reviewMeta`
+- collected file count matches PR metadata, or the coverage summary explains
+  exactly why it does not
 - existing review context affects recommendations
 - the review board is understandable
 - the action plan is concise and easy to scan
@@ -457,16 +637,29 @@ For each test, verify:
 - the user can challenge findings
 - drafts are editable
 - posting requires explicit approval
+- PR `headSha` is rechecked before posting; changed heads require rerun or
+  explicit confirmation
 
 ## Risks
 
 - Workflow runtime APIs may not support clean prompt/schema file imports.
 - GitHub MCP result size and pagination behavior may constrain large-PR
   collection.
+- Raising `MAX_MCP_OUTPUT_TOKENS` can make large MCP reads succeed but does not
+  fix the underlying cost and scaling problem.
+- Local git introduces a new trust boundary. Eligibility checks must prevent
+  dirty, stale, or wrong-repository data from contaminating findings.
+- Local diff line numbers must remain compatible with GitHub review comments.
 - Too much structured schema may recreate the current rigidity.
 - Too little structure may make synthesis unreliable.
 - Specialist agents may still request too much raw context for very large PRs.
 - Tool allowlisting may need user/session configuration outside the plugin.
+- Giving specialist agents broad shell or local-file access would expand the
+  prompt-injection surface. Prefer narrow helpers and source adapters.
+- Because workflow-spawned agents inherit the session tool allowlist, adding
+  helper command access for local git can accidentally expose that access to
+  specialist agents unless the execution model isolates collection from review.
+- Persisted MCP result parsing must not become arbitrary local file parsing.
 
 ## Initial Implementation Bias
 
@@ -475,9 +668,11 @@ Start conservative:
 - one skill
 - one bundled workflow JS file
 - embedded prompts and schemas
-- read-only GitHub MCP analysis
+- read-only GitHub MCP for PR metadata and review context
+- verified local git for diff metadata when available
 - review board output only
 - no posting from workflow
+- committed helper utilities only; no generated parsing scripts
 
 Then split prompts, schemas, and reusable agents once the runtime behavior is
 verified.
@@ -504,6 +699,11 @@ Tested 2026-06-22 against `openshift/hypershift#8704` (509 changed files,
 6. **No per-agent tool constraints from workflows.** Agents inherit the session
    tool allowlist. Read-only enforcement must use the skill's `allowed-tools`
    frontmatter and prompt instructions.
+
+7. **MCP output limits are token-based and configurable.** Claude Code defaults
+   to a 25,000-token MCP result limit and can be raised with
+   `MAX_MCP_OUTPUT_TOKENS`. Oversized results are persisted to disk and replaced
+   with a file reference.
 
 ### Answered Empirically
 
@@ -536,12 +736,38 @@ The structured-output truncation finding shapes the collection phase design:
   thread index can be stored as workflow variables and passed to downstream
   agents without data loss.
 
+### Follow-Up Test: Raised MCP Output Limit
+
+Tested 2026-06-24 against `openshift/hypershift#8704` (510 changed files,
++38,054/-153,798 lines) with `MAX_MCP_OUTPUT_TOKENS` raised.
+
+Results:
+
+- The workflow completed successfully and produced a review board.
+- `reviewMeta` reported `changedFileCount: 510` and `collectedFileCount: 510`.
+- No actual `exceeds maximum allowed tokens` or `Output has been saved` runtime
+  messages appeared in the workflow logs.
+- The run still required 492 workflow agents, 1,179 tool calls, and 5,163,587
+  tokens.
+- The primary `perPage=10` file collection was still inefficient: 43 of 51
+  primary pages were incomplete, requiring recovery of 430 file slots with
+  `perPage=1`; 3 slots needed a second recovery attempt.
+
+Design implication:
+
+- Raising the MCP output limit is a useful operational workaround, but it should
+  not be required for correctness.
+- Without GitHub MCP changes, the scalable fallback path should use
+  `perPage=100` plus a committed persisted-result parser for manifest
+  collection, and bounded focused patch extraction for selected files.
+- The preferred path remains local git for verified PR worktrees.
+
 ### Unchanged Assumptions
 
 The conservative initial layout remains correct:
 
 - one skill, one bundled workflow JS file
 - embedded prompts and schemas
-- read-only GitHub MCP analysis
+- read-only GitHub MCP for PR metadata and review context
 - review board output only
 - no posting from workflow
