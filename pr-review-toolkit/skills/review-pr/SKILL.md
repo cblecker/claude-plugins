@@ -8,6 +8,10 @@ argument-hint: <github-pr-url>
 allowed-tools:
   - Workflow
   - AskUserQuestion
+  - Bash(git fetch origin refs/pull/*/merge)
+  - Bash(git checkout --detach FETCH_HEAD)
+  - Bash(git rev-parse *)
+  - Bash(git diff *)
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
@@ -15,11 +19,23 @@ allowed-tools:
 
 # PR Review: $pr-url
 
+## Git Environment
+
+- Repository root: !`git rev-parse --show-toplevel 2>/dev/null || echo __NOT_A_GIT_REPO__`
+- Worktree state: !`git diff-index --quiet HEAD -- 2>/dev/null && echo __WORKTREE_CLEAN__ || echo __WORKTREE_DIRTY__`
+- Origin URL: !`git remote get-url origin 2>/dev/null || echo __NO_ORIGIN_REMOTE__`
+
 ## Constraints
 
 Use only the tools listed in `allowed-tools`. Do not generate ad-hoc scripts to
 process GitHub data. Workflow return values and MCP responses are structured
 JSON; read them directly.
+
+Bash access is intentionally limited to the `git fetch`, `git checkout`,
+`git rev-parse *`, and `git diff *` patterns listed in `allowed-tools`. Use them
+only for the exact local-git preflight and diff commands below. The three git
+environment checks above were injected during skill preprocessing and do not
+require Bash tool calls.
 
 The bundled workflow and workflow-spawned agents are analysis-only. They must
 use GitHub read tools only and must not draft pending reviews, add comments,
@@ -29,13 +45,152 @@ The skill conversation may draft comment text after the user selects findings.
 GitHub write tools may be used only after an exact preview and explicit final
 posting approval from the user.
 
-## Launch Analysis Workflow
+## Parse PR URL
 
 Parse `$pr-url` to extract owner, repo, and PR number from:
 
 ```text
 https://github.com/{owner}/{repo}/pull/{number}
 ```
+
+## Fetch PR Metadata
+
+Before local git preflight, fetch PR metadata to obtain the head SHA and base
+repository information. Call `mcp__plugin_github_github__pull_request_read` with
+method `get` for the parsed owner, repo, and pull number.
+
+Extract and record:
+
+- `headSha`: the current head commit SHA of the PR
+- `changedFiles`: the number of changed files
+- base repository clone URL (typically `https://github.com/{owner}/{repo}`)
+
+These values are needed to verify the local git checkout.
+
+## Local Git Preflight
+
+Attempt to set up a verified local git checkout of the PR merge result. If any
+check fails, record the failure reason, skip to the Launch Analysis Workflow
+section, and pass no `localGitManifest` or `fullDiff` in the workflow args. The
+workflow will fall back to MCP-based file collection.
+
+### Check injected git environment
+
+Read the three values from the Git Environment section above.
+
+1. If repository root is `__NOT_A_GIT_REPO__`, record fallback reason "not a
+   git repository" and skip to workflow launch.
+2. If worktree state is `__WORKTREE_DIRTY__`, record fallback reason "worktree
+   has uncommitted changes" and skip to workflow launch.
+3. If origin URL is `__NO_ORIGIN_REMOTE__`, record fallback reason "no origin
+   remote" and skip to workflow launch.
+4. Compare the origin URL to the PR base repository URL. The origin URL may use
+   HTTPS (`https://github.com/{owner}/{repo}.git` or
+   `https://github.com/{owner}/{repo}`) or SSH
+   (`git@github.com:{owner}/{repo}.git`). Normalize both to `{owner}/{repo}`
+   for comparison (case-insensitive). If they do not match, record fallback
+   reason "origin does not match PR base repository" and skip to workflow
+   launch.
+
+### Fetch merge ref
+
+Run this exact command, substituting the PR number:
+
+```bash
+git fetch origin refs/pull/{number}/merge
+```
+
+If this fails, the merge ref may not exist (e.g., the PR has merge conflicts or
+is closed). Record fallback reason "merge ref fetch failed" and skip to workflow
+launch.
+
+### Checkout merge commit
+
+Run this exact command:
+
+```bash
+git checkout --detach FETCH_HEAD
+```
+
+This checks out the merge result as a detached HEAD. Do NOT auto-restore the
+original ref afterward.
+
+### Verify merge parents
+
+Run this exact command (all three refs in one call):
+
+```bash
+git rev-parse HEAD HEAD^1 HEAD^2
+```
+
+This outputs three lines:
+
+- first line = `mergeCommit` (the merge commit SHA)
+- second line = `baseSha` (the base branch parent)
+- third line = `headSha` (the PR head parent)
+
+Verify that the third line matches the `headSha` from the PR metadata fetched
+earlier. If they do not match, record fallback reason "HEAD^2 does not match PR
+headSha" and skip to workflow launch. Do NOT trust local diff data when the
+merge parents do not match.
+
+## Build Local Git Manifest
+
+If all preflight checks passed, build the file manifest from local git.
+
+### Collect file statuses
+
+Run this exact command:
+
+```bash
+git diff --name-status -z HEAD^1 HEAD
+```
+
+Parse the NUL-delimited output into `{path, status}` entries. Map `A`, `M`, `D`,
+`R*`, and `C*` to `added`, `modified`, `deleted`, `renamed`, and `copied`. For
+renames and copies, use the destination path.
+
+### Collect line counts
+
+Run this exact command:
+
+```bash
+git diff --numstat -z HEAD^1 HEAD
+```
+
+Parse the NUL-delimited numstat output and merge it with the status list. Normal
+files have additions, deletions, and path. Rename/copy entries include source
+and destination paths; use the destination path as the merge key. Binary files
+show `-` for additions and deletions; store both as 0. Each manifest entry must
+have this shape:
+
+```json
+{
+  "path": "pkg/auth/session.go",
+  "status": "modified",
+  "additions": 42,
+  "deletions": 12
+}
+```
+
+The resulting array is the `localGitManifest`.
+
+## Collect Full Diff (Optional)
+
+If the local git manifest was built successfully, attempt to collect the full
+merge diff.
+
+Run this exact command:
+
+```bash
+git diff --no-ext-diff --no-textconv HEAD^1 HEAD
+```
+
+If the output is 200,000 characters or fewer, store it as the `fullDiff` string
+to pass to the workflow. If the output exceeds 200,000 characters, do not pass
+`fullDiff`.
+
+## Launch Analysis Workflow
 
 Invoke the Workflow tool with:
 
@@ -44,41 +199,28 @@ Invoke the Workflow tool with:
   - `owner`
   - `repo`
   - `pullNumber`
+  - `localGitManifest` (array of manifest entries, or omit if preflight failed)
+  - `fullDiff` (string, or omit if not collected or preflight failed)
+  - `sources` (object with preflight metadata; the workflow derives
+    `manifestSource` and `patchSource` from the presence of `localGitManifest`
+    and `fullDiff`):
+    - `mergeCommit`: the merge commit SHA (or empty string)
+    - `baseSha`: the base parent SHA (or empty string)
+    - `headSha`: the head parent SHA (or empty string)
+    - `fullDiffIncluded`: true if fullDiff is being passed
+    - `fallbackReason`: reason preflight failed (or empty string)
 
-The workflow owns PR collection, reviewer selection, specialist analysis, and
-review-board synthesis. Do not prefetch PR metadata, changed files, diffs, or
-review threads in the skill conversation.
+If preflight failed, omit `localGitManifest` and `fullDiff`, but still pass
+`sources` with empty `mergeCommit`, `baseSha`, and `headSha`,
+`fullDiffIncluded: false`, and the preserved `fallbackReason` so the workflow
+records why local git was not used.
 
-The workflow returns a review board with this shape:
+The workflow owns PR metadata collection (via MCP), reviewer selection,
+specialist analysis, and review-board synthesis. It also fetches review threads
+(always from MCP).
 
-```json
-{
-  "recommendedToPost": [],
-  "possiblePlusOnes": [],
-  "partialOverlaps": [],
-  "discussionOnly": [],
-  "alreadyCovered": [],
-  "discarded": [],
-  "positiveObservations": [],
-  "actionPlan": {
-    "critical": [],
-    "important": [],
-    "suggestions": [],
-    "recommendedNextAction": "review recommended postable findings"
-  },
-  "coverageSummary": {
-    "scope": "Collected source, tests, docs, and existing review threads.",
-    "largePrNotes": []
-  },
-  "pr": {
-    "owner": "org",
-    "repo": "repo",
-    "number": 123
-  },
-  "summary": {},
-  "reviewMeta": {}
-}
-```
+The workflow returns grouped findings, positive observations, an action plan,
+coverage summary, PR metadata, summary, and review metadata.
 
 ## Present Review Board
 
@@ -148,10 +290,7 @@ Support these actions:
 
 ## Draft Selected Comments
 
-Draft comments only in the conversation. Do not call GitHub write tools during
-drafting.
-
-Drafts should:
+Draft comments only in the conversation. Drafts should:
 
 - sound like the user wrote them
 - be concise and actionable

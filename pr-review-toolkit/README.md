@@ -14,13 +14,52 @@ human reviewer.
 
 ## Review Flow
 
-The skill parses a GitHub PR URL and launches the bundled workflow. The workflow:
+The skill parses a GitHub PR URL and launches the bundled workflow. The skill
+first attempts to set up a verified local git checkout of the PR merge result for
+efficient diff collection. If local git is unavailable or verification fails, it
+falls back to GitHub MCP-based file collection.
 
-- collects PR metadata, changed files, and review threads through GitHub MCP
-  read tools
-- fetches changed files one API page per collector agent, then merges the
-  manifest in workflow variables
+### Local Git Diff Provider (Preferred)
+
+When the current directory is a git repository with a clean worktree and
+`origin` matches the PR base repository, the skill:
+
+1. Fetches GitHub's `refs/pull/N/merge` synthetic merge ref from `origin`
+2. Checks out the merge result as a detached HEAD
+3. Verifies the merge commit's second parent (`HEAD^2`) matches the PR's
+   `headSha` from GitHub metadata
+4. Builds a compact file manifest from `git diff --name-status` and
+   `git diff --numstat` (NUL-delimited for safe parsing of special characters)
+5. Optionally collects the full merge diff when it fits within a 200K character
+   cap
+
+The local manifest and optional full diff are passed to the workflow via `args`.
+Specialist agents can also use Read and Grep on the merged checkout to inspect
+files in their merged state.
+
+The skill does NOT auto-restore the original git ref after checkout. The merged
+checkout state keeps the Read tool useful for workflow subagents. Running in a
+dedicated worktree is recommended.
+
+### MCP Fallback
+
+When local git is unavailable, the workflow collects changed files via GitHub MCP
+`get_files` with pagination and recovery retries, as in previous versions.
+
+Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and include:
+not a git repository, dirty worktree, origin mismatch, merge ref fetch failure,
+or merge parent mismatch.
+
+### Workflow
+
+The workflow:
+
+- collects PR metadata and review threads through GitHub MCP read tools
+- uses the local git manifest when provided, or falls back to MCP file
+  collection
 - selects relevant reviewer lenses from the manifest
+- passes the full merge diff to specialists when available, or instructs them
+  to use Read/Grep on the merged checkout
 - asks specialists for evidence-rich candidate findings
 - synthesizes findings into a review board grouped by posting recommendation,
   existing-review overlap, and discussion value
@@ -32,15 +71,20 @@ and explicit final approval.
 The control flow is:
 
 ```text
-skill command -> Workflow(review-pr.js) -> workflow agent() calls
-collection agents -> pr-review-github-collector -> GitHub MCP reads
-specialist agents -> pr-review-analysis-readonly -> read-only repo/MCP inspection
+skill command
+  |-- preflight: verify local git, checkout merge ref, build manifest
+  |-- fallback: skip local git if any check fails
+  v
+Workflow(review-pr.js) -> workflow agent() calls
+  collection agents -> pr-review-github-collector -> GitHub MCP reads (metadata, threads)
+  specialist agents -> pr-review-analysis-readonly -> read-only repo/MCP inspection
 ```
 
-The workflow script owns pagination, retries, validation, and merging. Spawned
-collection agents only perform focused GitHub reads and return structured
-output. Specialist agents may inspect repository files and use available
-read-only MCP tools to verify findings.
+The root skill handles local git checkout and manifest building with scoped Bash
+commands. The workflow script owns MCP collection (when needed), pagination,
+retries, validation, and merging. Spawned collection agents only perform focused
+GitHub reads and return structured output. Specialist agents may inspect
+repository files and use available read-only MCP tools to verify findings.
 
 ## Review Agents
 
@@ -84,14 +128,33 @@ Drafts are plain conversation text until the user approves a preview. The skill
 previews each line comment, review-body text, and the proposed review event
 (`COMMENT` or `REQUEST_CHANGES`) before any GitHub write tool is used.
 
-## GitHub MCP Permissions
+## Permissions
+
+### Local Git Commands
+
+The skill's `allowed-tools` frontmatter intentionally uses a small set of git
+command patterns for preflight and diff collection:
+
+- `git fetch origin refs/pull/*/merge` — fetch merge ref
+- `git checkout --detach FETCH_HEAD` — checkout merge result
+- `git rev-parse *` — record merge parents and related refs
+- `git diff *` — verify clean state and collect status, numstat, and full diff
+
+The repository root, worktree state, and origin URL checks are injected into the
+skill prompt during preprocessing. The skill instructions still constrain actual
+Bash use to the documented preflight and diff commands; workflow-spawned agents
+have no Bash access.
+
+All other Bash commands are denied.
+
+### GitHub MCP Permissions
 
 The plugin depends on the [github](../github) plugin.
 
 Analysis requires these read capabilities:
 
 - `pull_request_read` with `get`
-- `pull_request_read` with `get_files`
+- `pull_request_read` with `get_files` (MCP fallback only)
 - `pull_request_read` with `get_review_comments`
 
 The workflow and workflow-spawned agents must use read tools only. They are
@@ -105,7 +168,8 @@ file mutation tools so large MCP responses do not lead to generated Python,
 
 Specialist reviewers run through `pr-review-analysis-readonly`, which blocks
 shell and mutation tools while allowing read-only repository inspection and
-read-only MCP tools.
+read-only MCP tools. In the local git path, specialists can use Read and Grep
+on the merged checkout to inspect changed files and trace cross-file effects.
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
@@ -136,11 +200,20 @@ Representative PR validation should cover:
 - large PRs dominated by vendor, generated, or lockfile changes
 - missing-test, error-handling, comment/doc, and type/model/interface changes
 - PRs with meaningful positive observations
+- local git worktree where `HEAD^2` matches PR `headSha`
+- wrong `origin` remote (should fall back to MCP)
+- dirty worktree (should fall back to MCP)
+- PR with merge conflicts (merge ref fetch fails, should fall back to MCP)
+- PRs with renames, copies, deletes, binary files, and paths with special
+  characters
 
-For each run, verify that GitHub data comes from MCP tools, no generated parsing
-scripts are used, existing review context affects recommendations, the review
-board is understandable, the action plan is concise, drafts remain editable, and
-posting requires explicit approval.
+For each run, verify that PR metadata and review-thread context come from MCP
+tools, local-git runs record manifest/full-diff provenance in
+`reviewMeta.sources`, and MCP fallback runs record the fallback reason and
+recovery counts. Also verify no generated parsing scripts are used, existing
+review context affects recommendations, the review board is understandable, the
+action plan is concise, drafts remain editable, and posting requires explicit
+approval.
 
 ## Prerequisites
 
