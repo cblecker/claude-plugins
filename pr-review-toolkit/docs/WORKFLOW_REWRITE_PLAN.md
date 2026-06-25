@@ -227,27 +227,38 @@ all reviewer agents. The helper path needs permission to run committed plugin
 code and read-only git commands against the local checkout, while specialists
 should consume only the resulting manifest and bounded patch excerpts.
 
-1. **Local git adapter** is preferred when all eligibility checks pass:
-   - the working directory is inside the expected repository
-   - a remote corresponds to the PR base repository, or an accepted fork
-     relationship is identified
-   - `git rev-parse HEAD` exactly equals the PR `headSha`
-   - the base ref or merge base can be resolved locally or fetched safely
-   - the resulting file count matches PR metadata
+1. **Local git adapter** uses GitHub's `refs/pull/N/merge` ref. GitHub
+   maintains this synthetic merge commit and auto-updates it when either
+   the PR head or the base branch moves. It represents the true merge
+   result — the diff matches what GitHub shows in "Files changed."
 
-   Use defensive, read-only git commands:
+   The root skill fetches the merge ref and checks it out as a detached
+   HEAD before launching the workflow. After checkout, `HEAD` is the merge
+   commit and `HEAD^1` is the base branch tip at merge time.
+
+   Eligibility reduces to: did the fetch succeed? If yes, all required
+   objects are local. No need to verify HEAD against `headSha`, match
+   remotes, or compute a merge base.
+
+   Git commands after checkout:
 
    ```text
-   git rev-parse HEAD
-   git remote -v
-   git merge-base <base> HEAD
-   git --no-pager diff --name-status -z --no-ext-diff --no-textconv <base>...HEAD
-   git --no-pager diff --numstat -z --no-ext-diff --no-textconv <base>...HEAD
-   git --no-pager diff --no-ext-diff --no-textconv <base>...HEAD -- <path>
+   git fetch origin refs/pull/<N>/merge
+   git checkout --detach FETCH_HEAD
+   git diff --name-status HEAD^1 HEAD
+   git diff --numstat HEAD^1 HEAD
+   git diff --no-ext-diff --no-textconv HEAD^1 HEAD
+   git diff --no-ext-diff --no-textconv HEAD^1 HEAD -- <path>
    ```
 
-   Parse `-z` output to handle spaces, tabs, renames, copies, binary files, and
-   deletes.
+   The root skill must verify the worktree has no pending changes before
+   checkout and must error if it does. No auto-restore of the original
+   ref — this skill typically runs in a disposable worktree.
+
+   Specialist agents receive the merge diff through a preloaded skill
+   with dynamic context injection (see Tool Access Model), not through
+   direct shell access. They can also use the Read tool to examine files
+   in the merged checkout directly.
 
 2. **GitHub MCP adapter** is the fallback when local git is unavailable. For
    manifest collection, use `get_files` with `perPage=100` and treat persisted
@@ -261,29 +272,67 @@ should consume only the resulting manifest and bounded patch excerpts.
 
 ### Tool Access Model
 
-Keep tool access split by responsibility:
+Tool access is split by responsibility across two mechanisms.
 
-- **Main skill conversation** uses `Workflow`, `AskUserQuestion`, GitHub MCP
-  reads for final `headSha` rechecks, and GitHub MCP writes after explicit
-  approval.
+**Root skill (SKILL.md)** handles merge ref checkout and manifest building.
+It uses these exact Bash commands, each explicitly allowed in the skill
+frontmatter via `Bash()` scoping:
+
+```text
+git diff-index --quiet HEAD --              # verify clean worktree
+git rev-parse HEAD                          # confirm git repo
+git fetch origin "refs/pull/${N}/merge"     # fetch merge commit
+git checkout --detach FETCH_HEAD            # checkout merge result
+git diff --name-status HEAD^1 HEAD          # manifest: file statuses
+git diff --numstat HEAD^1 HEAD              # manifest: line counts
+```
+
+The skill's `allowed-tools` frontmatter permits only these commands plus
+the MCP tools needed for PR metadata, review interaction, and posting:
+
+```yaml
+allowed-tools:
+  - Workflow
+  - AskUserQuestion
+  - Bash(git diff-index --quiet HEAD --)
+  - Bash(git rev-parse HEAD)
+  - Bash(git fetch origin refs/pull/*)
+  - Bash(git checkout --detach FETCH_HEAD)
+  - Bash(git diff --name-status HEAD^1 HEAD)
+  - Bash(git diff --numstat HEAD^1 HEAD)
+  - mcp__plugin_github_github__pull_request_read
+  - mcp__plugin_github_github__pull_request_review_write
+  - mcp__plugin_github_github__add_comment_to_pending_review
+```
+
+All other Bash commands are denied. No auto-restore of the original ref —
+this skill typically runs in a disposable worktree.
+
+**Preloaded skill (`local-git-context`)** uses dynamic context injection
+to run `git diff HEAD^1 HEAD` during skill preprocessing and inject the
+merge diff into each specialist agent's context. The `skills` field in
+agent frontmatter is supported for plugin subagents (only `hooks`,
+`mcpServers`, and `permissionMode` are ignored for plugins).
+
+**Workflow subagents** use Read and Grep freely to examine the merged
+checkout, but never Bash. The existing `pr-review-analysis-readonly` and
+`pr-review-github-collector` agent types already disallow Bash via their
+frontmatter — this is unchanged.
+
+After the detached HEAD checkout, the working tree is the merge result.
+Agents with Read access can examine any file in its merged state, not
+just the diff output.
+
+**Remaining access rules:**
+
+- **Main skill conversation** also uses `Workflow`, `AskUserQuestion`,
+  GitHub MCP reads for `headSha` rechecks, and GitHub MCP writes after
+  explicit approval.
 - **PR metadata and review-context collectors** use GitHub MCP read tools.
-- **Local diff collection** uses a narrow helper execution path with read access
-  to the checkout and committed plugin code. It may run read-only git commands
-  such as `rev-parse`, `remote -v`, `merge-base`, and `diff`.
-- **MCP fallback parsing** uses the committed parser helper against explicit
-  persisted MCP result paths.
-- **Specialist reviewers and synthesizer** should ideally have no tools. If the
-  workflow runtime forces them to inherit a broader session allowlist, prompts
-  must explicitly prohibit shell, local-file, and GitHub write usage, and the
-  workflow should provide all required context up front.
-
-The unresolved implementation choice is where helper execution happens:
-
-- before launching the workflow, in the skill conversation
-- inside a dedicated collection-only workflow agent
-- through a plugin-supported helper/tool wrapper, if available
-
-Do not proceed with Phase 3a until this execution model is proven.
+- **Specialist reviewers and synthesizer** use Read and Grep for file
+  inspection. They inherit the session tool allowlist minus the tools
+  denied by their agent type. Prompts must still prohibit GitHub write
+  usage. The workflow provides all required PR context up front.
 
 `MAX_MCP_OUTPUT_TOKENS` is an operational escape hatch, not a design
 requirement. A larger limit can make a run succeed, but it should not be
@@ -529,18 +578,25 @@ No posting step should run from the analysis workflow.
 
 ### Phase 3a: Add Local Git Diff Provider
 
-- Prove the helper execution model before implementation: skill pre-step,
-  collection-only workflow agent, or plugin-supported helper wrapper.
-- Ensure helper command access does not become general specialist-reviewer tool
-  access.
-- Detect whether the current checkout is an eligible PR worktree.
-- Validate `HEAD` against PR `headSha`.
-- Resolve or fetch the base ref safely.
-- Build the manifest from `git diff --name-status -z` and
-  `git diff --numstat -z`.
-- Validate the local manifest count against GitHub PR metadata.
-- Serve bounded focused patches from local git when `patchSource` is
-  `local-git`.
+Execution model resolved — see Capability Spike Results for the full
+exploration.
+
+- Root skill fetches `refs/pull/N/merge` and checks out as detached HEAD.
+- Root skill builds manifest from `git diff --name-status HEAD^1 HEAD`
+  and `git diff --numstat HEAD^1 HEAD`, passes via workflow `args`.
+- Verify clean worktree before checkout; error if dirty.
+- No auto-restore — worktree is disposable.
+- New skill `local-git-context` with dynamic context injection: runs
+  `git diff HEAD^1 HEAD` at agent preload time, outputs bounded diff.
+- Preload `local-git-context` into specialist agents via the `skills`
+  field in `pr-review-analysis-readonly.md`.
+- Workflow collection phase: if `localGitManifest` present in args, use
+  it and skip MCP file pagination. Otherwise use existing MCP collection.
+- Specialist prompt update: "If local git diff data appears in your
+  context, use it as your primary source. Otherwise use
+  `pull_request_read` to fetch patches."
+- Specialist agents can also use Read to examine files in the merged
+  checkout directly.
 
 ### Phase 3b: Add MCP Fallback Parser
 
@@ -771,3 +827,78 @@ The conservative initial layout remains correct:
 - read-only GitHub MCP for PR metadata and review context
 - review board output only
 - no posting from workflow
+
+### Execution Model Exploration
+
+Explored 2026-06-24. The goal was to get local git diff data into workflow
+agents without granting broad Bash access to specialist agents.
+
+#### Approaches Evaluated
+
+1. **SessionStart hooks on agent frontmatter.** Plugin subagents ignore
+   the `hooks` frontmatter field (documented security restriction:
+   "plugin subagents do not support the `hooks`, `mcpServers`, or
+   `permissionMode` frontmatter fields"). Not viable for plugins.
+
+2. **PreToolUse hook with `updatedInput` on the Workflow tool.** The
+   `updatedInput` field in `hookSpecificOutput` can modify a tool's input
+   before execution. Uncertain whether this propagates through to the
+   workflow script's `args` global. Unproven mechanism for this tool.
+
+3. **PostToolUse hook replacing MCP read results via
+   `updatedToolOutput`.** The MCP call still fires first (wasted). Output
+   strings (`additionalContext`, `systemMessage`, stdout) are capped at
+   10,000 characters. Whether `updatedToolOutput` shares this cap or
+   re-triggers MCP token limits is undocumented. Does not reduce agent
+   count for paginated collection.
+
+4. **Plugin-level SessionStart hook.** Uncertain whether SessionStart
+   fires for workflow-spawned agents. 10,000-character output cap. No
+   documented mechanism for scoping to specific agent types.
+
+5. **Collection-only workflow agent with Bash.** Agent type system
+   enforces tool isolation (specialists disallow Bash via `disallowedTools`
+   in their frontmatter). Viable, but `${CLAUDE_PLUGIN_ROOT}` and
+   `${CLAUDE_SKILL_DIR}` are not available inside workflows (confirmed by
+   capability spike). The agent would need the resolved script path passed
+   through `args`, which is brittle.
+
+6. **Skill with dynamic context injection, preloaded into agents.** The
+   `` !`command` `` syntax runs shell commands during skill preprocessing,
+   before the agent starts reasoning. The command output replaces the
+   placeholder. The `skills` frontmatter field is supported for plugin
+   subagents — it is not in the security restriction list. No agent needs
+   Bash — the shell runs during preprocessing. Viable.
+
+7. **Root skill checks out merge ref as detached HEAD.** Combined with
+   approach 6: the skill sets up the git state (detached HEAD on the merge
+   commit), and the preloaded skill's `` !`command` `` reads that state
+   (`git diff HEAD^1 HEAD`). No arguments or path resolution needed — the
+   commands just read the current git state. Viable.
+
+#### Key Findings
+
+- GitHub maintains `refs/pull/N/merge` as a synthetic merge commit that
+  auto-updates when the PR head or base branch moves. Fetching this ref
+  gives the true merge result without computing the merge base locally.
+- `git diff HEAD^1 HEAD` after checking out the merge ref produces exactly
+  what GitHub shows in "Files changed." `HEAD^1` is the base branch tip
+  at merge time.
+- The `skills` field in plugin agent frontmatter is not in the security
+  restriction list. Preloaded skills with dynamic context injection work
+  for plugin subagents.
+- Dynamic context injection runs once during skill preprocessing. The
+  command output replaces the placeholder. The agent receives the rendered
+  content, not the command.
+- After detached HEAD checkout, the working tree is the merge result.
+  Agents with Read access can examine files in their merged state, not
+  just the diff output.
+- Skill `allowed-tools` can scope Bash to exact commands using `Bash()`
+  patterns, denying all other Bash invocations.
+
+#### Resolved Approach
+
+Combination of approaches 6 and 7. Root skill handles merge ref checkout
+and manifest building with explicitly scoped Bash commands. Preloaded
+skill handles diff injection via dynamic context injection. No workflow
+agent needs Bash.
