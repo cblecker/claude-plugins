@@ -25,6 +25,7 @@ At session start, the plugin runs a detection script that:
 1. **Detects your mainline branch** (via `origin HEAD`, falls back to `main`/`master`)
 2. **Detects conventional commits** (commitlint config or commit history analysis)
 3. **Detects fork setup** (checks for `upstream` remote)
+4. **Sets git config overrides** via `CLAUDE_ENV_FILE` environment variables
 
 Then injects tailored git instructions covering:
 
@@ -52,6 +53,15 @@ The plugin auto-detects repository conventions at session start.
 | Mainline branch | `git ls-remote --symref origin HEAD`, local fallback |
 | Conventional commits | commitlint config files, commit history pattern matching |
 | Fork setup | Presence of `upstream` remote |
+
+### Git Config Overrides
+
+When `CLAUDE_ENV_FILE` is available, the plugin writes environment variables to
+override git settings for the session (without modifying git config files):
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| `branch.autosetupmerge` | `false` | Prevents unintended tracking when creating branches |
 
 ## Testing
 

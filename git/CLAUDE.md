@@ -8,11 +8,12 @@ are needed.
 
 ```text
 SessionStart → git-instructions.sh → stdout (instructions injected as context)
-                    ↓
+                    ↓                → CLAUDE_ENV_FILE (git config overrides)
               1. Detect mainline branch
               2. Detect conventional commits
               3. Detect fork setup
               4. Output instructions with detected values
+              5. Write git config env overrides (if CLAUDE_ENV_FILE available)
 ```
 
 ### Prerequisite
@@ -61,6 +62,25 @@ includes an instruction telling Claude to check its own context for duplicate gi
 instructions and warn the user if both built-in and plugin instructions are
 present. This keeps detection logic out of the script and lets Claude handle it
 contextually.
+
+### Git config overrides via environment
+
+Rather than modifying git config files (which the safety protocol forbids), the
+script writes `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`
+environment variables to `CLAUDE_ENV_FILE`. These override git settings for the
+session without persisting to disk.
+
+The entries use deferred expansion via a single-quoted heredoc: literal
+`${GIT_CONFIG_COUNT:-0}` references are written to the file and expand at
+source-time. This makes the approach additive — if another plugin or the parent
+environment has already set entries, our entries append at the next available
+index rather than overwriting.
+
+Current overrides:
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| `branch.autosetupmerge` | `false` | Prevents unintended tracking setup when creating branches |
 
 ### Differences from built-in instructions
 
