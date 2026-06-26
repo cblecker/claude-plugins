@@ -274,3 +274,14 @@ ${BRANCH_NAMING}
 - Check \`git branch\` before creating to avoid duplicates
 
 EOF
+
+###############################################################################
+# Environment: Git config overrides via CLAUDE_ENV_FILE
+###############################################################################
+if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
+  cat >> "${CLAUDE_ENV_FILE}" <<'ENVEOF'
+export GIT_CONFIG_KEY_${GIT_CONFIG_COUNT:-0}=branch.autosetupmerge
+export GIT_CONFIG_VALUE_${GIT_CONFIG_COUNT:-0}=false
+export GIT_CONFIG_COUNT=$(( ${GIT_CONFIG_COUNT:-0} + 1 ))
+ENVEOF
+fi
