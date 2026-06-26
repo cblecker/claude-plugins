@@ -251,7 +251,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
    - Use the description/body for details, not the title
 3. Complete the following steps in order:
    - Create new branch if needed (if on ${MAINLINE}, create a feature branch first)
-   - Push to remote with -u flag if needed
+   - Push to remote if needed
    - Create PR using the GitHub MCP create_pull_request tool with: owner, repo, title, head, base (${MAINLINE}), body
    - PR body format:
 <example>
