@@ -13,19 +13,20 @@ Tracked upstream: <https://github.com/anthropics/claude-code/issues/70684>
 
 ## How it works
 
-A SessionStart hook detects the broken pattern and overrides `GIT_SSH_COMMAND`
-via `$CLAUDE_ENV_FILE`:
+This plugin ships an `nc` wrapper (`bin/nc`) that intercepts SOCKS5 proxy calls
+and delegates to `ncat` with the auth credentials parsed from `ALL_PROXY`.
 
-- If `ncat` is available: uses `ncat --proxy-type socks5 --proxy-auth` with
-  credentials parsed from `ALL_PROXY`
-- If `ncat` is not available: falls back to plain `ssh` (bypasses the proxy,
-  relies on the sandbox network allowlist)
+### Flow
 
-The fix only activates when all conditions are met:
+1. SessionStart hook prepends `plugin/bin/` to `PATH` via `CLAUDE_ENV_FILE`
+2. Sandbox injects `GIT_SSH_COMMAND` containing `nc -X 5 -x localhost:PORT %h %p`
+3. SSH runs ProxyCommand, shell finds `bin/nc` wrapper first via PATH
+4. Wrapper checks for the SOCKS5 pattern (`-X 5 -x`), reads `ALL_PROXY`
+   (available at runtime in sandbox), and delegates to `ncat` with `--proxy-auth`
+5. Non-SOCKS5 calls or missing `ncat` fall through to `/usr/bin/nc`
 
-1. Running inside the sandbox (`SANDBOX_RUNTIME=1`)
-2. `GIT_SSH_COMMAND` contains the broken `nc -X 5` pattern
-3. `ALL_PROXY` contains credentials (has `@`)
+The wrapper uses `127.0.0.1` instead of `localhost` because `ncat` resolves
+`localhost` differently and the connection is refused.
 
 ## Prerequisites
 
@@ -35,8 +36,8 @@ Install `ncat` (from nmap) for full SOCKS5 proxy support:
 brew install nmap
 ```
 
-Without `ncat`, the plugin falls back to direct SSH which still works but
-bypasses the sandbox's SOCKS5 proxy.
+Without `ncat`, the plugin falls back to the system `nc` which will fail for
+authenticated SOCKS5 proxies.
 
 ## License
 

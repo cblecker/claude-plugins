@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+if [[ "$#" -ge 6 ]] \
+  && [[ "$1" == "-X" && "$2" == "5" && "$3" == "-x" ]] \
+  && [[ "${ALL_PROXY:-}" == *"@"* ]] \
+  && command -v ncat >/dev/null 2>&1; then
+  _auth="${ALL_PROXY#*://}"
+  _auth="${_auth%@*}"
+  _proxy="${4/localhost/127.0.0.1}"
+  exec ncat --proxy-type socks5 --proxy-auth "$_auth" --proxy "$_proxy" "${@: -2}"
+fi
+exec /usr/bin/nc "$@"
