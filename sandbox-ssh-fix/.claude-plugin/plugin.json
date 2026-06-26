@@ -1,7 +1,7 @@
 {
   "name": "sandbox-ssh-fix",
-  "version": "1.0.0",
-  "description": "Fixes git-over-SSH in the Claude Code sandbox on macOS by replacing the broken BSD nc SOCKS5 proxy with ncat",
+  "version": "1.0.1",
+  "description": "Fixes git-over-SSH in the Claude Code sandbox on macOS by wrapping BSD nc with ncat for SOCKS5 proxy auth",
   "author": {
     "name": "cblecker",
     "email": "admin@toph.ca"
