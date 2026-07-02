@@ -76,7 +76,7 @@ Deprecated behavior: If a non-default event is imported, its type will be change
   - `insert` — Creates an event.
   - `instances` — Returns instances of the specified recurring event.
   - `list` — Returns events on the specified calendar.
-  - `move` — Moves an event to another calendar, i.e. changes an event's organizer. Note that only default events can be moved; birthday, focusTime, fromGmail, outOfOffice and workingLocation events cannot be moved.
+  - `move` — Moves an event to another calendar, i.e. changes an event's organizer. Only default events can be moved; birthday, focusTime, fromGmail, outOfOffice and workingLocation events cannot be moved.
   - `patch` — Updates an event. This method supports patch semantics.
   - `quickAdd` — Creates an event based on a simple text string.
   - `update` — Updates an event.
