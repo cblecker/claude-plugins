@@ -16,6 +16,13 @@ allowed-tools:
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
   - mcp__plugin_github_github__add_reply_to_pull_request_comment
+  - mcp__plugin_golang_gopls__go_diagnostics
+  - mcp__plugin_golang_gopls__go_file_context
+  - mcp__plugin_golang_gopls__go_package_api
+  - mcp__plugin_golang_gopls__go_search
+  - mcp__plugin_golang_gopls__go_symbol_references
+  - mcp__plugin_golang_gopls__go_vulncheck
+  - mcp__plugin_golang_gopls__go_workspace
 ---
 
 # PR Review: $pr-url
