@@ -1,0 +1,21 @@
+name: Skillsaw Review
+
+on:
+  workflow_run:
+    workflows: ["Lint Plugins"]
+    types:
+      - completed
+
+jobs:
+  review:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Post PR review comments
+        uses: stbenjam/skillsaw/review@a1d7340ef19cd0949f884a5381155843589dbad8 #v0.15.0
