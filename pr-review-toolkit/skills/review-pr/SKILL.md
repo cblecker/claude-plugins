@@ -15,6 +15,7 @@ allowed-tools:
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
+  - mcp__plugin_github_github__add_reply_to_pull_request_comment
 ---
 
 # PR Review: $pr-url
@@ -27,21 +28,13 @@ allowed-tools:
 
 ## Constraints
 
-Use only the tools listed in `allowed-tools`. Do not generate ad-hoc scripts to
-process GitHub data. Workflow return values and MCP responses are structured
-JSON; read them directly.
+Use only `allowed-tools`. Do not generate ad-hoc processing scripts. Workflow
+return values and MCP responses are structured JSON; read them directly. Bash is
+limited to the git patterns in `allowed-tools` for preflight and diff steps
+below.
 
-Bash access is intentionally limited to the `git fetch`, `git checkout`,
-`git rev-parse *`, and `git diff *` patterns listed in `allowed-tools`. Use them
-only for the exact local-git preflight and diff commands below. The three git
-environment checks above were injected during skill preprocessing and do not
-require Bash tool calls.
+The workflow and its agents are read-only — they must not call GitHub write tools.
 
-The bundled workflow and workflow-spawned agents are analysis-only. They must
-use GitHub read tools only and must not draft pending reviews, add comments,
-submit reviews, resolve threads, or call GitHub write tools.
-
-The skill conversation may draft comment text after the user selects findings.
 GitHub write tools may be used only after an exact preview and explicit final
 posting approval from the user.
 
@@ -55,84 +48,54 @@ https://github.com/{owner}/{repo}/pull/{number}
 
 ## Fetch PR Metadata
 
-Before local git preflight, fetch PR metadata to obtain the head SHA and base
-repository information. Call `mcp__plugin_github_github__pull_request_read` with
-method `get` for the parsed owner, repo, and pull number.
-
-Extract and record:
+Call `pull_request_read` with method `get`. Extract and record:
 
 - `headSha`: the current head commit SHA of the PR
 - `changedFiles`: the number of changed files
 - base repository clone URL (typically `https://github.com/{owner}/{repo}`)
 
-These values are needed to verify the local git checkout.
-
 ## Local Git Preflight
 
-Attempt to set up a verified local git checkout of the PR merge result. If any
-check fails, record the failure reason, skip to the Launch Analysis Workflow
-section, and pass no `localGitManifest` or `fullDiff` in the workflow args. The
-workflow will fall back to MCP-based file collection.
+Set up a verified local checkout of the PR merge result. If any check below
+fails, record the reason as `fallbackReason`, skip remaining preflight, and
+launch the workflow without `localGitManifest` or `fullDiff`.
 
 ### Check injected git environment
 
 Read the three values from the Git Environment section above.
 
-1. If repository root is `__NOT_A_GIT_REPO__`, record fallback reason "not a
-   git repository" and skip to workflow launch.
-2. If worktree state is `__WORKTREE_DIRTY__`, record fallback reason "worktree
-   has uncommitted changes" and skip to workflow launch.
-3. If origin URL is `__NO_ORIGIN_REMOTE__`, record fallback reason "no origin
-   remote" and skip to workflow launch.
-4. Compare the origin URL to the PR base repository URL. The origin URL may use
-   HTTPS (`https://github.com/{owner}/{repo}.git` or
-   `https://github.com/{owner}/{repo}`) or SSH
-   (`git@github.com:{owner}/{repo}.git`). Normalize both to `{owner}/{repo}`
-   for comparison (case-insensitive). If they do not match, record fallback
-   reason "origin does not match PR base repository" and skip to workflow
-   launch.
+1. `__NOT_A_GIT_REPO__` → "not a git repository"
+2. `__WORKTREE_DIRTY__` → "worktree has uncommitted changes"
+3. `__NO_ORIGIN_REMOTE__` → "no origin remote"
+4. Normalize origin URL and PR base URL to `{owner}/{repo}` (strip protocol,
+   `.git` suffix; case-insensitive). Mismatch → "origin does not match PR base
+   repository"
 
 ### Fetch merge ref
-
-Run this exact command, substituting the PR number:
 
 ```bash
 git fetch origin refs/pull/{number}/merge
 ```
 
-If this fails, the merge ref may not exist (e.g., the PR has merge conflicts or
-is closed). Record fallback reason "merge ref fetch failed" and skip to workflow
-launch.
+Failure → "merge ref fetch failed".
 
 ### Checkout merge commit
-
-Run this exact command:
 
 ```bash
 git checkout --detach FETCH_HEAD
 ```
 
-This checks out the merge result as a detached HEAD. Do NOT auto-restore the
-original ref afterward.
+Do NOT auto-restore the original ref afterward.
 
 ### Verify merge parents
-
-Run this exact command (all three refs in one call):
 
 ```bash
 git rev-parse HEAD HEAD^1 HEAD^2
 ```
 
-This outputs three lines:
-
-- first line = `mergeCommit` (the merge commit SHA)
-- second line = `baseSha` (the base branch parent)
-- third line = `headSha` (the PR head parent)
-
-Verify that the third line matches the `headSha` from the PR metadata fetched
-earlier. If they do not match, record fallback reason "HEAD^2 does not match PR
-headSha" and skip to workflow launch. Do NOT trust local diff data when the
-merge parents do not match.
+Output: line 1 = `mergeCommit`, line 2 = `baseSha`, line 3 = `headSha` (PR
+head). If line 3 does not match the PR metadata `headSha`, record "HEAD^2 does
+not match PR headSha". Do not trust local diff data on mismatch.
 
 ## Build Local Git Manifest
 
@@ -140,153 +103,132 @@ If all preflight checks passed, build the file manifest from local git.
 
 ### Collect file statuses
 
-Run this exact command:
-
 ```bash
 git diff --name-status -z HEAD^1 HEAD
 ```
 
-Parse the NUL-delimited output into `{path, status}` entries. Map `A`, `M`, `D`,
-`R*`, and `C*` to `added`, `modified`, `deleted`, `renamed`, and `copied`. For
-renames and copies, use the destination path.
+Parse NUL-delimited output into `{path, status}` entries. Map `A`, `M`, `D`,
+`R*`, `C*` to `added`, `modified`, `deleted`, `renamed`, `copied`. For renames
+and copies, use the destination path.
 
 ### Collect line counts
-
-Run this exact command:
 
 ```bash
 git diff --numstat -z HEAD^1 HEAD
 ```
 
-Parse the NUL-delimited numstat output and merge it with the status list. Normal
-files have additions, deletions, and path. Rename/copy entries include source
-and destination paths; use the destination path as the merge key. Binary files
-show `-` for additions and deletions; store both as 0. Each manifest entry must
-have this shape:
-
-```json
-{
-  "path": "pkg/auth/session.go",
-  "status": "modified",
-  "additions": 42,
-  "deletions": 12
-}
-```
+Parse NUL-delimited numstat and merge with the status list. For renames/copies
+use destination path as key. Binary files show `-` for additions/deletions;
+store as 0. Each entry has shape: `{path, status, additions, deletions}`.
 
 The resulting array is the `localGitManifest`.
 
 ## Collect Full Diff (Optional)
 
-If the local git manifest was built successfully, attempt to collect the full
-merge diff.
-
-Run this exact command:
+If the manifest was built, collect the full merge diff:
 
 ```bash
 git diff --no-ext-diff --no-textconv HEAD^1 HEAD
 ```
 
-If the output is 200,000 characters or fewer, store it as the `fullDiff` string
-to pass to the workflow. If the output exceeds 200,000 characters, do not pass
-`fullDiff`.
+Store as `fullDiff` if 200,000 characters or fewer; otherwise omit.
 
 ## Launch Analysis Workflow
 
 Invoke the Workflow tool with:
 
 - `scriptPath`: `${CLAUDE_SKILL_DIR}/review-pr.js`
-- `args`:
-  - `owner`
-  - `repo`
-  - `pullNumber`
-  - `localGitManifest` (array of manifest entries, or omit if preflight failed)
-  - `fullDiff` (string, or omit if not collected or preflight failed)
-  - `sources` (object with preflight metadata; the workflow derives
-    `manifestSource` and `patchSource` from the presence of `localGitManifest`
-    and `fullDiff`):
-    - `mergeCommit`: the merge commit SHA (or empty string)
-    - `baseSha`: the base parent SHA (or empty string)
-    - `headSha`: the head parent SHA (or empty string)
-    - `fullDiffIncluded`: true if fullDiff is being passed
-    - `fallbackReason`: reason preflight failed (or empty string)
+- `args`: `owner`, `repo`, `pullNumber`, `localGitManifest` (omit if preflight
+  failed), `fullDiff` (omit if not collected), and `sources`:
+  - `mergeCommit`, `baseSha`, `headSha` (empty strings if preflight failed)
+  - `fullDiffIncluded`: whether fullDiff is included
+  - `fallbackReason`: reason preflight failed (or empty string)
 
-If preflight failed, omit `localGitManifest` and `fullDiff`, but still pass
-`sources` with empty `mergeCommit`, `baseSha`, and `headSha`,
-`fullDiffIncluded: false`, and the preserved `fallbackReason` so the workflow
-records why local git was not used.
-
-The workflow owns PR metadata collection (via MCP), reviewer selection,
-specialist analysis, and review-board synthesis. It also fetches review threads
-(always from MCP).
-
-The workflow returns grouped findings, positive observations, an action plan,
-coverage summary, PR metadata, summary, and review metadata.
+The workflow collects PR metadata via MCP, runs specialist analysis, fetches
+review threads, and returns grouped findings with review metadata.
 
 ## Present Review Board
 
-Present the review board before drafting or posting anything. Keep it concise,
-but do not hide important groups.
+Present the review board before drafting or posting anything. Use this order:
 
-Use this order:
+### 1. Heading
 
-1. Review heading: `owner/repo#number` and PR title when available.
-2. Coverage summary:
-   - `coverageSummary.scope`
-   - `coverageSummary.largePrNotes`, if present
-   - selected reviewers and file/thread counts from `reviewMeta`
-3. Action plan:
-   - critical
-   - important
-   - suggestions
-   - recommended next action
-4. Findings grouped by outcome:
-   - recommended to post
-   - possible plus-ones
-   - partial overlaps
-   - worth discussing, not posting
-   - already covered
-   - discarded or weak findings, summarized if long
-5. Positive observations.
+Format: `owner/repo#number — PR title`
 
-For each finding shown in detail, include:
+Below the heading, include a one-line summary with section counts derived from
+section array lengths:
 
-- stable id
-- location
-- lens
-- title
-- confidence
+```text
+N findings recommended, M overlap existing threads, P discussion-worthy.
+Reviewers: code-reviewer, pr-test-analyzer, silent-failure-hunter.
+```
+
+The reviewer list comes from `reviewMeta.selectedReviewers` which stores full
+agent names.
+
+### 2. Recommended to post (full detail)
+
+For each finding, include:
+
+- stable id, location, lens, title, confidence
 - claim
 - evidence
 - why it matters
 - suggested fix or next step
-- existing review overlap rationale when present
+- recommendation rationale: one sentence explaining why this finding is
+  recommended for posting, synthesized from severity, confidence, and overlap
+  status
+
+### 3. Related to existing threads (full detail)
+
+Same fields as recommended, plus existing review overlap rationale.
+
+### 4. Discussion-worthy (full detail)
+
+Same fields as recommended; rationale explains why not recommended to post.
+
+### 5. Already covered (one-liner per finding)
+
+One line per finding: `id — title (covered by thread on path:line)`.
+
+### 6. Discarded (one-liner per finding)
+
+One line per finding: `id — title (reason)`.
+
+### 7. Positive observations
+
+List positive observations when present.
 
 ## Ask What To Do Next
 
-After presenting the board, ask with `AskUserQuestion`:
+After presenting the board, propose a recommended action based on board state
+using `AskUserQuestion` with contextual options.
 
-```text
-What should we do next? You can reply with commands like "draft recommended",
-"draft F1 F3", "plus-one F2", "explain F4", "challenge F5", "show covered",
-"skip F6", "post selected", or "cancel".
-```
+### When recommended findings exist
 
-Use a free-text response, not option buttons. Interpret natural language
-flexibly, but preserve the review board ids as the stable selection handles.
+Write a brief assessment of the recommended findings and any notable overlaps,
+then offer options:
 
-Support these actions:
+1. "Draft recommended findings" (first option — the recommended action)
+2. "Draft all including overlap endorsements"
+3. "I want to adjust the selection"
+4. "Cancel"
 
-- `draft recommended`: draft all `recommendedToPost` findings.
-- `draft F1 F3`: draft selected findings.
-- `plus-one F2`: draft a concise endorsement for an overlap finding.
-- `skip F4`: mark a finding as intentionally omitted in the conversation.
-- `explain F5`: explain the evidence, uncertainty, and tradeoffs.
-- `challenge F6`: reassess the finding using the board evidence and state any
-  uncertainty plainly.
-- `show covered`: show `alreadyCovered` and relevant overlap rationale.
-- `cancel`: stop without drafting or posting.
-- `post selected`: only continue if there is already an approved preview;
-  otherwise draft and preview first.
+### When only overlap or discussion findings exist
+
+1. "Endorse overlap findings"
+2. "Skip posting"
+3. "I want to discuss specific findings"
+4. "Cancel"
+
+### When nothing is postable
+
+1. "Leave an approving review"
+2. "I spotted something"
+3. "Done"
+
+The user may type free-form text via Other (e.g., "Tell me more about F3").
+Respond accordingly and loop back to updated options.
 
 ## Draft Selected Comments
 
@@ -299,38 +241,60 @@ Draft comments only in the conversation. Drafts should:
 - avoid duplicating comments already covered elsewhere
 - distinguish blocking concerns from optional suggestions
 
-For possible plus-ones and partial overlaps, make the overlap explicit. Draft a
-plus-one only when the finding's `existingReviewOverlap` indicates that an
-endorsement or additional detail is useful.
+### Overlap findings
+
+Draft `relatedToExisting` findings as thread replies: acknowledge the original
+comment, add the new perspective, and avoid restating the concern.
+
+### Line comments vs review body
 
 Prefer line comments for findings with a concrete changed-file location. Put
 findings without a valid line location in the review body.
+
+### Review event
 
 Choose the proposed review event from the selected findings:
 
 - `REQUEST_CHANGES` only when at least one selected finding is a serious
   correctness or blocking concern.
-- `COMMENT` for non-blocking feedback, suggestions, plus-ones, or discussion.
+- `COMMENT` for non-blocking feedback, suggestions, endorsements, or discussion.
+- `APPROVE` when the user selected "Leave an approving review" from the
+  nothing-postable menu and no findings are being posted.
 
 ## Preview And Confirm
 
-Before posting, show an exact preview:
+Before posting, show an exact preview.
 
-- each line comment with finding id, path, line, and body
-- review body text for non-line findings
-- proposed review event: `COMMENT` or `REQUEST_CHANGES`
-- any selected findings intentionally omitted from posting
+For each finding being posted as a new line comment, show:
 
-Ask for explicit final approval with `AskUserQuestion`. Accept approval only
-when the user clearly confirms posting the preview, such as "post this",
-"approved", or "submit". If the user requests edits or removals, update the
-preview and ask for approval again.
+- finding id, path, line, and body
+
+For each overlap finding being posted as a thread reply, show:
+
+- finding id, "Reply to thread on path:line", and body
+
+For review body text (non-line findings), show the review body.
+
+Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
+
+After the preview, ask for explicit approval with `AskUserQuestion`:
+
+1. "Post this review"
+2. "Edit the draft"
+3. "Add or remove findings"
+4. "Cancel"
+
+Accept approval only when the user selects "Post this review" or clearly
+confirms posting. If the user requests edits or removals, update the preview and
+ask for approval again.
 
 ## Post Approved Review
 
 Use GitHub write tools only in this final approved step.
 
-If the approved preview has line comments:
+### Posting new line comments
+
+If the approved preview has new line comments:
 
 1. Create a pending review with
    `mcp__plugin_github_github__pull_request_review_write`.
@@ -340,8 +304,20 @@ If the approved preview has line comments:
    `mcp__plugin_github_github__pull_request_review_write` using the approved
    event and review body.
 
+### Posting thread replies for overlap findings
+
+Post overlapping findings as replies using
+`add_reply_to_pull_request_comment` with the numeric `commentId` and
+`pullNumber`. If `commentId` is missing or invalid, post as a new line comment
+via the pending review flow instead. Thread replies are independent of the
+pending review submission.
+
+### Review body only
+
 If the approved preview has only review-body text, submit the review body with
 `mcp__plugin_github_github__pull_request_review_write` using the approved event.
+
+### Invalid locations
 
 If a line comment cannot be added because the location is invalid for the PR
 diff, move that text into the review body, show the revised preview, and ask for
