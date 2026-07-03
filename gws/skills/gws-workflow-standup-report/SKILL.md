@@ -1,12 +1,13 @@
 ---
 name: gws-workflow-standup-report
-version: 1.0.0
 description: "Google Workflow: Today's meetings + open tasks as a standup summary."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws workflow +standup-report --help"
 ---
 
@@ -39,7 +40,6 @@ gws workflow +standup-report --format table
 
 - Read-only — never modifies data.
 - Combines calendar agenda (today) with tasks list.
-- Scale output verbosity based on `${CLAUDE_EFFORT}`: terse bullet list at `low`, standard summary at `medium` (default), full detail with action items and blockers at `high`.
 
 ## See Also
 

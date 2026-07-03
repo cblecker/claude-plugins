@@ -1,12 +1,13 @@
 ---
 name: gws-calendar
-version: 1.0.0
 description: "Google Calendar: Manage calendars and events."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws calendar --help"
 ---
 
@@ -105,4 +106,3 @@ gws schema calendar.<resource>.<method>
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.
-

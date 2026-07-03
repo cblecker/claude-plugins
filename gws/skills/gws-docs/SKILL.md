@@ -1,12 +1,13 @@
 ---
 name: gws-docs
-version: 1.0.0
 description: "Read and write Google Docs."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws docs --help"
 ---
 
@@ -45,4 +46,3 @@ gws schema docs.<resource>.<method>
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.
-

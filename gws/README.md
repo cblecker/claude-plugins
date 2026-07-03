@@ -42,15 +42,39 @@ Multi-step productivity workflows:
 - `gws-workflow-weekly-digest` - Weekly activity summary
 - `gws-workflow-file-announce` - Share files with notifications
 
-## Updating Skills
+## Syncing Skills with Upstream
 
-To sync with the latest upstream `gws` skills:
+This plugin carries a curated subset of skills from the upstream
+[gws CLI repository](https://github.com/googleworkspace/cli). The upstream
+generates skills via `gws generate-skills` and publishes them under `skills/`
+in the repo. We carry 28 of ~74 available skills (core services, helpers,
+and workflows — no personas or recipes).
 
-```text
-/gws-sync
-```
+### Process
 
-This runs the curation skill which compares upstream skills against your OAuth scopes and presents new, updated, or removed skills for review.
+1. Check the installed CLI version (`gws --version`) against the latest
+   [upstream release](https://github.com/googleworkspace/cli/releases).
+   Update the CLI if needed.
+2. For each local skill in `gws/skills/*/SKILL.md`, fetch the matching
+   file from `googleworkspace/cli` `skills/` on the `main` branch.
+3. Overwrite the local file with the upstream content. Do not add local
+   customizations — take upstream wholesale.
+4. Bump the plugin version in `.claude-plugin/plugin.json` (minor for
+   content-only updates).
+5. Validate: `claude plugin validate ./gws`
+
+### Guidelines
+
+- **Go pure upstream.** Local customizations (extra sections, modified
+  tips) create merge debt and tend to duplicate what the Claude Code
+  harness already handles (e.g., effort-level scaling via `CLAUDE_EFFORT`).
+- **Frontmatter must match upstream format.** Version lives inside
+  `metadata.version`, not as a top-level field. YAML arrays use block
+  style (`- gws`), not inline (`["gws"]`).
+- **New upstream skills** (chat, forms, keep, people, classroom, events,
+  script, admin-reports, modelarmor, personas, recipes) can be pulled in
+  by creating the corresponding `skills/<name>/` directory and copying
+  the upstream SKILL.md. No other files are needed per skill.
 
 ## Links
 

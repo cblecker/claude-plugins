@@ -1,12 +1,13 @@
 ---
 name: gws-shared
-version: 1.0.0
 description: "gws CLI: Shared patterns for authentication, global flags, and output formatting."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
 ---
 
 # gws — Shared Reference
@@ -72,18 +73,6 @@ gws <service> <resource> [sub-resource] <method> [flags]
   ```bash
   gws drive files list --params '{"pageSize": 5}'
   ```
-
-## Effort Level
-
-The `${CLAUDE_EFFORT}` variable (when set) indicates how much detail to include in output:
-
-| Value | Behavior |
-|-------|----------|
-| `low` | Concise output — minimal formatting, key facts only |
-| `medium` | Standard output (default when unset) |
-| `high` | Detailed output — expanded descriptions, additional context |
-
-Workflow skills that produce summaries or reports should scale their verbosity accordingly.
 
 ## Community & Feedback Etiquette
 

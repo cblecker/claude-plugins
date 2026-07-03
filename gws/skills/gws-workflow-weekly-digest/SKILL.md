@@ -1,12 +1,13 @@
 ---
 name: gws-workflow-weekly-digest
-version: 1.0.0
 description: "Google Workflow: Weekly summary: this week's meetings + unread email count."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws workflow +weekly-digest --help"
 ---
 
@@ -39,7 +40,6 @@ gws workflow +weekly-digest --format table
 
 - Read-only — never modifies data.
 - Combines calendar agenda (week) with gmail triage summary.
-- Scale output verbosity based on `${CLAUDE_EFFORT}`: key counts only at `low`, standard summary at `medium` (default), full breakdown with per-meeting notes and email themes at `high`.
 
 ## See Also
 

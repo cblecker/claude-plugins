@@ -1,12 +1,13 @@
 ---
 name: gws-workflow
-version: 1.0.0
 description: "Google Workflow: Cross-service productivity workflows."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws workflow --help"
 ---
 
@@ -41,4 +42,3 @@ gws schema workflow.<resource>.<method>
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.
-

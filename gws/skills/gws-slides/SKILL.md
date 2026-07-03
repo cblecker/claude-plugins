@@ -1,12 +1,13 @@
 ---
 name: gws-slides
-version: 1.0.0
 description: "Google Slides: Read and write presentations."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws slides --help"
 ---
 
@@ -40,4 +41,3 @@ gws schema slides.<resource>.<method>
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.
-
