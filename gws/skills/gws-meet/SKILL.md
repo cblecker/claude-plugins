@@ -1,12 +1,13 @@
 ---
 name: gws-meet
-version: 1.0.0
 description: "Manage Google Meet conferences."
 metadata:
+  version: 0.22.5
   openclaw:
     category: "productivity"
     requires:
-      bins: ["gws"]
+      bins:
+        - gws
     cliHelp: "gws meet --help"
 ---
 
@@ -26,6 +27,7 @@ gws meet <resource> <method> [flags]
   - `list` — Lists the conference records. By default, ordered by start time and in descending order.
   - `participants` — Operations on the 'participants' resource
   - `recordings` — Operations on the 'recordings' resource
+  - `smartNotes` — Operations on the 'smartNotes' resource
   - `transcripts` — Operations on the 'transcripts' resource
 
 ### spaces
@@ -48,4 +50,3 @@ gws schema meet.<resource>.<method>
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.
-
