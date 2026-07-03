@@ -876,7 +876,7 @@ function bestOverlap(left, right) {
   return {
     status: selected.status || 'none',
     threadId: selected.threadId || '',
-    commentId: selected.commentId || undefined,
+    commentId: selected.commentId || (right && right.commentId) || (left && left.commentId) || undefined,
     rationale: combineText(left && left.rationale, right && right.rationale)
   }
 }
@@ -907,7 +907,7 @@ function inferThreadOverlap(item, threads) {
         return Object.assign({}, existing, { commentId: matched.commentId })
       }
     }
-    return existing
+    if (existing.threadId || existing.commentId) return existing
   }
 
   const location = item.location || {}
