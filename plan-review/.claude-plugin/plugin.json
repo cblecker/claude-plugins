@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-plugin.json",
+  "name": "plan-review",
+  "version": "0.1.0",
+  "description": "Pre-flight review of plan files before context clear",
+  "author": {
+    "name": "cblecker",
+    "email": "admin@toph.ca"
+  }
+}
