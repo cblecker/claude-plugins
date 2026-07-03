@@ -37,6 +37,11 @@
       "name": "sandbox-ssh-fix",
       "source": "./sandbox-ssh-fix",
       "strict": true
+    },
+    {
+      "name": "plan-review",
+      "source": "./plan-review",
+      "strict": true
     }
   ]
 }
