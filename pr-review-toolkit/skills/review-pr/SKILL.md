@@ -15,6 +15,7 @@ allowed-tools:
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
+  - mcp__plugin_github_github__add_reply_to_pull_request_comment
 ---
 
 # PR Review: $pr-url
@@ -219,74 +220,99 @@ The workflow owns PR metadata collection (via MCP), reviewer selection,
 specialist analysis, and review-board synthesis. It also fetches review threads
 (always from MCP).
 
-The workflow returns grouped findings, positive observations, an action plan,
-coverage summary, PR metadata, summary, and review metadata.
+The workflow returns grouped findings, positive observations, PR metadata,
+summary, and review metadata.
 
 ## Present Review Board
 
-Present the review board before drafting or posting anything. Keep it concise,
-but do not hide important groups.
+Present the review board before drafting or posting anything. Use this order:
 
-Use this order:
+### 1. Heading
 
-1. Review heading: `owner/repo#number` and PR title when available.
-2. Coverage summary:
-   - `coverageSummary.scope`
-   - `coverageSummary.largePrNotes`, if present
-   - selected reviewers and file/thread counts from `reviewMeta`
-3. Action plan:
-   - critical
-   - important
-   - suggestions
-   - recommended next action
-4. Findings grouped by outcome:
-   - recommended to post
-   - possible plus-ones
-   - partial overlaps
-   - worth discussing, not posting
-   - already covered
-   - discarded or weak findings, summarized if long
-5. Positive observations.
+Format: `owner/repo#number — PR title`
 
-For each finding shown in detail, include:
+Below the heading, include a one-line summary with section counts derived from
+section array lengths:
 
-- stable id
-- location
-- lens
-- title
-- confidence
+```text
+N findings recommended, M overlap existing threads, P discussion-worthy.
+Reviewers: code-reviewer, pr-test-analyzer, silent-failure-hunter.
+```
+
+The reviewer list comes from `reviewMeta.selectedReviewers` which stores full
+agent names.
+
+### 2. Recommended to post (full detail)
+
+For each finding, include:
+
+- stable id, location, lens, title, confidence
 - claim
 - evidence
 - why it matters
 - suggested fix or next step
-- existing review overlap rationale when present
+- recommendation rationale: one sentence explaining why this finding is
+  recommended for posting, synthesized from severity, confidence, and overlap
+  status
+
+### 3. Related to existing threads (full detail)
+
+For each finding, include the same fields as recommended findings, plus:
+
+- existing review overlap rationale
+- recommendation rationale explaining why this is related to an existing thread
+  rather than standalone
+
+### 4. Discussion-worthy (full detail)
+
+For each finding, include the same fields as recommended findings, with the
+recommendation rationale explaining why this is not recommended to post.
+
+### 5. Already covered (one-liner per finding)
+
+One line per finding: `id — title (covered by thread on path:line)`.
+
+### 6. Discarded (one-liner per finding)
+
+One line per finding: `id — title (reason)`.
+
+### 7. Positive observations
+
+List positive observations when present.
 
 ## Ask What To Do Next
 
-After presenting the board, ask with `AskUserQuestion`:
+After presenting the board, propose a recommended action based on board state
+using `AskUserQuestion` with contextual options.
 
-```text
-What should we do next? You can reply with commands like "draft recommended",
-"draft F1 F3", "plus-one F2", "explain F4", "challenge F5", "show covered",
-"skip F6", "post selected", or "cancel".
-```
+### When recommended findings exist
 
-Use a free-text response, not option buttons. Interpret natural language
-flexibly, but preserve the review board ids as the stable selection handles.
+Write a brief assessment of the recommended findings and any notable overlaps,
+then offer options:
 
-Support these actions:
+1. "Draft recommended findings" (first option — the recommended action)
+2. "Draft all including overlap endorsements"
+3. "I want to adjust the selection"
+4. "Cancel"
 
-- `draft recommended`: draft all `recommendedToPost` findings.
-- `draft F1 F3`: draft selected findings.
-- `plus-one F2`: draft a concise endorsement for an overlap finding.
-- `skip F4`: mark a finding as intentionally omitted in the conversation.
-- `explain F5`: explain the evidence, uncertainty, and tradeoffs.
-- `challenge F6`: reassess the finding using the board evidence and state any
-  uncertainty plainly.
-- `show covered`: show `alreadyCovered` and relevant overlap rationale.
-- `cancel`: stop without drafting or posting.
-- `post selected`: only continue if there is already an approved preview;
-  otherwise draft and preview first.
+### When only overlap or discussion findings exist
+
+1. "Endorse overlap findings"
+2. "Skip posting"
+3. "I want to discuss specific findings"
+4. "Cancel"
+
+### When nothing is postable
+
+1. "Leave an approving review"
+2. "I spotted something"
+3. "Done"
+
+### Exploratory actions
+
+There are no dedicated commands. The user can type anything via the Other field,
+such as "Tell me more about F3" or "I disagree with F1". Interpret natural
+language flexibly, respond accordingly, and loop back to present updated options.
 
 ## Draft Selected Comments
 
@@ -299,38 +325,64 @@ Draft comments only in the conversation. Drafts should:
 - avoid duplicating comments already covered elsewhere
 - distinguish blocking concerns from optional suggestions
 
-For possible plus-ones and partial overlaps, make the overlap explicit. Draft a
-plus-one only when the finding's `existingReviewOverlap` indicates that an
-endorsement or additional detail is useful.
+### Drafting for overlap findings (relatedToExisting)
+
+For findings in `relatedToExisting`, draft as thread replies rather than
+standalone comments. The draft should:
+
+- acknowledge the original comment and add the new perspective
+- avoid restating the concern from scratch
+- read naturally as a reply in the existing conversation
+
+### Line comments vs review body
 
 Prefer line comments for findings with a concrete changed-file location. Put
 findings without a valid line location in the review body.
+
+### Review event
 
 Choose the proposed review event from the selected findings:
 
 - `REQUEST_CHANGES` only when at least one selected finding is a serious
   correctness or blocking concern.
-- `COMMENT` for non-blocking feedback, suggestions, plus-ones, or discussion.
+- `COMMENT` for non-blocking feedback, suggestions, endorsements, or discussion.
+- `APPROVE` when the user selected "Leave an approving review" from the
+  nothing-postable menu and no findings are being posted.
 
 ## Preview And Confirm
 
-Before posting, show an exact preview:
+Before posting, show an exact preview.
 
-- each line comment with finding id, path, line, and body
-- review body text for non-line findings
-- proposed review event: `COMMENT` or `REQUEST_CHANGES`
-- any selected findings intentionally omitted from posting
+For each finding being posted as a new line comment, show:
 
-Ask for explicit final approval with `AskUserQuestion`. Accept approval only
-when the user clearly confirms posting the preview, such as "post this",
-"approved", or "submit". If the user requests edits or removals, update the
-preview and ask for approval again.
+- finding id, path, line, and body
+
+For each overlap finding being posted as a thread reply, show:
+
+- finding id, "Reply to thread on path:line", and body
+
+For review body text (non-line findings), show the review body.
+
+Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
+
+After the preview, ask for explicit approval with `AskUserQuestion`:
+
+1. "Post this review"
+2. "Edit the draft"
+3. "Add or remove findings"
+4. "Cancel"
+
+Accept approval only when the user selects "Post this review" or clearly
+confirms posting. If the user requests edits or removals, update the preview and
+ask for approval again.
 
 ## Post Approved Review
 
 Use GitHub write tools only in this final approved step.
 
-If the approved preview has line comments:
+### Posting new line comments
+
+If the approved preview has new line comments:
 
 1. Create a pending review with
    `mcp__plugin_github_github__pull_request_review_write`.
@@ -340,8 +392,25 @@ If the approved preview has line comments:
    `mcp__plugin_github_github__pull_request_review_write` using the approved
    event and review body.
 
+### Posting thread replies for overlap findings
+
+For findings with `existingReviewOverlap.status === 'overlaps'` and a valid
+numeric `existingReviewOverlap.commentId`, post as a reply to the existing
+thread using `mcp__plugin_github_github__add_reply_to_pull_request_comment`
+with the `commentId` and `pullNumber`.
+
+If the `commentId` is missing or invalid, fall back to posting as a new line
+comment via the pending review flow.
+
+Thread replies are posted independently of the pending review flow — they do
+not need to be part of the pending review submission.
+
+### Review body only
+
 If the approved preview has only review-body text, submit the review body with
 `mcp__plugin_github_github__pull_request_review_write` using the approved event.
+
+### Invalid locations
 
 If a line comment cannot be added because the location is invalid for the PR
 diff, move that text into the review body, show the revised preview, and ask for

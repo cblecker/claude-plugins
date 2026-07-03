@@ -116,7 +116,7 @@ const FINDING_SCHEMA = {
             properties: {
               recommendation: {
                 type: 'string',
-                enum: ['recommended_to_post', 'possible_plus_one', 'partial_overlap', 'discussion_only', 'already_covered', 'discard']
+                enum: ['recommended_to_post', 'overlaps', 'discussion_only', 'already_covered', 'discard']
               },
               rationale: { type: 'string' },
               existingThreadIds: {
@@ -151,6 +151,7 @@ const THREAD_SCHEMA = {
         type: 'object',
         properties: {
           id: { type: 'string' },
+          commentId: { type: 'number' },
           path: { type: 'string' },
           line: { type: 'number' },
           author: { type: 'string' },
@@ -200,9 +201,10 @@ const BOARD_ITEM_SCHEMA = {
       properties: {
         status: {
           type: 'string',
-          enum: ['none', 'possible_plus_one', 'partial_overlap', 'already_covered']
+          enum: ['none', 'overlaps', 'already_covered']
         },
         threadId: { type: 'string' },
+        commentId: { type: 'number' },
         rationale: { type: 'string' }
       },
       required: ['status', 'rationale']
@@ -219,11 +221,7 @@ const REVIEW_BOARD_SCHEMA = {
       type: 'array',
       items: BOARD_ITEM_SCHEMA
     },
-    possiblePlusOnes: {
-      type: 'array',
-      items: BOARD_ITEM_SCHEMA
-    },
-    partialOverlaps: {
+    relatedToExisting: {
       type: 'array',
       items: BOARD_ITEM_SCHEMA
     },
@@ -242,39 +240,9 @@ const REVIEW_BOARD_SCHEMA = {
     positiveObservations: {
       type: 'array',
       items: { type: 'string' }
-    },
-    actionPlan: {
-      type: 'object',
-      properties: {
-        critical: {
-          type: 'array',
-          items: { type: 'string' }
-        },
-        important: {
-          type: 'array',
-          items: { type: 'string' }
-        },
-        suggestions: {
-          type: 'array',
-          items: { type: 'string' }
-        },
-        recommendedNextAction: { type: 'string' }
-      },
-      required: ['critical', 'important', 'suggestions', 'recommendedNextAction']
-    },
-    coverageSummary: {
-      type: 'object',
-      properties: {
-        scope: { type: 'string' },
-        largePrNotes: {
-          type: 'array',
-          items: { type: 'string' }
-        }
-      },
-      required: ['scope', 'largePrNotes']
     }
   },
-  required: ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded', 'positiveObservations', 'actionPlan', 'coverageSummary']
+  required: ['recommendedToPost', 'relatedToExisting', 'discussionOnly', 'alreadyCovered', 'discarded', 'positiveObservations']
 }
 
 let config = {}
@@ -682,7 +650,7 @@ Think deeply about each type's role in the larger system. Sometimes a simpler ty
 Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
 }
 
-const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, possible_plus_one, partial_overlap, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
+const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, overlaps, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
 const FILE_PAGE_SIZE = 10
 const FILE_SINGLE_PAGE_RETRIES = 2
@@ -721,7 +689,7 @@ const REVIEWERS = {
   }
 }
 
-const BOARD_SECTIONS = ['recommendedToPost', 'possiblePlusOnes', 'partialOverlaps', 'discussionOnly', 'alreadyCovered', 'discarded']
+const BOARD_SECTIONS = ['recommendedToPost', 'relatedToExisting', 'discussionOnly', 'alreadyCovered', 'discarded']
 
 function asNumber(value, fallback) {
   const parsed = Number(value)
@@ -799,17 +767,16 @@ function overlapFromFinding(finding) {
   const postability = finding.postability || {}
   const recommendation = postability.recommendation || ''
   const threadIds = Array.isArray(postability.existingThreadIds) ? postability.existingThreadIds : []
-  const status = recommendation === 'possible_plus_one'
-    ? 'possible_plus_one'
-    : recommendation === 'partial_overlap'
-      ? 'partial_overlap'
-      : recommendation === 'already_covered'
-        ? 'already_covered'
-        : 'none'
+  const status = recommendation === 'overlaps'
+    ? 'overlaps'
+    : recommendation === 'already_covered'
+      ? 'already_covered'
+      : 'none'
 
   return {
     status: status,
     threadId: threadIds[0] || '',
+    commentId: undefined,
     rationale: postability.rationale || 'No existing review overlap was classified.'
   }
 }
@@ -900,7 +867,7 @@ function bestSeverity(left, right) {
 }
 
 function bestOverlap(left, right) {
-  const order = { none: 0, possible_plus_one: 1, partial_overlap: 2, already_covered: 3 }
+  const order = { none: 0, overlaps: 1, already_covered: 2 }
   const leftStatus = (left && left.status) || 'none'
   const rightStatus = (right && right.status) || 'none'
   const selected = (order[rightStatus] > order[leftStatus]) ? right : left
@@ -909,6 +876,7 @@ function bestOverlap(left, right) {
   return {
     status: selected.status || 'none',
     threadId: selected.threadId || '',
+    commentId: selected.commentId || undefined,
     rationale: combineText(left && left.rationale, right && right.rationale)
   }
 }
@@ -932,7 +900,15 @@ function mergeBoardItem(base, next) {
 
 function inferThreadOverlap(item, threads) {
   const existing = item.existingReviewOverlap || {}
-  if (existing.status && existing.status !== 'none') return existing
+  if (existing.status && existing.status !== 'none') {
+    if (!existing.commentId && existing.threadId) {
+      const matched = (threads || []).find(t => t && t.id === existing.threadId)
+      if (matched && matched.commentId) {
+        return Object.assign({}, existing, { commentId: matched.commentId })
+      }
+    }
+    return existing
+  }
 
   const location = item.location || {}
   const itemText = combinedItemText(item)
@@ -955,19 +931,19 @@ function inferThreadOverlap(item, threads) {
     return {
       status: 'none',
       threadId: existing.threadId || '',
+      commentId: existing.commentId || undefined,
       rationale: existing.rationale || 'No existing review overlap was classified.'
     }
   }
 
   const status = best.thread.isResolved && best.overlap >= 0.25
     ? 'already_covered'
-    : best.sameLine && best.overlap >= 0.2
-      ? 'possible_plus_one'
-      : 'partial_overlap'
+    : 'overlaps'
 
   return {
     status: status,
     threadId: best.thread.id || '',
+    commentId: best.thread.commentId || undefined,
     rationale: 'Inferred overlap with an existing review thread on ' + location.path + (best.thread.line != null ? ':' + best.thread.line : '') + '.'
   }
 }
@@ -976,8 +952,7 @@ function routeSection(item, preferredSection, recommendation) {
   const overlap = item.existingReviewOverlap || {}
   if (preferredSection === 'discarded' || recommendation === 'discard') return 'discarded'
   if (overlap.status === 'already_covered' || recommendation === 'already_covered') return 'alreadyCovered'
-  if (overlap.status === 'partial_overlap' || recommendation === 'partial_overlap') return 'partialOverlaps'
-  if (overlap.status === 'possible_plus_one' || recommendation === 'possible_plus_one') return 'possiblePlusOnes'
+  if (overlap.status === 'overlaps' || recommendation === 'overlaps') return 'relatedToExisting'
   if (recommendation === 'discussion_only') return 'discussionOnly'
   if (recommendation === 'recommended_to_post') return 'recommendedToPost'
   if (BOARD_SECTIONS.indexOf(preferredSection) !== -1) return preferredSection
@@ -991,9 +966,8 @@ function bestRecommendation(left, right) {
     discard: 0,
     already_covered: 1,
     discussion_only: 2,
-    partial_overlap: 3,
-    possible_plus_one: 4,
-    recommended_to_post: 5
+    overlaps: 3,
+    recommended_to_post: 4
   }
   const leftScore = Object.prototype.hasOwnProperty.call(order, left) ? order[left] : -1
   const rightScore = Object.prototype.hasOwnProperty.call(order, right) ? order[right] : -1
@@ -1044,22 +1018,6 @@ function normalizeBoardSections(board, prContext) {
     sortFindings(normalized[section])
     board[section] = normalized[section]
   })
-}
-
-function actionPlanForBoard(board) {
-  const actionable = board.recommendedToPost.concat(board.possiblePlusOnes, board.partialOverlaps, board.discussionOnly)
-  return {
-    critical: actionable.filter(item => item.severity === 'critical').map(item => item.id + ': ' + item.title),
-    important: actionable.filter(item => item.severity === 'important').map(item => item.id + ': ' + item.title),
-    suggestions: actionable.filter(item => item.severity === 'suggestion').map(item => item.id + ': ' + item.title),
-    recommendedNextAction: board.recommendedToPost.length > 0
-      ? 'review recommended postable findings'
-      : (board.possiblePlusOnes.length + board.partialOverlaps.length) > 0
-        ? 'review overlap findings before posting'
-        : board.discussionOnly.length > 0
-          ? 'review discussion-only findings'
-          : 'no postable findings identified'
-  }
 }
 
 function uniq(values) {
@@ -1455,22 +1413,11 @@ function boardItemFromFinding(finding, index) {
 function fallbackBoard(findings, positives, prContext) {
   const board = {
     recommendedToPost: [],
-    possiblePlusOnes: [],
-    partialOverlaps: [],
+    relatedToExisting: [],
     discussionOnly: [],
     alreadyCovered: [],
     discarded: [],
-    positiveObservations: positives,
-    actionPlan: {
-      critical: [],
-      important: [],
-      suggestions: [],
-      recommendedNextAction: 'review board'
-    },
-    coverageSummary: {
-      scope: coverageScope(prContext),
-      largePrNotes: largePrNotes(prContext)
-    }
+    positiveObservations: positives
   }
 
   const entries = findings.map((finding, index) => {
@@ -1486,40 +1433,7 @@ function fallbackBoard(findings, positives, prContext) {
     board[routeSection(entry.item, '', entry.recommendation)].push(entry.item)
   })
   BOARD_SECTIONS.forEach(section => sortFindings(board[section]))
-  board.actionPlan = actionPlanForBoard(board)
   return board
-}
-
-function coverageScope(prContext) {
-  const summary = prContext.summary || {}
-  const sources = prContext.sources || {}
-  const categories = summary.categories || {}
-  const categoryText = Object.keys(categories).sort().map(key => key + ': ' + categories[key]).join(', ')
-  const sourceNote = sources.manifestSource === 'local-git'
-    ? ' from local git merge ref'
-    : ' across ' + (prContext.filePageCount || 0) + ' page(s) via GitHub API'
-  return 'Collected ' + (summary.collectedFileCount || 0) + ' changed file(s)' + sourceNote
-    + ' with ' + (summary.existingThreadCount || 0) + ' existing review thread(s). Categories: '
-    + (categoryText || 'none') + '.'
-}
-
-function largePrNotes(prContext) {
-  const summary = prContext.summary || {}
-  const sources = prContext.sources || {}
-  const notes = []
-  if (summary.scale === 'large' || summary.scale === 'very_large') {
-    if (sources.fullDiffIncluded) {
-      notes.push('Large PR: reviewers received the complete manifest and full merge diff.')
-    } else if (sources.manifestSource === 'local-git') {
-      notes.push('Large PR: reviewers received the complete manifest. Full diff exceeded size cap; specialists used manifest plus Read/Grep on the merged checkout.')
-    } else {
-      notes.push('Large PR: reviewers received the complete manifest via GitHub API. Full diff was not preloaded; specialists used focused GitHub patch reads when needed.')
-    }
-  }
-  const lowSignal = (summary.categories && ((summary.categories.vendor || 0) + (summary.categories.generated || 0) + (summary.categories.lockfile || 0))) || 0
-  if (lowSignal > 0) notes.push(lowSignal + ' vendor/generated/lockfile file(s) were kept visible in the manifest but deprioritized for detailed review.')
-  if (sources.fallbackReason) notes.push('Fell back to MCP for diff collection: ' + sources.fallbackReason)
-  return notes
 }
 
 function finalizeBoard(board, findings, positives, prContext) {
@@ -1551,13 +1465,6 @@ function finalizeBoard(board, findings, positives, prContext) {
     })
   })
   if (!Array.isArray(finalBoard.positiveObservations)) finalBoard.positiveObservations = positives
-  finalBoard.actionPlan = actionPlanForBoard(finalBoard)
-  if (!finalBoard.coverageSummary) {
-    finalBoard.coverageSummary = {
-      scope: coverageScope(prContext),
-      largePrNotes: largePrNotes(prContext)
-    }
-  }
 
   // These fields intentionally extend the synthesizer schema; the skill
   // presents them as part of the final review board contract.
@@ -1651,7 +1558,7 @@ if (localGitManifest && localGitManifest.length > 0) {
 if (pr.changedFiles === 0) pr.changedFiles = files.length
 
 log('Fetching review threads')
-const threadPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
+const threadPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
 
 const threadData = await agent(threadPrompt, {
   label: 'collect-review-threads',
@@ -1734,7 +1641,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- possiblePlusOnes: findings where an existing thread already raises the issue but an endorsement may help.\n- partialOverlaps: findings that add useful information beyond an existing thread.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, possible_plus_one, partial_overlap, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Include positive observations when useful. The action plan should be easy to scan: critical issues first, important issues next, optional suggestions last, and one recommended next action. The coverage summary must be honest about large-PR scope and low-signal areas.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- relatedToExisting: findings that overlap with an existing review thread — either as an endorsement or with additional detail beyond what the thread covers.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, overlaps, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Include positive observations when useful.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',

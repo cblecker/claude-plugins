@@ -106,8 +106,7 @@ The workflow returns a review board grouped by outcome:
 
 - `recommendedToPost` — high-signal findings that look postable by a human
   reviewer and are not already covered
-- `possiblePlusOnes` — existing threads where an endorsement may help
-- `partialOverlaps` — findings that add useful detail beyond an existing thread
+- `relatedToExisting` — findings that overlap or endorse existing review threads
 - `discussionOnly` — useful reviewer notes that should not be posted yet
 - `alreadyCovered` — findings fully covered by existing human or bot review
   threads
@@ -115,8 +114,7 @@ The workflow returns a review board grouped by outcome:
 
 Each finding preserves the specialist's claim, evidence, reasoning, suggested
 fix, confidence, source lens, and existing-review overlap rationale. The board
-also includes positive observations, an action plan, coverage notes, PR metadata,
-and review metadata.
+also includes positive observations, PR metadata, and review metadata.
 
 ## Interaction And Posting
 
@@ -212,7 +210,7 @@ tools, local-git runs record manifest/full-diff provenance in
 `reviewMeta.sources`, and MCP fallback runs record the fallback reason and
 recovery counts. Also verify no generated parsing scripts are used, existing
 review context affects recommendations, the review board is understandable, the
-action plan is concise, drafts remain editable, and posting requires explicit
+drafts remain editable, and posting requires explicit
 approval.
 
 ## Prerequisites
