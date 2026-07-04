@@ -268,6 +268,40 @@ Choose the proposed review event from the selected findings:
 - `APPROVE` when the user selected "Leave an approving review" from the
   nothing-postable menu and no findings are being posted.
 
+## Translate Line Numbers for Posting
+
+Skip this section if MCP fallback was used (no local checkout) — findings
+already use PR HEAD line numbers.
+
+Findings use merge-result line numbers. GitHub requires PR HEAD (`HEAD^2`)
+line numbers. Translate before posting.
+
+### Quick check
+
+```bash
+git diff --name-only HEAD^2 HEAD
+```
+
+No output → lines are identical, skip translation.
+
+### Per-file translation
+
+For each finding on a file listed above:
+
+1. Run `git diff HEAD^2 HEAD -- <path>`.
+2. If the finding's line falls on a `+`-only line (no PR HEAD equivalent),
+   move the finding to the review body.
+3. If the line falls within a hunk on a context line, find the PR HEAD line
+   by counting context and `-` lines from the hunk's PR HEAD start (`a` in
+   `@@ -a,b +c,d @@`).
+4. If the line falls between hunks, accumulate the offset from preceding
+   hunks: `offset += (b - d)` per `@@ -a,b +c,d @@`.
+   `PR_HEAD_line = merge_line + offset`.
+5. Validate the translated line falls within a PR diff hunk (from
+   `pull_request_read get_files`). If not, move to review body.
+
+Files absent from the diff output have identical line numbers — use as-is.
+
 ## Preview And Confirm
 
 Before posting, show an exact preview.

@@ -1,6 +1,6 @@
 {
   "name": "pr-review-toolkit",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Comprehensive PR review board using shared workflow context",
   "author": {
     "name": "cblecker",
