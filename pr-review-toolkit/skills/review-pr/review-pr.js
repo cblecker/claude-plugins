@@ -1365,6 +1365,7 @@ function patchInstructions(prContext) {
   if (sources.fullDiffIncluded && prContext.fullDiff) {
     return '## Diff context\n\n'
       + 'The full merge diff is included below. Use it as your primary source for understanding what changed. '
+      + 'Line numbers in your findings will correspond to the merge-result checkout and will be translated to PR HEAD line numbers before posting. '
       + 'You may also use Read and Grep on the merged checkout to inspect unchanged context, trace cross-file effects, or verify assumptions.\n\n'
       + 'Do not run Bash commands. Do not call GitHub write tools.\n\n'
       + '<full-merge-diff>\n' + prContext.fullDiff + '\n</full-merge-diff>'
@@ -1373,6 +1374,7 @@ function patchInstructions(prContext) {
   if (sources.manifestSource === 'local-git') {
     return '## Diff context\n\n'
       + 'The working tree is checked out to the merge result for this PR. Full diff text was omitted because it exceeded the size cap. '
+      + 'Line numbers in your findings will correspond to the merge-result checkout and will be translated to PR HEAD line numbers before posting. '
       + 'Use the file manifest for whole-PR awareness, then use Read and Grep on the merged checkout to inspect changed files and trace cross-file effects.\n\n'
       + 'Do not run Bash commands. Do not call GitHub write tools.'
   }
