@@ -23,6 +23,7 @@ claude plugin marketplace add cblecker/claude-plugins
 | [rh-dataverse](./rh-dataverse)               | Red Hat Dataverse MCP server                                                                    |
 | [sandbox-ssh-fix](./sandbox-ssh-fix)         | Fixes git-over-SSH in the Claude Code sandbox on macOS by replacing the broken BSD nc SOCKS5 proxy |
 | [plan-review](./plan-review)                 | Pre-flight review of plan files before context clear                                             |
+| [x-twitter-scraper](./x-twitter-scraper)     | Xquik X/Twitter API, MCP, SDK, webhook, export, and monitor workflow planning                    |
 
 ## License
 
