@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Checkout a GitHub PR merge commit using git plumbing commands,
-# excluding .claude/ from the working tree to avoid sandbox write
-# restrictions. Output is consumed by skill pre-execution substitution.
+# excluding sandbox-protected files from the working tree.
+# Output is consumed by skill pre-execution substitution.
 
 skip() { printf 'CHECKOUT_SKIP: %s\n' "$1"; exit 0; }
 
@@ -30,17 +30,32 @@ if ! git fetch origin "refs/pull/${pr_number}/merge" 2>/dev/null; then
     skip "merge ref fetch failed"
 fi
 
-# --- Plumbing checkout (excludes .claude/) ---
+# --- Plumbing checkout (excludes sandbox-protected files) ---
 merge_sha="$(git rev-parse FETCH_HEAD)"
 
-if ! {
-    git read-tree "${merge_sha}" \
-    && git ls-files -z -- . ':(exclude).claude/' \
-        | git checkout-index -f -z --stdin \
-    && git update-ref --no-deref HEAD "${merge_sha}"
-}; then
-    skip "plumbing checkout failed"
-fi
+git read-tree "${merge_sha}" || skip "read-tree failed"
+
+# Exclude files on the sandbox mandatory-deny list (DANGEROUS_FILES,
+# DANGEROUS_DIRECTORIES in anthropic-experimental/sandbox-runtime).
+# These are always write-protected regardless of sandbox config;
+# checkout-index would fail with EPERM trying to unlink them.
+git ls-files -z -- . \
+    ':(glob,exclude)**/.gitconfig' \
+    ':(glob,exclude)**/.gitmodules' \
+    ':(glob,exclude)**/.bashrc' \
+    ':(glob,exclude)**/.bash_profile' \
+    ':(glob,exclude)**/.zshrc' \
+    ':(glob,exclude)**/.zprofile' \
+    ':(glob,exclude)**/.profile' \
+    ':(glob,exclude)**/.ripgreprc' \
+    ':(glob,exclude)**/.mcp.json' \
+    ':(glob,exclude)**/.claude/**' \
+    ':(glob,exclude)**/.vscode/**' \
+    ':(glob,exclude)**/.idea/**' \
+    | git checkout-index -f -z --stdin \
+    || skip "checkout-index failed"
+
+git update-ref --no-deref HEAD "${merge_sha}" || skip "update-ref failed"
 
 # --- Resolve parents ---
 base_sha="$(git rev-parse "HEAD^1")" || skip "could not resolve merge parents"
