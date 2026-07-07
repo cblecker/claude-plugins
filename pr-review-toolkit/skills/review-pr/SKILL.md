@@ -6,6 +6,7 @@ disable-model-invocation: true
 arguments: [pr-url]
 argument-hint: <github-pr-url>
 allowed-tools:
+  - ExitPlanMode
   - Workflow
   - AskUserQuestion
   - Bash(git fetch origin refs/pull/*/merge)
@@ -44,6 +45,11 @@ The workflow and its agents are read-only — they must not call GitHub write to
 
 GitHub write tools may be used only after an exact preview and explicit final
 posting approval from the user.
+
+## Exit Plan Mode
+
+If plan mode is active, call `ExitPlanMode` now before proceeding. The workflow
+and its tool calls require manual mode to avoid unwanted permission prompts.
 
 ## Parse PR URL
 

@@ -99,7 +99,6 @@ const FINDING_SCHEMA = {
                   properties: {
                     path: { type: 'string' },
                     line: { type: 'number' },
-                    threadId: { type: 'string' },
                     detail: { type: 'string' }
                   },
                   required: ['detail']
@@ -110,28 +109,9 @@ const FINDING_SCHEMA = {
           },
           reasoning: { type: 'string' },
           whyItMatters: { type: 'string' },
-          suggestedFix: { type: 'string' },
-          postability: {
-            type: 'object',
-            properties: {
-              recommendation: {
-                type: 'string',
-                enum: ['recommended_to_post', 'overlaps', 'discussion_only', 'already_covered', 'discard']
-              },
-              rationale: { type: 'string' },
-              existingThreadIds: {
-                type: 'array',
-                items: { type: 'string' }
-              },
-              caveats: {
-                type: 'array',
-                items: { type: 'string' }
-              }
-            },
-            required: ['recommendation', 'rationale', 'existingThreadIds', 'caveats']
-          }
+          suggestedFix: { type: 'string' }
         },
-        required: ['location', 'severity', 'confidence', 'title', 'claim', 'evidence', 'reasoning', 'whyItMatters', 'suggestedFix', 'postability']
+        required: ['location', 'severity', 'confidence', 'title', 'claim', 'evidence', 'reasoning', 'whyItMatters', 'suggestedFix']
       }
     },
     positiveObservations: {
@@ -397,22 +377,7 @@ Look for patterns that hide errors:
 - Returning null/undefined/default values on error without logging
 - Using optional chaining (?.) to silently skip operations that might fail
 - Fallback chains that try multiple approaches without explaining why
-- Retry logic that exhausts attempts without informing the user
-
-## Your Output Format
-
-For each issue you find, provide:
-
-1. **Location**: File path and line number(s)
-2. **Severity**: critical (silent failure, broad catch), important (poor error message, unjustified fallback), or suggestion (missing context, could be more specific)
-3. **Issue Description**: What's wrong and why it's problematic
-4. **Hidden Errors**: List specific types of unexpected errors that could be caught and hidden
-5. **User Impact**: How this affects the user experience and debugging
-6. **Recommendation**: Specific code changes needed to fix the issue
-
-Check the project's CLAUDE.md for project-specific error handling patterns, logging functions, and error tracking conventions.
-
-Rate confidence 0-100. Only report findings with confidence >= 50.`,
+- Retry logic that exhausts attempts without informing the user`,
 
   'pr-test-analyzer': `You are an expert test coverage analyst specializing in pull request review. Your primary responsibility is to ensure that PRs have adequate test coverage for critical functionality without being overly pedantic about 100% coverage.
 
@@ -435,35 +400,8 @@ Rate confidence 0-100. Only report findings with confidence >= 50.`,
 
 4. **Prioritize Recommendations**: For each suggested test or modification:
    - Provide specific examples of failures it would catch
-   - Rate criticality from 1-10 (10 being absolutely essential)
    - Explain the specific regression or bug it prevents
    - Consider whether existing tests might already cover the scenario
-
-**Analysis Process:**
-
-1. First, examine the PR's changes to understand new functionality and modifications
-2. Review the accompanying tests to map coverage to functionality
-3. Identify critical paths that could cause production issues if broken
-4. Check for tests that are too tightly coupled to implementation
-5. Look for missing negative cases and error scenarios
-6. Consider integration points and their test coverage
-
-**Rating Guidelines:**
-- 9-10: Critical functionality that could cause data loss, security issues, or system failures
-- 7-8: Important business logic that could cause user-facing errors
-- 5-6: Edge cases that could cause confusion or minor issues
-- 3-4: Nice-to-have coverage for completeness
-- 1-2: Minor improvements that are optional
-
-**Output Format:**
-
-Structure your analysis as:
-
-1. **Summary**: Brief overview of test coverage quality
-2. **Critical Gaps** (if any): Tests rated 8-10 that must be added
-3. **Important Improvements** (if any): Tests rated 5-7 that should be considered
-4. **Test Quality Issues** (if any): Tests that are brittle or overfit to implementation
-5. **Positive Observations**: What's well-tested and follows best practices
 
 **Important Considerations:**
 
@@ -475,9 +413,7 @@ Structure your analysis as:
 - Be specific about what each test should verify and why it matters
 - Note when tests are testing implementation rather than behavior
 
-You are thorough but pragmatic, focusing on tests that provide real value in catching bugs and preventing regressions rather than achieving metrics. You understand that good tests are those that fail when behavior changes unexpectedly, not when implementation details change.
-
-Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`,
+You are thorough but pragmatic, focusing on tests that provide real value in catching bugs and preventing regressions rather than achieving metrics. You understand that good tests are those that fail when behavior changes unexpectedly, not when implementation details change.`,
 
   'comment-analyzer': `You are a meticulous code comment analyzer with deep expertise in technical documentation and long-term code maintainability. You approach every comment with healthy skepticism, understanding that inaccurate or outdated comments create technical debt that compounds over time.
 
@@ -492,56 +428,28 @@ When analyzing comments, you will:
    - Edge cases mentioned are actually handled in the code
    - Performance characteristics or complexity claims are accurate
 
-2. **Assess Completeness**: Evaluate whether the comment provides sufficient context without being redundant:
+2. **Assess Completeness and Long-term Value**: Evaluate whether the comment provides sufficient context without being redundant, and consider its utility over the codebase's lifetime:
    - Critical assumptions or preconditions are documented
    - Non-obvious side effects are mentioned
    - Important error conditions are described
    - Complex algorithms have their approach explained
    - Business logic rationale is captured when not self-evident
-
-3. **Evaluate Long-term Value**: Consider the comment's utility over the codebase's lifetime:
    - Comments that merely restate obvious code should be flagged for removal
    - Comments explaining 'why' are more valuable than those explaining 'what'
    - Comments that will become outdated with likely code changes should be reconsidered
    - Comments should be written for the least experienced future maintainer
    - Avoid comments that reference temporary states or transitional implementations
 
-4. **Identify Misleading Elements**: Actively search for ways comments could be misinterpreted:
+3. **Identify Misleading Elements and Suggest Improvements**: Actively search for ways comments could be misinterpreted and provide specific, actionable feedback:
    - Ambiguous language that could have multiple meanings
    - Outdated references to refactored code
    - Assumptions that may no longer hold true
    - Examples that don't match current implementation
    - TODOs or FIXMEs that may have already been addressed
-
-5. **Suggest Improvements**: Provide specific, actionable feedback:
    - Rewrite suggestions for unclear or inaccurate portions
    - Recommendations for additional context where needed
    - Clear rationale for why comments should be removed
-   - Alternative approaches for conveying the same information
-
-Your analysis output should be structured as:
-
-**Summary**: Brief overview of the comment analysis scope and findings
-
-**Critical Issues**: Comments that are factually incorrect or highly misleading
-- Location: [file:line]
-- Issue: [specific problem]
-- Suggestion: [recommended fix]
-
-**Improvement Opportunities**: Comments that could be enhanced
-- Location: [file:line]
-- Current state: [what's lacking]
-- Suggestion: [how to improve]
-
-**Recommended Removals**: Comments that add no value or create confusion
-- Location: [file:line]
-- Rationale: [why it should be removed]
-
-**Positive Findings**: Well-written comments that serve as good examples (if any)
-
-Remember: You are the guardian against technical debt from poor documentation. Be thorough, be skeptical, and always prioritize the needs of future maintainers. Every comment should earn its place in the codebase by providing clear, lasting value.
-
-Rate each finding: severity as critical/important/suggestion, confidence 0-100. Only report findings with confidence >= 50.`,
+   - Alternative approaches for conveying the same information`,
 
   'type-design-analyzer': `You are a type design expert with extensive experience in large-scale software architecture. Your specialty is analyzing and improving type designs to ensure they have strong, clearly expressed, and well-encapsulated invariants.
 
@@ -559,62 +467,29 @@ When analyzing a type, you will:
    - Business logic rules encoded in the type
    - Preconditions and postconditions
 
-2. **Evaluate Encapsulation** (Rate 1-10):
+2. **Evaluate Encapsulation**:
    - Are internal implementation details properly hidden?
    - Can the type's invariants be violated from outside?
    - Are there appropriate access modifiers?
    - Is the interface minimal and complete?
 
-3. **Assess Invariant Expression** (Rate 1-10):
+3. **Assess Invariant Expression**:
    - How clearly are invariants communicated through the type's structure?
    - Are invariants enforced at compile-time where possible?
    - Is the type self-documenting through its design?
    - Are edge cases and constraints obvious from the type definition?
 
-4. **Judge Invariant Usefulness** (Rate 1-10):
+4. **Judge Invariant Usefulness**:
    - Do the invariants prevent real bugs?
    - Are they aligned with business requirements?
    - Do they make the code easier to reason about?
    - Are they neither too restrictive nor too permissive?
 
-5. **Examine Invariant Enforcement** (Rate 1-10):
+5. **Examine Invariant Enforcement**:
    - Are invariants checked at construction time?
    - Are all mutation points guarded?
    - Is it impossible to create invalid instances?
    - Are runtime checks appropriate and comprehensive?
-
-**Output Format:**
-
-Provide your analysis in this structure:
-
-\`\`\`
-## Type: [TypeName]
-
-### Invariants Identified
-- [List each invariant with a brief description]
-
-### Ratings
-- **Encapsulation**: X/10
-  [Brief justification]
-
-- **Invariant Expression**: X/10
-  [Brief justification]
-
-- **Invariant Usefulness**: X/10
-  [Brief justification]
-
-- **Invariant Enforcement**: X/10
-  [Brief justification]
-
-### Strengths
-[What the type does well]
-
-### Concerns
-[Specific issues that need attention]
-
-### Recommended Improvements
-[Concrete, actionable suggestions that won't overcomplicate the codebase]
-\`\`\`
 
 **Key Principles:**
 
@@ -634,25 +509,58 @@ Provide your analysis in this structure:
 - Types with too many responsibilities
 - Missing validation at construction boundaries
 - Inconsistent enforcement across mutation methods
-- Types that rely on external code to maintain invariants
+- Types that rely on external code to maintain invariants`,
 
-**When Suggesting Improvements:**
+  'security-reviewer': `You are a security-focused code reviewer specializing in identifying vulnerabilities introduced or exposed by pull request changes. You analyze code through the lens of an attacker looking for exploitable weaknesses.
 
-Always consider:
-- The complexity cost of your suggestions
-- Whether the improvement justifies potential breaking changes
-- The skill level and conventions of the existing codebase
-- Performance implications of additional validation
-- The balance between safety and usability
+**Focus areas:**
+- Injection vulnerabilities: SQL injection, command injection, path traversal, LDAP injection, template injection
+- Authentication and authorization: bypass opportunities, missing auth checks, privilege escalation paths
+- Credential exposure: hardcoded secrets, tokens, passwords, or API keys in code or config
+- Unsafe deserialization: accepting untrusted data into deserialization functions
+- Server-side request forgery (SSRF): user-controlled URLs used in server-side requests
+- Cross-site scripting (XSS): unsanitized user input rendered in HTML or JavaScript
+- Insecure cryptography: weak algorithms (MD5, SHA1 for security), hardcoded keys, missing salts, insufficient key lengths
+- Missing input validation at trust boundaries: user input, API parameters, file uploads, external data
+- Insecure defaults: permissive CORS, debug mode in production, overly broad permissions
+- Sensitive data handling: PII logged without redaction, secrets in error messages, insecure storage
 
-Think deeply about each type's role in the larger system. Sometimes a simpler type with fewer guarantees is better than a complex type that tries to do too much. Your goal is to help create types that are robust, clear, and maintainable without introducing unnecessary complexity.
+For each issue, describe the specific attack scenario and how an attacker could exploit the vulnerability.`,
 
-Map each finding to severity (critical/important/suggestion) and confidence (0-100). Only report findings with confidence >= 50.`
+  'api-compat-reviewer': `You are an API compatibility analyst focused on detecting breaking changes introduced by pull request changes. You protect downstream consumers from unexpected breakage.
+
+**Focus areas:**
+- Removed or renamed public functions, methods, types, or constants
+- Changed function signatures: added required parameters, changed parameter types, changed return types
+- Modified interface contracts: added required methods, changed method signatures
+- Breaking changes in REST/gRPC/protobuf definitions: renamed endpoints, changed request/response schemas, removed fields, renumbered protobuf fields
+- Removed or renamed exported constants, configuration keys, or environment variables
+- Changed error types or error codes that consumers may be matching on
+- Behavioral changes in public APIs that could break callers relying on previous behavior
+- Removed or changed default values that consumers depend on
+- Changed package exports or module entry points
+
+For each issue, identify the specific downstream impact and which consumers would break.`,
+
+  'concurrency-reviewer': `You are a concurrency specialist focused on identifying race conditions, deadlocks, and resource management issues in concurrent code. You analyze code for thread safety and correct synchronization.
+
+**Focus areas:**
+- Race conditions: shared mutable state accessed without synchronization
+- Mutex and lock ordering: inconsistent lock acquisition order across code paths leading to deadlocks
+- Goroutine and thread leaks: spawned concurrent work that is never joined, cancelled, or bounded
+- Channel and queue issues: unbuffered channels causing deadlocks, missing close signals, sends on closed channels
+- Context cancellation: missing propagation of cancellation, work continuing after context is done
+- Atomic operation correctness: non-atomic read-modify-write sequences, mixing atomic and non-atomic access
+- Missing defer for unlock: Lock() calls without corresponding deferred Unlock()
+- Resource cleanup under concurrency: file handles, connections, or temporary resources not cleaned up when concurrent operations fail
+- Shared state in concurrent tests: test helpers or fixtures that are not safe for parallel test execution
+
+For each issue, describe the specific interleaving or timing that triggers the bug.`
 }
 
-const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Include a postability recommendation for human review only: recommended_to_post, overlaps, discussion_only, already_covered, or discard. Preserve concrete evidence from patches, files, and existing threads; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
+const STANDARDIZATION_SUFFIX = `Return only high-signal candidate findings. For each finding, provide a concise title, a concrete claim, structured evidence, specialist reasoning, why it matters, and a specific suggested fix when applicable. Preserve concrete evidence from patches and files; do not collapse reasoning into generic summaries. Use a neutral technical voice and do not reference yourself, your role, or your review methodology.`
 
-const FILE_PAGE_SIZE = 10
+const FILE_PAGE_SIZE = 30
 const FILE_SINGLE_PAGE_RETRIES = 2
 // Workflow agent() calls cannot pass per-call tool allowlists, so phase-specific
 // plugin agent types define the tool boundary for spawned agents.
@@ -685,6 +593,21 @@ const REVIEWERS = {
   'type-design-analyzer': {
     lens: 'type-design',
     prompt: REVIEWER_PROMPTS['type-design-analyzer'],
+    options: { effort: 'high' }
+  },
+  'security-reviewer': {
+    lens: 'security',
+    prompt: REVIEWER_PROMPTS['security-reviewer'],
+    options: { effort: 'high' }
+  },
+  'api-compat-reviewer': {
+    lens: 'api-compat',
+    prompt: REVIEWER_PROMPTS['api-compat-reviewer'],
+    options: { effort: 'high' }
+  },
+  'concurrency-reviewer': {
+    lens: 'concurrency',
+    prompt: REVIEWER_PROMPTS['concurrency-reviewer'],
     options: { effort: 'high' }
   }
 }
@@ -754,31 +677,6 @@ function whyItMattersText(finding) {
   if (!whyItMatters) return reasoning
   if (whyItMatters.indexOf(reasoning) !== -1) return whyItMatters
   return whyItMatters + '\n\nSpecialist reasoning: ' + reasoning
-}
-
-function postabilityRecommendation(finding) {
-  const postability = finding.postability || {}
-  return postability.recommendation || ''
-}
-
-function overlapFromFinding(finding) {
-  if (finding.existingReviewOverlap) return finding.existingReviewOverlap
-
-  const postability = finding.postability || {}
-  const recommendation = postability.recommendation || ''
-  const threadIds = Array.isArray(postability.existingThreadIds) ? postability.existingThreadIds : []
-  const status = recommendation === 'overlaps'
-    ? 'overlaps'
-    : recommendation === 'already_covered'
-      ? 'already_covered'
-      : 'none'
-
-  return {
-    status: status,
-    threadId: threadIds[0] || '',
-    commentId: undefined,
-    rationale: postability.rationale || 'No existing review overlap was classified.'
-  }
 }
 
 function compactText(value) {
@@ -948,30 +846,15 @@ function inferThreadOverlap(item, threads) {
   }
 }
 
-function routeSection(item, preferredSection, recommendation) {
+function routeSection(item, preferredSection) {
   const overlap = item.existingReviewOverlap || {}
-  if (preferredSection === 'discarded' || recommendation === 'discard') return 'discarded'
-  if (overlap.status === 'already_covered' || recommendation === 'already_covered') return 'alreadyCovered'
-  if (overlap.status === 'overlaps' || recommendation === 'overlaps') return 'relatedToExisting'
-  if (recommendation === 'discussion_only') return 'discussionOnly'
-  if (recommendation === 'recommended_to_post') return 'recommendedToPost'
+  if (preferredSection === 'discarded') return 'discarded'
+  if (overlap.status === 'already_covered') return 'alreadyCovered'
+  if (overlap.status === 'overlaps') return 'relatedToExisting'
   if (BOARD_SECTIONS.indexOf(preferredSection) !== -1) return preferredSection
   if (asNumber(item.confidence, 0) < 50) return 'discarded'
   if ((item.severity === 'critical' || item.severity === 'important') && asNumber(item.confidence, 0) >= 80) return 'recommendedToPost'
   return 'discussionOnly'
-}
-
-function bestRecommendation(left, right) {
-  const order = {
-    discard: 0,
-    already_covered: 1,
-    discussion_only: 2,
-    overlaps: 3,
-    recommended_to_post: 4
-  }
-  const leftScore = Object.prototype.hasOwnProperty.call(order, left) ? order[left] : -1
-  const rightScore = Object.prototype.hasOwnProperty.call(order, right) ? order[right] : -1
-  return rightScore > leftScore ? right : left
 }
 
 function mergeBoardEntries(entries) {
@@ -987,8 +870,7 @@ function mergeBoardEntries(entries) {
     }
     byKey[key] = {
       item: mergeBoardItem(byKey[key].item, entry.item),
-      section: byKey[key].section || entry.section,
-      recommendation: bestRecommendation(byKey[key].recommendation, entry.recommendation)
+      section: byKey[key].section || entry.section
     }
   })
   return order.map(key => byKey[key])
@@ -1010,7 +892,7 @@ function normalizeBoardSections(board, prContext) {
   })
 
   mergeBoardEntries(entries).forEach(entry => {
-    const section = routeSection(entry.item, entry.section, entry.recommendation)
+    const section = routeSection(entry.item, entry.section)
     normalized[section].push(entry.item)
   })
 
@@ -1057,7 +939,48 @@ function signalsForFile(file) {
   if (p.indexOf('error') !== -1 || p.indexOf('exception') !== -1 || p.indexOf('fallback') !== -1 || p.indexOf('retry') !== -1 || p.indexOf('handler') !== -1) signals.push('error-handling')
   if (/\.(ts|tsx|go|rs|java|kt|cs)$/.test(p) || p.indexOf('types') !== -1 || p.indexOf('model') !== -1 || p.indexOf('schema') !== -1 || p.indexOf('interface') !== -1) signals.push('types')
   if (p.indexOf('api') !== -1 || p.indexOf('client') !== -1 || p.indexOf('server') !== -1 || p.indexOf('controller') !== -1 || p.indexOf('route') !== -1) signals.push('public-api')
+  if ((p.indexOf('auth') !== -1 && !/\bauthors?\b/.test(p)) || p.indexOf('security') !== -1 || p.indexOf('crypto') !== -1 || p.indexOf('token') !== -1 || p.indexOf('password') !== -1 || p.indexOf('secret') !== -1 || p.indexOf('credential') !== -1 || p.indexOf('session') !== -1 || p.indexOf('permission') !== -1 || p.indexOf('oauth') !== -1 || p.indexOf('jwt') !== -1 || (p.indexOf('cert') !== -1 && p.indexOf('concert') === -1) || p.indexOf('tls') !== -1 || p.indexOf('ssl') !== -1) signals.push('security')
+  if (p.indexOf('concurrent') !== -1 || p.indexOf('parallel') !== -1 || p.indexOf('mutex') !== -1 || (p.indexOf('lock') !== -1 && p.indexOf('block') === -1) || p.indexOf('channel') !== -1 || p.indexOf('goroutine') !== -1 || p.indexOf('worker') !== -1 || p.indexOf('pool') !== -1 || p.indexOf('queue') !== -1 || (p.indexOf('sync') !== -1 && p.indexOf('async') === -1)) signals.push('concurrency')
   return uniq(signals)
+}
+
+function enrichSignalsFromDiff(files, fullDiff) {
+  if (!fullDiff) return files
+  var hunks = {}
+  var currentFile = null
+  fullDiff.split('\n').forEach(function(line) {
+    var diffMatch = /^diff --git a\/.+ b\/(.+)$/.exec(line)
+    if (diffMatch) {
+      currentFile = diffMatch[1]
+      if (!hunks[currentFile]) hunks[currentFile] = []
+      return
+    }
+    if (currentFile && (line.charAt(0) === '+' && line.charAt(1) !== '+')) {
+      hunks[currentFile].push(line.substring(1))
+    }
+  })
+
+  var SIGNAL_PATTERNS = {
+    'error-handling': /\b(catch|except|recover|on\s*error|fallback|rescue)\b/i,
+    'types': /\b(interface|struct|class\s|enum\s)\b|@dataclass/,
+    'security': /\b(auth|password|token|secret|credential|jwt|bcrypt|hash|encrypt|decrypt|certificate)\b/i,
+    'concurrency': /\b(mutex|Mutex|chan\s|go\s+func|async\s|await\s|WaitGroup|Semaphore|threading|concurrent)\b|Lock\(\)|RLock\(\)/,
+    'public-api': /\b(export\s|pub\s+fn|public\s+func|module\.exports)\b/
+  }
+
+  files.forEach(function(file) {
+    var addedLines = hunks[file.path]
+    if (!addedLines || addedLines.length === 0) return
+    var combined = addedLines.join('\n')
+    var newSignals = file.signals ? file.signals.slice() : []
+    Object.keys(SIGNAL_PATTERNS).forEach(function(signal) {
+      if (SIGNAL_PATTERNS[signal].test(combined)) {
+        newSignals.push(signal)
+      }
+    })
+    file.signals = uniq(newSignals)
+  })
+  return files
 }
 
 function normalizePr(prResult) {
@@ -1315,6 +1238,8 @@ function buildSummary(pr, files, threads) {
   if (signalCounts['error-handling']) riskAreas.push('error-handling')
   if (signalCounts['types']) riskAreas.push('type-design')
   if (signalCounts['public-api']) riskAreas.push('public-api')
+  if (signalCounts['security']) riskAreas.push('security')
+  if (signalCounts['concurrency']) riskAreas.push('concurrency')
   if ((categories.source || 0) > 0 && (categories.tests || 0) === 0) riskAreas.push('tests')
   if ((categories.config || 0) > 0 || (categories.ci || 0) > 0) riskAreas.push('config-or-ci')
 
@@ -1346,6 +1271,9 @@ function selectReviewers(files, summary) {
   if (signals['error-handling']) selected.push('silent-failure-hunter')
   if ((categories.docs || 0) > 0 || signals.comments) selected.push('comment-analyzer')
   if (signals.types) selected.push('type-design-analyzer')
+  if (signals.security) selected.push('security-reviewer')
+  if (signals['public-api']) selected.push('api-compat-reviewer')
+  if (signals.concurrency) selected.push('concurrency-reviewer')
 
   return uniq(selected).filter(name => REVIEWERS[name])
 }
@@ -1354,8 +1282,7 @@ function contextForPrompt(prContext) {
   return JSON.stringify({
     pr: prContext.pr,
     summary: prContext.summary,
-    files: prContext.files,
-    threads: prContext.threads
+    files: prContext.files
   })
 }
 
@@ -1389,10 +1316,10 @@ function patchInstructions(prContext) {
 
 function analysisPrompt(name, prContext) {
   return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX
-    + '\n\n## Shared PR context\n\nThe workflow already collected PR metadata, the complete changed-file manifest, and review threads. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n'
+    + '\n\n## Shared PR context\n\nThe workflow already collected PR metadata and the complete changed-file manifest. Use this shared context for whole-PR awareness and do not refetch PR metadata, the full file list, or review threads.\n\n'
     + contextForPrompt(prContext) + '\n\n'
     + patchInstructions(prContext)
-    + '\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Postability is only a recommendation to the synthesizer; do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.'
+    + '\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.'
 }
 
 function boardItemFromFinding(finding, index) {
@@ -1407,7 +1334,7 @@ function boardItemFromFinding(finding, index) {
     evidence: evidenceText(finding),
     whyItMatters: whyItMattersText(finding),
     suggestedFix: finding.suggestedFix || '',
-    existingReviewOverlap: overlapFromFinding(finding),
+    existingReviewOverlap: finding.existingReviewOverlap || { status: 'none', rationale: '' },
     sourceAgent: finding.sourceAgent || ''
   }
 }
@@ -1425,14 +1352,11 @@ function fallbackBoard(findings, positives, prContext) {
   const entries = findings.map((finding, index) => {
     const item = boardItemFromFinding(finding, index)
     item.existingReviewOverlap = inferThreadOverlap(item, prContext.threads)
-    return {
-      item: item,
-      recommendation: postabilityRecommendation(finding)
-    }
+    return { item: item }
   })
 
   mergeBoardEntries(entries).forEach(entry => {
-    board[routeSection(entry.item, '', entry.recommendation)].push(entry.item)
+    board[routeSection(entry.item, '')].push(entry.item)
   })
   BOARD_SECTIONS.forEach(section => sortFindings(board[section]))
   return board
@@ -1510,6 +1434,16 @@ const prResult = await agent(metadataPrompt, {
 
 const pr = normalizePr(prResult)
 
+const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
+const threadCollectionPromise = agent(threadCollectionPrompt, {
+  label: 'collect-review-threads',
+  schema: THREAD_SCHEMA,
+  phase: 'Collect',
+  agentType: GITHUB_COLLECTOR_AGENT_TYPE,
+  model: 'haiku',
+  effort: 'high'
+})
+
 let files
 let filePageCount
 let manifestSource
@@ -1559,19 +1493,11 @@ if (localGitManifest && localGitManifest.length > 0) {
 }
 if (pr.changedFiles === 0) pr.changedFiles = files.length
 
-log('Fetching review threads')
-const threadPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
-
-const threadData = await agent(threadPrompt, {
-  label: 'collect-review-threads',
-  schema: THREAD_SCHEMA,
-  phase: 'Collect',
-  agentType: GITHUB_COLLECTOR_AGENT_TYPE,
-  model: 'haiku',
-  effort: 'high'
-})
+log('Awaiting review threads')
+const threadData = await threadCollectionPromise
 
 const threads = (threadData && Array.isArray(threadData.threads)) ? threadData.threads : []
+enrichSignalsFromDiff(files, effectiveFullDiff)
 const summary = buildSummary(pr, files, threads)
 const prContext = {
   pr: pr,
@@ -1643,7 +1569,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- relatedToExisting: findings that overlap with an existing review thread — either as an endorsement or with additional detail beyond what the thread covers.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify against existing review threads by logical concern, not just file proximity. Use existingReviewOverlap.status values none, overlaps, or already_covered.\n4. Use each specialist's postability recommendation as an input, not a command. Do not invent posting or drafting behavior.\n5. Include positive observations when useful.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- relatedToExisting: findings that overlap with an existing review thread — either as an endorsement or with additional detail beyond what the thread covers.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify each finding against existing review threads by logical concern, not just file proximity. Set existingReviewOverlap.status to overlaps, already_covered, or none based on whether the finding's concern matches an existing thread.\n4. Do not invent posting or drafting behavior.\n5. Include positive observations when useful.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',
