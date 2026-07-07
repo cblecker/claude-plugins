@@ -95,6 +95,9 @@ repository files and use available read-only MCP tools to verify findings.
 | pr-test-analyzer | Functional code that should have corresponding tests | Analyzes test coverage completeness |
 | comment-analyzer | Changes add or modify comments, docstrings, or docs | Checks comment accuracy and maintainability |
 | type-design-analyzer | Changes introduce or modify type definitions in typed languages | Evaluates type design and invariant quality |
+| security-reviewer | Changes touch auth, crypto, tokens, credentials, or security-related code | Reviews for security vulnerabilities and unsafe patterns |
+| api-compat-reviewer | Changes touch public APIs, exports, or client-facing interfaces | Checks API compatibility and breaking changes |
+| concurrency-reviewer | Changes touch mutexes, locks, channels, goroutines, or parallel code | Reviews concurrency patterns for races and deadlocks |
 
 Agent selection is liberal: when in doubt, the agent runs. All agents execute in
 parallel within a single workflow from the collected PR manifest and thread
