@@ -9,9 +9,6 @@ allowed-tools:
   - ExitPlanMode
   - Workflow
   - AskUserQuestion
-  - Bash(git fetch origin refs/pull/*/merge)
-  - Bash(git checkout --detach FETCH_HEAD)
-  - Bash(git rev-parse *)
   - Bash(git diff *)
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__pull_request_review_write
@@ -30,16 +27,15 @@ allowed-tools:
 
 ## Git Environment
 
-- Repository root: !`git rev-parse --show-toplevel 2>/dev/null || echo __NOT_A_GIT_REPO__`
-- Worktree state: !`git diff-index --quiet HEAD -- 2>/dev/null && echo __WORKTREE_CLEAN__ || echo __WORKTREE_DIRTY__`
 - Origin URL: !`git remote get-url origin 2>/dev/null || echo __NO_ORIGIN_REMOTE__`
+- Checkout: !`bash "${CLAUDE_SKILL_DIR}/scripts/checkout.sh" "$pr-url"`
 
 ## Constraints
 
 Use only `allowed-tools`. Do not generate ad-hoc processing scripts. Workflow
 return values and MCP responses are structured JSON; read them directly. Bash is
-limited to the git patterns in `allowed-tools` for preflight and diff steps
-below.
+limited to the git patterns in `allowed-tools` for diff collection and
+line-number translation below.
 
 The workflow and its agents are read-only — they must not call GitHub write tools.
 
@@ -69,70 +65,32 @@ Call `pull_request_read` with method `get`. Extract and record:
 
 ## Local Git Preflight
 
-Set up a verified local checkout of the PR merge result. If any check below
-fails, record the reason as `fallbackReason`, skip remaining preflight, and
-launch the workflow without `localGitManifest` or `fullDiff`.
+Read the Checkout output from Git Environment above.
 
-### Check injected git environment
+`CHECKOUT_SKIP:` → record the reason as `fallbackReason`, skip to workflow
+launch without `localGitManifest` or `fullDiff`.
 
-Read the three values from the Git Environment section above.
+`CHECKOUT_OK` → parse `mergeCommit`, `baseSha`, `headSha` from the subsequent
+`key value` lines. Then:
 
-1. `__NOT_A_GIT_REPO__` → "not a git repository"
-2. `__WORKTREE_DIRTY__` → "worktree has uncommitted changes"
-3. `__NO_ORIGIN_REMOTE__` → "no origin remote"
-4. Normalize origin URL and PR base URL to `{owner}/{repo}` (strip protocol,
-   `.git` suffix; case-insensitive). Mismatch → "origin does not match PR base
-   repository"
-
-### Fetch merge ref
-
-```bash
-git fetch origin refs/pull/{number}/merge
-```
-
-Failure → "merge ref fetch failed".
-
-### Checkout merge commit
-
-```bash
-git checkout --detach FETCH_HEAD
-```
-
-Do NOT auto-restore the original ref afterward.
-
-### Verify merge parents
-
-```bash
-git rev-parse HEAD HEAD^1 HEAD^2
-```
-
-Output: line 1 = `mergeCommit`, line 2 = `baseSha`, line 3 = `headSha` (PR
-head). If line 3 does not match the PR metadata `headSha`, record "HEAD^2 does
-not match PR headSha". Do not trust local diff data on mismatch.
+1. Verify `headSha` matches PR metadata `headSha`. Mismatch → record "HEAD^2
+   does not match PR headSha". Do not trust local diff data on mismatch.
+2. Normalize origin URL (from Git Environment) and PR base URL to
+   `{owner}/{repo}` (strip protocol, `.git` suffix; case-insensitive).
+   Mismatch → "origin does not match PR base repository".
 
 ## Build Local Git Manifest
 
-If all preflight checks passed, build the file manifest from local git.
+Parse the `NAME_STATUS` and `NUMSTAT` sections from the checkout output.
 
-### Collect file statuses
-
-```bash
-git diff --name-status -z HEAD^1 HEAD
-```
-
-Parse NUL-delimited output into `{path, status}` entries. Map `A`, `M`, `D`,
+From `NAME_STATUS`, parse each line into `{path, status}`. Map `A`, `M`, `D`,
 `R*`, `C*` to `added`, `modified`, `deleted`, `renamed`, `copied`. For renames
 and copies, use the destination path.
 
-### Collect line counts
-
-```bash
-git diff --numstat -z HEAD^1 HEAD
-```
-
-Parse NUL-delimited numstat and merge with the status list. For renames/copies
-use destination path as key. Binary files show `-` for additions/deletions;
-store as 0. Each entry has shape: `{path, status, additions, deletions}`.
+From `NUMSTAT`, parse additions and deletions per file and merge with the status
+list. For renames/copies use destination path as key. Binary files show `-` for
+additions/deletions; store as 0. Each entry: `{path, status, additions,
+deletions}`.
 
 The resulting array is the `localGitManifest`.
 
