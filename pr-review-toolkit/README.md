@@ -6,11 +6,35 @@ as a single Workflow-based skill. The workflow collects shared PR context,
 runs specialist reviewers, and returns an interactive review board for the
 human reviewer.
 
-## Usage
+## Skills
+
+### review-pr
 
 ```text
 /pr-review-toolkit:review-pr <github-pr-url>
 ```
+
+Conduct a comprehensive PR review and return an interactive review board.
+See [Review Flow](#review-flow) below.
+
+### address-pr-feedback
+
+```text
+/pr-review-toolkit:address-pr-feedback [--interactive]
+```
+
+Systematically collect, analyze, score, and address pull request review
+feedback from the current branch's PR. After implementing changes, drafts
+reply comments and posts them to GitHub with per-reply user approval.
+
+By default, the skill auto-detects the open PR for the current branch and
+fetches all review comments via GitHub MCP. Use `--interactive` to manually
+paste feedback items instead.
+
+**Flow:** branch validation &rarr; feedback collection &rarr; parallel
+analysis and scoring (Sonnet + Haiku agents) &rarr; per-item action
+confirmation &rarr; plan generation &rarr; implementation &rarr; reply
+posting.
 
 ## Review Flow
 
