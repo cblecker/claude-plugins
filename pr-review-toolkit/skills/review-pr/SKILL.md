@@ -277,16 +277,22 @@ For each finding being posted as a new line comment, show:
 For each overlap finding being posted as a thread reply, show:
 
 - finding id, "Reply to thread on path:line", and body
+- if the target thread is resolved, append a warning:
+  `⚠ Target thread is resolved — reply will stay collapsed and the PR author may
+  not see it.`
 
 For review body text (non-line findings), show the review body.
 
 Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
 
-After the preview, ask for explicit approval with `AskUserQuestion`:
+After the preview, ask for explicit approval with `AskUserQuestion`. Use the
+`preview` field on each option so the reviewer can attach free-text notes to
+their selection (e.g., specifying exactly what to edit):
 
 1. "Post this review"
-2. "Edit the draft"
-3. "Add or remove findings"
+2. "Edit findings" — covers editing drafts, adding, or removing findings
+3. "Convert resolved-thread replies to new line comments" — include this option
+   only when at least one overlap finding targets a resolved thread
 4. "Cancel"
 
 Accept approval only when the user selects "Post this review" or clearly

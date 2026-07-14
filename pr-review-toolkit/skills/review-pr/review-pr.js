@@ -185,6 +185,7 @@ const BOARD_ITEM_SCHEMA = {
         },
         threadId: { type: 'string' },
         commentId: { type: 'number' },
+        isResolved: { type: 'boolean' },
         rationale: { type: 'string' }
       },
       required: ['status', 'rationale']
@@ -775,6 +776,7 @@ function bestOverlap(left, right) {
     status: selected.status || 'none',
     threadId: selected.threadId || '',
     commentId: selected.commentId || (right && right.commentId) || (left && left.commentId) || undefined,
+    isResolved: selected.isResolved || false,
     rationale: combineText(left && left.rationale, right && right.rationale)
   }
 }
@@ -799,13 +801,15 @@ function mergeBoardItem(base, next) {
 function inferThreadOverlap(item, threads) {
   const existing = item.existingReviewOverlap || {}
   if (existing.status && existing.status !== 'none') {
-    if (!existing.commentId && existing.threadId) {
-      const matched = (threads || []).find(t => t && t.id === existing.threadId)
-      if (matched && matched.commentId) {
-        return Object.assign({}, existing, { commentId: matched.commentId })
-      }
+    if (existing.threadId || existing.commentId) {
+      const matched = (threads || []).find(t =>
+        t && (t.id === existing.threadId || (existing.commentId && t.commentId === existing.commentId))
+      )
+      return Object.assign({}, existing, {
+        commentId: existing.commentId || (matched && matched.commentId) || undefined,
+        isResolved: matched ? matched.isResolved || false : false
+      })
     }
-    if (existing.threadId || existing.commentId) return existing
   }
 
   const location = item.location || {}
@@ -830,18 +834,18 @@ function inferThreadOverlap(item, threads) {
       status: 'none',
       threadId: existing.threadId || '',
       commentId: existing.commentId || undefined,
+      isResolved: false,
       rationale: existing.rationale || 'No existing review overlap was classified.'
     }
   }
 
-  const status = best.thread.isResolved && best.overlap >= 0.25
-    ? 'already_covered'
-    : 'overlaps'
+  const status = best.overlap >= 0.5 ? 'already_covered' : 'overlaps'
 
   return {
     status: status,
     threadId: best.thread.id || '',
     commentId: best.thread.commentId || undefined,
+    isResolved: best.thread.isResolved || false,
     rationale: 'Inferred overlap with an existing review thread on ' + location.path + (best.thread.line != null ? ':' + best.thread.line : '') + '.'
   }
 }
@@ -1334,7 +1338,7 @@ function boardItemFromFinding(finding, index) {
     evidence: evidenceText(finding),
     whyItMatters: whyItMattersText(finding),
     suggestedFix: finding.suggestedFix || '',
-    existingReviewOverlap: finding.existingReviewOverlap || { status: 'none', rationale: '' },
+    existingReviewOverlap: finding.existingReviewOverlap || { status: 'none', isResolved: false, rationale: '' },
     sourceAgent: finding.sourceAgent || ''
   }
 }
