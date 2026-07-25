@@ -1,5 +1,11 @@
 # PR Review Toolkit Workflow Rewrite Plan
 
+> **Historical design document.** This plan guided the original rewrite and is
+> kept for design rationale. Where it differs from the implementation (for
+> example, the plumbing-based `scripts/checkout.sh` replacing
+> `git checkout --detach`, the narrower `allowed-tools` list, and non-NUL
+> manifest output), the implementation and `README.md` are authoritative.
+
 This plan describes how to implement the requirements in
 `docs/PR_REVIEW_REQUIREMENTS.md` using a Workflow-backed analysis engine and a
 skill-driven interactive review loop.

@@ -19,15 +19,19 @@ review feedback, then post reply comments to GitHub.
 **Validate branch first:**
 
 - Run `git branch --show-current` to get the current branch
-- Run `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'` to get the mainline branch
+- Get the mainline branch: run
+  `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` and strip
+  the `origin/` prefix. If that fails (origin/HEAD not set locally), fall
+  back to
+  `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'`
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution
 
 **Then ensure plan mode is active:**
 
-- If plan mode is not already active, call `EnterPlanMode` and wait for user
-  approval
+- If plan mode is not already active, call `EnterPlanMode` to switch into
+  planning before collecting and analyzing feedback
 - If plan mode is already active (check for "Plan mode is active" in system
   context), proceed directly
 
@@ -71,6 +75,8 @@ Check if the argument contains `--interactive`. If it does, use the
    - `commentId` — numeric comment ID (for reply posting)
    - `threadId` — thread node ID (inline comments) or null
    - `type` — `"review"` | `"inline"` | `"conversation"`
+   - `isResolved` — thread resolution state when the API response exposes it;
+     null when unknown (do not guess)
 
 ### Interactive Collection Path (`--interactive`)
 
@@ -84,8 +90,9 @@ Loop until user says "done":
    - Extract feedback text
    - Extract author (if available)
    - Extract file/line location (if available)
-   - Normalize into structured format with `commentId`, `threadId`, and `type`
-     fields (set to null if not available from pasted content)
+   - Normalize into structured format with `commentId`, `threadId`, `type`,
+     and `isResolved` fields (set to null if not available from pasted
+     content or the fetched comment data)
 3. Acknowledge: "Recorded item [N]: [brief summary]"
 4. Continue loop
 
@@ -233,7 +240,9 @@ item that has a draft reply.
 
 For each item:
 
-1. Present the draft reply text (generated in Phase 2, refined in Phase 4)
+1. Present the draft reply text (generated in Phase 2, refined in Phase 4).
+   If the item's thread is known to be resolved (`isResolved` is true), note
+   it: a reply will stay collapsed and the reviewer may not see it.
 2. Use `AskUserQuestion`:
 
    ```text

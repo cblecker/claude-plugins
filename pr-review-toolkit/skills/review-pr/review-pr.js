@@ -149,7 +149,7 @@ const THREAD_SCHEMA = {
             }
           }
         },
-        required: ['id', 'path', 'author', 'body', 'isResolved']
+        required: ['id', 'path', 'author', 'body']
       }
     }
   },
@@ -765,6 +765,13 @@ function bestSeverity(left, right) {
   return (SEVERITY_ORDER[left] ?? 3) <= (SEVERITY_ORDER[right] ?? 3) ? left : right
 }
 
+// Resolution state is tri-state: true, false, or undefined when the GitHub
+// read tools did not expose it. Coercing unknown to false would hide the
+// uncertainty from the posting preview.
+function knownResolved(value) {
+  return typeof value === 'boolean' ? value : undefined
+}
+
 function bestOverlap(left, right) {
   const order = { none: 0, overlaps: 1, already_covered: 2 }
   const leftStatus = (left && left.status) || 'none'
@@ -772,11 +779,14 @@ function bestOverlap(left, right) {
   const selected = (order[rightStatus] > order[leftStatus]) ? right : left
   if (!selected) return { status: 'none', threadId: '', rationale: '' }
 
+  // threadId, commentId, and isResolved must all come from the selected
+  // overlap: mixing ids across merged findings can point replies at the
+  // wrong thread.
   return {
     status: selected.status || 'none',
     threadId: selected.threadId || '',
-    commentId: selected.commentId || (right && right.commentId) || (left && left.commentId) || undefined,
-    isResolved: selected.isResolved || false,
+    commentId: selected.commentId || undefined,
+    isResolved: knownResolved(selected.isResolved),
     rationale: combineText(left && left.rationale, right && right.rationale)
   }
 }
@@ -798,20 +808,7 @@ function mergeBoardItem(base, next) {
   }
 }
 
-function inferThreadOverlap(item, threads) {
-  const existing = item.existingReviewOverlap || {}
-  if (existing.status && existing.status !== 'none') {
-    if (existing.threadId || existing.commentId) {
-      const matched = (threads || []).find(t =>
-        t && (t.id === existing.threadId || (existing.commentId && t.commentId === existing.commentId))
-      )
-      return Object.assign({}, existing, {
-        commentId: existing.commentId || (matched && matched.commentId) || undefined,
-        isResolved: matched ? matched.isResolved || false : false
-      })
-    }
-  }
-
+function bestThreadMatch(item, threads) {
   const location = item.location || {}
   const itemText = combinedItemText(item)
   let best = null
@@ -828,13 +825,50 @@ function inferThreadOverlap(item, threads) {
       best = { thread: thread, overlap: overlap, sameLine: sameLine, nearLine: nearLine, score: score }
     }
   })
+  return best
+}
 
+function inferThreadOverlap(item, threads) {
+  const existing = item.existingReviewOverlap || {}
+  const location = item.location || {}
+
+  // The synthesizer classifies overlap by logical concern with full thread
+  // bodies in context; keep its non-none status and only attach thread
+  // identity here. Token matching is a fallback classifier, not an override.
+  if (existing.status && existing.status !== 'none') {
+    let matched = null
+    if (existing.threadId || existing.commentId) {
+      matched = (threads || []).find(t =>
+        t && ((existing.threadId && t.id === existing.threadId) || (existing.commentId && t.commentId === existing.commentId))
+      ) || null
+    }
+    if (!matched) {
+      const best = bestThreadMatch(item, threads)
+      matched = best ? best.thread : null
+    }
+    // When a thread is matched, take the whole identity triple from it so
+    // threadId, commentId, and isResolved always describe one thread; a
+    // synthesizer-provided id that resolved to nothing must not be paired
+    // with a different thread's commentId.
+    return {
+      status: existing.status,
+      threadId: matched ? (matched.id || '') : (existing.threadId || ''),
+      commentId: matched ? (matched.commentId || undefined) : (existing.commentId || undefined),
+      isResolved: matched ? knownResolved(matched.isResolved) : knownResolved(existing.isResolved),
+      rationale: existing.rationale
+        || (matched
+          ? 'Overlaps an existing review thread on ' + (matched.path || location.path || 'PR') + (matched.line != null ? ':' + matched.line : '') + '.'
+          : 'Overlap classified during review synthesis.')
+    }
+  }
+
+  const best = bestThreadMatch(item, threads)
   if (!best) {
     return {
       status: 'none',
-      threadId: existing.threadId || '',
-      commentId: existing.commentId || undefined,
-      isResolved: false,
+      threadId: '',
+      commentId: undefined,
+      isResolved: undefined,
       rationale: existing.rationale || 'No existing review overlap was classified.'
     }
   }
@@ -845,7 +879,7 @@ function inferThreadOverlap(item, threads) {
     status: status,
     threadId: best.thread.id || '',
     commentId: best.thread.commentId || undefined,
-    isResolved: best.thread.isResolved || false,
+    isResolved: knownResolved(best.thread.isResolved),
     rationale: 'Inferred overlap with an existing review thread on ' + location.path + (best.thread.line != null ? ':' + best.thread.line : '') + '.'
   }
 }
@@ -948,16 +982,56 @@ function signalsForFile(file) {
   return uniq(signals)
 }
 
+function unquoteGitPath(value) {
+  var escapes = { t: '\t', n: '\n', r: '\r', '"': '"', '\\': '\\', a: '\x07', b: '\b', f: '\f', v: '\v' }
+  var out = ''
+  for (var i = 0; i < value.length; i++) {
+    var ch = value.charAt(i)
+    if (ch !== '\\') {
+      out += ch
+      continue
+    }
+    var next = value.charAt(i + 1)
+    if (next >= '0' && next <= '7') {
+      var oct = ''
+      while (oct.length < 3 && value.charAt(i + 1) >= '0' && value.charAt(i + 1) <= '7') {
+        oct += value.charAt(++i)
+      }
+      out += String.fromCharCode(parseInt(oct, 8))
+    } else {
+      out += escapes[next] != null ? escapes[next] : next
+      i++
+    }
+  }
+  return out
+}
+
 function enrichSignalsFromDiff(files, fullDiff) {
   if (!fullDiff) return files
   var hunks = {}
   var currentFile = null
+  var awaitingHeader = false
   fullDiff.split('\n').forEach(function(line) {
-    var diffMatch = /^diff --git a\/.+ b\/(.+)$/.exec(line)
-    if (diffMatch) {
-      currentFile = diffMatch[1]
-      if (!hunks[currentFile]) hunks[currentFile] = []
+    // Track the current file from the `+++ b/` header directly after each
+    // `diff --git` line: the header carries one unambiguous path where the
+    // `diff --git` line has two. Space-containing paths get a trailing TAB
+    // and special characters arrive C-quoted; both are normalized so hunk
+    // keys equal manifest paths. `+++ /dev/null` (deletions) never matches,
+    // and added content lines that look like headers are ignored because a
+    // header is only accepted while one is expected.
+    if (line.indexOf('diff --git ') === 0) {
+      currentFile = null
+      awaitingHeader = true
       return
+    }
+    if (awaitingHeader) {
+      var headerMatch = /^\+\+\+ (?:"b\/(.+)"|b\/(.+?))\t?$/.exec(line)
+      if (headerMatch) {
+        currentFile = headerMatch[1] != null ? unquoteGitPath(headerMatch[1]) : headerMatch[2]
+        awaitingHeader = false
+        if (!hunks[currentFile]) hunks[currentFile] = []
+        return
+      }
     }
     if (currentFile && (line.charAt(0) === '+' && line.charAt(1) !== '+')) {
       hunks[currentFile].push(line.substring(1))
@@ -969,7 +1043,8 @@ function enrichSignalsFromDiff(files, fullDiff) {
     'types': /\b(interface|struct|class\s|enum\s)\b|@dataclass/,
     'security': /\b(auth|password|token|secret|credential|jwt|bcrypt|hash|encrypt|decrypt|certificate)\b/i,
     'concurrency': /\b(mutex|Mutex|chan\s|go\s+func|async\s|await\s|WaitGroup|Semaphore|threading|concurrent)\b|Lock\(\)|RLock\(\)/,
-    'public-api': /\b(export\s|pub\s+fn|public\s+func|module\.exports)\b/
+    'public-api': /\b(export\s|pub\s+fn|public\s+func|module\.exports)\b/,
+    'comments': /(^|\n)\s*(\/\/|#\s|\/\*|\*\s|<!--|"""|''')/
   }
 
   files.forEach(function(file) {
@@ -1282,12 +1357,52 @@ function selectReviewers(files, summary) {
   return uniq(selected).filter(name => REVIEWERS[name])
 }
 
+// Above this many files, specialist prompts carry a prioritized subset of
+// the manifest plus an explicit omission summary. The complete manifest
+// stays in workflow context; nothing is silently hidden.
+const PROMPT_FILE_CAP = 400
+const LOW_SIGNAL_CATEGORIES = { vendor: true, generated: true, lockfile: true, binary: true }
+
+function promptManifest(prContext) {
+  const files = prContext.files || []
+  if (files.length <= PROMPT_FILE_CAP) return { files: files, omittedSummary: null }
+
+  const priority = file => {
+    const churn = Math.min(999, asNumber(file.additions, 0) + asNumber(file.deletions, 0))
+    return (asNumber(file.threadCount, 0) * 1000000)
+      + (LOW_SIGNAL_CATEGORIES[file.category] ? 0 : 100000)
+      + ((file.signals || []).length * 1000)
+      + churn
+  }
+  const ranked = files.slice().sort((a, b) => priority(b) - priority(a))
+  const kept = ranked.slice(0, PROMPT_FILE_CAP)
+  const omitted = ranked.slice(PROMPT_FILE_CAP)
+
+  const byCategory = {}
+  omitted.forEach(file => {
+    byCategory[file.category] = (byCategory[file.category] || 0) + 1
+  })
+
+  kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return {
+    files: kept,
+    omittedSummary: {
+      omittedFileCount: omitted.length,
+      byCategory: byCategory,
+      note: 'The complete manifest was collected; this prompt lists the ' + PROMPT_FILE_CAP + ' highest-signal files and summarizes the rest by category above. Omitted files are still part of the PR and can be inspected directly (Read/Grep on the merged checkout, or the focused patch access instructions).'
+    }
+  }
+}
+
 function contextForPrompt(prContext) {
-  return JSON.stringify({
+  const manifest = promptManifest(prContext)
+  const payload = {
     pr: prContext.pr,
     summary: prContext.summary,
-    files: prContext.files
-  })
+    files: manifest.files
+  }
+  if (manifest.omittedSummary) payload.manifestTruncation = manifest.omittedSummary
+  return JSON.stringify(payload)
 }
 
 function patchInstructions(prContext) {
@@ -1404,15 +1519,19 @@ function finalizeBoard(board, findings, positives, prContext) {
     selectedReviewers: prContext.selectedReviewers,
     totalFindings: findings.length,
     existingThreadCount: prContext.threads.length,
+    threadCollectionFailed: Boolean(prContext.threadCollectionFailed),
     changedFileCount: prContext.summary.changedFileCount,
     collectedFileCount: prContext.summary.collectedFileCount,
     filePageCount: prContext.filePageCount,
+    manifestPromptTruncation: promptManifest(prContext).omittedSummary,
     sources: prContext.sources || {
       manifestSource: 'mcp',
       patchSource: 'none',
       mergeCommit: '',
       baseSha: '',
       headSha: prContext.pr.headSha || '',
+      prDiffFileCount: -1,
+      mergeDiffFileCount: -1,
       fullDiffIncluded: false,
       fallbackReason: '',
       recoveryAttempts: 0,
@@ -1438,7 +1557,7 @@ const prResult = await agent(metadataPrompt, {
 
 const pr = normalizePr(prResult)
 
-const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, isResolved, and replies with author/body. Do not call any GitHub write tools.`
+const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved only when the tool response actually exposes thread resolution state; omit it when the response does not say — never guess or default it. Do not call any GitHub write tools.`
 const threadCollectionPromise = agent(threadCollectionPrompt, {
   label: 'collect-review-threads',
   schema: THREAD_SCHEMA,
@@ -1477,15 +1596,30 @@ if (localGitManifest && localGitManifest.length > 0) {
   manifestSource = 'local-git'
 
   if (pr.changedFiles && files.length !== pr.changedFiles) {
-    fallbackReason = 'local git manifest count mismatch: expected ' + pr.changedFiles + ', got ' + files.length
-    log('Warning: ' + fallbackReason + '. Falling back to GitHub MCP file collection.')
-    const fileManifest = await collectCompleteFileManifest(pr)
-    files = fileManifest.files
-    filePageCount = fileManifest.pageCount
-    manifestSource = 'mcp'
-    effectiveFullDiff = null
-    recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
-    recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
+    // The local manifest diffs the merge result against the current base
+    // tip, while GitHub's changedFiles counts the merge-base..head PR diff.
+    // When the base branch has advanced, the counts legitimately differ;
+    // prDiffFileCount (the local merge-base..head count) is the like-for-like
+    // verification against GitHub's number, and mergeDiffFileCount (computed
+    // by checkout.sh) verifies the parsed manifest itself is complete.
+    // Note: asNumber(null, -1) is 0, so guard the property access, not the
+    // object.
+    const prDiffFileCount = asNumber(configSources ? configSources.prDiffFileCount : undefined, -1)
+    const mergeDiffFileCount = asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1)
+    if (prDiffFileCount >= 0 && prDiffFileCount === pr.changedFiles
+      && mergeDiffFileCount >= 0 && files.length === mergeDiffFileCount) {
+      log('Local merge-diff manifest has ' + files.length + ' file(s) vs GitHub changedFiles ' + pr.changedFiles + '; local PR diff count matches GitHub (' + prDiffFileCount + ') and the manifest matches the merge diff (' + mergeDiffFileCount + '), so the base branch has advanced. Keeping the verified local manifest.')
+    } else {
+      fallbackReason = 'local git manifest count mismatch: expected ' + pr.changedFiles + ', got ' + files.length
+      log('Warning: ' + fallbackReason + '. Falling back to GitHub MCP file collection.')
+      const fileManifest = await collectCompleteFileManifest(pr)
+      files = fileManifest.files
+      filePageCount = fileManifest.pageCount
+      manifestSource = 'mcp'
+      effectiveFullDiff = null
+      recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
+      recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
+    }
   }
 } else {
   const fileManifest = await collectCompleteFileManifest(pr)
@@ -1500,13 +1634,18 @@ if (pr.changedFiles === 0) pr.changedFiles = files.length
 log('Awaiting review threads')
 const threadData = await threadCollectionPromise
 
-const threads = (threadData && Array.isArray(threadData.threads)) ? threadData.threads : []
+const threadCollectionFailed = !(threadData && Array.isArray(threadData.threads))
+if (threadCollectionFailed) {
+  log('Warning: review-thread collection failed. Existing-review overlap classification is unavailable for this run; recommended findings may duplicate existing comments.')
+}
+const threads = threadCollectionFailed ? [] : threadData.threads
 enrichSignalsFromDiff(files, effectiveFullDiff)
 const summary = buildSummary(pr, files, threads)
 const prContext = {
   pr: pr,
   files: files,
   threads: threads,
+  threadCollectionFailed: threadCollectionFailed,
   summary: summary,
   filePageCount: filePageCount,
   fullDiff: effectiveFullDiff || null,
@@ -1516,6 +1655,8 @@ const prContext = {
     mergeCommit: (configSources && configSources.mergeCommit) || '',
     baseSha: (configSources && configSources.baseSha) || '',
     headSha: (configSources && configSources.headSha) || pr.headSha || '',
+    prDiffFileCount: asNumber(configSources ? configSources.prDiffFileCount : undefined, -1),
+    mergeDiffFileCount: asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1),
     fullDiffIncluded: Boolean(effectiveFullDiff),
     fallbackReason: fallbackReason,
     recoveryAttempts: recoveryAttempts,
@@ -1526,6 +1667,10 @@ const prContext = {
 phase('Analyze')
 const selected = selectReviewers(files, summary)
 prContext.selectedReviewers = selected
+const manifestTruncation = promptManifest(prContext).omittedSummary
+if (manifestTruncation) {
+  log('Specialist prompts list the ' + PROMPT_FILE_CAP + ' highest-signal of ' + files.length + ' files; ' + manifestTruncation.omittedFileCount + ' file(s) summarized by category (complete manifest retained in workflow context).')
+}
 log('Running ' + selected.length + ' review agent(s): ' + selected.join(', '))
 
 const results = await parallel(selected.map(name => () => {

@@ -10,63 +10,164 @@ skip() { printf 'CHECKOUT_SKIP: %s\n' "$1"; exit 0; }
 # --- Input validation ---
 pr_url="${1:-}"
 
-if ! [[ "${pr_url}" =~ ^https://github\.com/[^/]+/[^/]+/pull/([0-9]+)(/.*)?$ ]]; then
+if ! [[ "${pr_url}" =~ ^https://github\.com/([^/?#]+)/([^/?#]+)/pull/([0-9]+)([/?#].*)?$ ]]; then
     skip "invalid PR URL"
 fi
-pr_number="${BASH_REMATCH[1]}"
+pr_owner="${BASH_REMATCH[1]}"
+pr_repo="${BASH_REMATCH[2]}"
+pr_number="${BASH_REMATCH[3]}"
 
 # --- Preflight ---
-git rev-parse --show-toplevel >/dev/null 2>&1 \
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || skip "not a git repository"
+cd "${toplevel}"
 
+git update-index -q --refresh 2>/dev/null || true
 git diff-index --quiet HEAD -- 2>/dev/null \
     || skip "worktree has uncommitted changes"
 
-git remote get-url origin >/dev/null 2>&1 \
+origin_url="$(git remote get-url origin 2>/dev/null)" \
     || skip "no origin remote"
+
+# Origin must match the PR base repository before anything is fetched.
+# Normalize both sides to lowercase {owner}/{repo}: strip trailing slashes
+# and .git, then take the last two path components (covers https, ssh,
+# and scp-style URLs).
+normalized_origin="$(printf '%s' "${origin_url}" \
+    | sed -e 's|/*$||' -e 's|\.git$||' -e 's|:|/|g' \
+    | awk -F/ 'NF>=2 {print tolower($(NF-1))"/"tolower($NF)}')"
+expected_repo="$(printf '%s/%s' "${pr_owner}" "${pr_repo}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${normalized_origin}" != "${expected_repo}" ]]; then
+    skip "origin does not match PR base repository"
+fi
 
 # --- Fetch ---
 if ! git fetch origin "refs/pull/${pr_number}/merge" 2>/dev/null; then
     skip "merge ref fetch failed"
 fi
 
-# --- Plumbing checkout (excludes sandbox-protected files) ---
 merge_sha="$(git rev-parse FETCH_HEAD)"
+orig_head="$(git rev-parse HEAD)"
 
-git read-tree "${merge_sha}" || skip "read-tree failed"
+# --- Resolve parents and verification data before mutating anything ---
+base_sha="$(git rev-parse --verify -q "${merge_sha}^1")" \
+    || skip "could not resolve merge parents"
+head_sha="$(git rev-parse --verify -q "${merge_sha}^2")" \
+    || skip "could not resolve merge parents"
+
+# File count of the base...head PR diff, for comparison against GitHub's
+# changedFiles. May be unavailable in shallow clones; omitted when unknown.
+pr_diff_file_count=""
+if merge_base="$(git merge-base "${base_sha}" "${head_sha}" 2>/dev/null)"; then
+    pr_diff_file_count="$(git diff --name-only "${merge_base}" "${head_sha}" | wc -l | tr -d '[:space:]')"
+fi
+
+# File count of the merge diff itself, so the workflow can verify the parsed
+# manifest is complete before trusting it.
+merge_diff_file_count="$(git diff --name-only "${base_sha}" "${merge_sha}" | wc -l | tr -d '[:space:]')"
 
 # Exclude files on the sandbox mandatory-deny list (DANGEROUS_FILES,
 # DANGEROUS_DIRECTORIES in anthropic-experimental/sandbox-runtime).
 # These are always write-protected regardless of sandbox config;
-# checkout-index would fail with EPERM trying to unlink them.
-git ls-files -z -- . \
-    ':(glob,exclude)**/.gitconfig' \
-    ':(glob,exclude)**/.gitmodules' \
-    ':(glob,exclude)**/.bashrc' \
-    ':(glob,exclude)**/.bash_profile' \
-    ':(glob,exclude)**/.zshrc' \
-    ':(glob,exclude)**/.zprofile' \
-    ':(glob,exclude)**/.profile' \
-    ':(glob,exclude)**/.ripgreprc' \
-    ':(glob,exclude)**/.mcp.json' \
-    ':(glob,exclude)**/.claude/**' \
-    ':(glob,exclude)**/.vscode/**' \
-    ':(glob,exclude)**/.idea/**' \
-    | git checkout-index -f -z --stdin \
-    || skip "checkout-index failed"
+# checkout-index and rm would fail with EPERM touching them.
+protected_pathspecs=(
+    ':(glob,exclude)**/.gitconfig'
+    ':(glob,exclude)**/.gitmodules'
+    ':(glob,exclude)**/.bashrc'
+    ':(glob,exclude)**/.bash_profile'
+    ':(glob,exclude)**/.zshrc'
+    ':(glob,exclude)**/.zprofile'
+    ':(glob,exclude)**/.profile'
+    ':(glob,exclude)**/.ripgreprc'
+    ':(glob,exclude)**/.mcp.json'
+    ':(glob,exclude)**/.claude/**'
+    ':(glob,exclude)**/.vscode/**'
+    ':(glob,exclude)**/.idea/**'
+)
 
-git update-ref --no-deref HEAD "${merge_sha}" || skip "update-ref failed"
+checkout_worktree() {
+    git ls-files -z -- . "${protected_pathspecs[@]}" \
+        | git checkout-index -f -z --stdin
+}
 
-# --- Resolve parents ---
-base_sha="$(git rev-parse "HEAD^1")" || skip "could not resolve merge parents"
-head_sha="$(git rev-parse "HEAD^2")" || skip "could not resolve merge parents"
+# Restore the index and worktree to the original HEAD when the checkout
+# fails partway, so preflight stays clean for reruns and the MCP fallback
+# does not inherit a half-mutated repository. Files the merge added are
+# removed first: checkout-index never deletes, so they would otherwise
+# survive as untracked merge-content debris.
+restore_original() {
+    while IFS= read -r -d '' added_path; do
+        rm -f -- "${added_path}" 2>/dev/null || true
+        added_dir="$(dirname -- "${added_path}")"
+        if [[ "${added_dir}" != "." ]]; then
+            rmdir -p -- "${added_dir}" 2>/dev/null || true
+        fi
+    done < <(git diff --name-only -z --no-renames --diff-filter=A \
+        "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}" 2>/dev/null)
+    git read-tree "${orig_head}" 2>/dev/null || return 0
+    checkout_worktree 2>/dev/null || true
+}
+
+# --- Plumbing checkout (excludes sandbox-protected files) ---
+if ! git read-tree "${merge_sha}"; then
+    restore_original
+    skip "read-tree failed"
+fi
+
+# Remove files present at the original HEAD but absent from the merge
+# result (checkout-index never deletes), so stale content is not visible
+# to Read/Grep on the merged checkout. --no-renames decomposes renames
+# into delete+add so old rename sources are removed too. Runs before
+# checkout-index so type changes (file -> directory) do not collide.
+while IFS= read -r -d '' stale_path; do
+    if ! rm -f -- "${stale_path}"; then
+        restore_original
+        skip "stale file removal failed"
+    fi
+    stale_dir="$(dirname -- "${stale_path}")"
+    if [[ "${stale_dir}" != "." ]]; then
+        rmdir -p -- "${stale_dir}" 2>/dev/null || true
+    fi
+done < <(git diff --name-only -z --no-renames --diff-filter=D \
+    "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
+
+if ! checkout_worktree; then
+    restore_original
+    skip "checkout-index failed"
+fi
+
+if ! git update-ref --no-deref HEAD "${merge_sha}"; then
+    restore_original
+    skip "update-ref failed"
+fi
+
+# Protected paths the merge modified or added stay at their original
+# worktree content, so the index (merge version) would read as dirty and
+# block reruns. Mark them skip-worktree: git then treats the untouched
+# worktree copy as intentional.
+protected_match=()
+for spec in "${protected_pathspecs[@]}"; do
+    protected_match+=("${spec/,exclude/}")
+done
+while IFS= read -r -d '' protected_path; do
+    git update-index --skip-worktree -- "${protected_path}" 2>/dev/null || true
+done < <(git diff --name-only -z --no-renames --diff-filter=AM \
+    "${orig_head}" "${merge_sha}" -- "${protected_match[@]}" 2>/dev/null)
+
+# read-tree leaves index entries without stat data; refresh so the checkout
+# reads as clean to git status and to this script's own preflight on reruns.
+git update-index -q --refresh 2>/dev/null || true
 
 # --- Output ---
 printf 'CHECKOUT_OK\n'
 printf 'mergeCommit %s\n' "${merge_sha}"
 printf 'baseSha %s\n' "${base_sha}"
 printf 'headSha %s\n' "${head_sha}"
+if [[ -n "${pr_diff_file_count}" ]]; then
+    printf 'prDiffFileCount %s\n' "${pr_diff_file_count}"
+fi
+printf 'mergeDiffFileCount %s\n' "${merge_diff_file_count}"
 printf 'NAME_STATUS\n'
-git diff --name-status HEAD^1 HEAD
+git diff --name-status "${base_sha}" "${merge_sha}"
 printf 'NUMSTAT\n'
-git diff --numstat HEAD^1 HEAD
+git diff --numstat "${base_sha}" "${merge_sha}"

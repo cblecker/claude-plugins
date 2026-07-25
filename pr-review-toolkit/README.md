@@ -45,34 +45,49 @@ falls back to GitHub MCP-based file collection.
 
 ### Local Git Diff Provider (Preferred)
 
-When the current directory is a git repository with a clean worktree and
-`origin` matches the PR base repository, the skill:
+The bundled `checkout.sh` script runs during skill preprocessing. When the
+current directory is a git repository with a clean worktree, it:
 
-1. Fetches GitHub's `refs/pull/N/merge` synthetic merge ref from `origin`
-2. Checks out the merge result as a detached HEAD
-3. Verifies the merge commit's second parent (`HEAD^2`) matches the PR's
-   `headSha` from GitHub metadata
-4. Builds a compact file manifest from `git diff --name-status` and
-   `git diff --numstat` (NUL-delimited for safe parsing of special characters)
-5. Optionally collects the full merge diff when it fits within a 200K character
-   cap
+1. Verifies `origin` matches the PR base repository (parsed from the PR URL)
+   before fetching anything
+2. Fetches GitHub's `refs/pull/N/merge` synthetic merge ref from `origin`
+3. Checks out the merge result as a detached HEAD using plumbing commands
+   (`read-tree`, `checkout-index`, `update-ref`) so sandbox-protected files
+   (shell profiles, `.mcp.json`, `.claude/`, editor config) are skipped
+   instead of failing the checkout; files deleted by the merge are removed
+   from the worktree, and a mid-checkout failure restores the original index
+   and tracked worktree content (including removing files the partial
+   checkout added) before falling back to MCP
+4. Emits a compact file manifest from `git diff --name-status` and
+   `git diff --numstat` (paths with special characters appear C-quoted, as in
+   normal git output, and are decoded during parsing), plus two verification
+   counts: `prDiffFileCount` — the merge-base..head file count cross-checked
+   against GitHub's `changedFiles` when the base branch has advanced — and
+   `mergeDiffFileCount`, which the workflow compares against the parsed
+   manifest length before trusting it (both recorded as `-1` in
+   `reviewMeta.sources` when unavailable)
+5. The skill then verifies the merge commit's second parent (`HEAD^2`)
+   matches the PR's `headSha` from GitHub metadata, and optionally collects
+   the full merge diff when it fits within a 200K character cap
 
 The local manifest and optional full diff are passed to the workflow via `args`.
 Specialist agents can also use Read and Grep on the merged checkout to inspect
-files in their merged state.
+files in their merged state. Sandbox-protected files listed above are the one
+exception: their worktree content stays at the pre-merge state.
 
-The skill does NOT auto-restore the original git ref after checkout. The merged
-checkout state keeps the Read tool useful for workflow subagents. Running in a
-dedicated worktree is recommended.
+After a successful checkout the skill does NOT auto-restore the original git
+ref. The merged checkout state keeps the Read tool useful for workflow
+subagents. Running in a dedicated worktree is recommended.
 
 ### MCP Fallback
 
 When local git is unavailable, the workflow collects changed files via GitHub MCP
 `get_files` with pagination and recovery retries, as in previous versions.
 
-Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and include:
-not a git repository, dirty worktree, origin mismatch, merge ref fetch failure,
-or merge parent mismatch.
+Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and
+include: not a git repository, dirty worktree, missing origin, origin
+mismatch, merge ref fetch failure, checkout failure (after restoring the
+original state), or merge parent mismatch.
 
 ### Workflow
 
@@ -117,7 +132,7 @@ repository files and use available read-only MCP tools to verify findings.
 | code-reviewer | Always | Reviews code for bugs, style, and guideline adherence (runs on Opus) |
 | silent-failure-hunter | Changes touch error handling, try/catch, or fallback logic | Identifies silent failures and inadequate error handling |
 | pr-test-analyzer | Functional code that should have corresponding tests | Analyzes test coverage completeness |
-| comment-analyzer | Changes add or modify comments, docstrings, or docs | Checks comment accuracy and maintainability |
+| comment-analyzer | Changes touch docs files, or — when the local full diff is available — add or modify comments or docstrings | Checks comment accuracy and maintainability |
 | type-design-analyzer | Changes introduce or modify type definitions in typed languages | Evaluates type design and invariant quality |
 | security-reviewer | Changes touch auth, crypto, tokens, credentials, or security-related code | Reviews for security vulnerabilities and unsafe patterns |
 | api-compat-reviewer | Changes touch public APIs, exports, or client-facing interfaces | Checks API compatibility and breaking changes |
@@ -141,7 +156,14 @@ The workflow returns a review board grouped by outcome:
 
 Each finding preserves the specialist's claim, evidence, reasoning, suggested
 fix, confidence, source lens, and existing-review overlap rationale. The board
-also includes positive observations, PR metadata, and review metadata.
+also includes positive observations, PR metadata, and review metadata. Thread
+resolution state (`isResolved`) is recorded only when the GitHub read tools
+expose it. If review-thread collection fails, the board says so
+(`reviewMeta.threadCollectionFailed`) instead of silently skipping overlap
+classification. For very large PRs, specialist prompts carry the
+highest-signal subset of the manifest with an explicit per-category summary of
+the rest (`reviewMeta.manifestPromptTruncation`); the complete manifest is
+always collected.
 
 ## Interaction And Posting
 
@@ -151,26 +173,23 @@ show already-covered findings, or cancel.
 
 Drafts are plain conversation text until the user approves a preview. The skill
 previews each line comment, review-body text, and the proposed review event
-(`COMMENT` or `REQUEST_CHANGES`) before any GitHub write tool is used.
+(`COMMENT`, `REQUEST_CHANGES`, or `APPROVE`) before any GitHub write tool is
+used.
 
 ## Permissions
 
 ### Local Git Commands
 
-The skill's `allowed-tools` frontmatter intentionally uses a small set of git
-command patterns for preflight and diff collection:
+Preflight, fetch, and checkout run inside the bundled, reviewable
+`scripts/checkout.sh` helper during skill preprocessing — they are not
+model-issued Bash calls. The skill's `allowed-tools` frontmatter then permits
+only one git command pattern:
 
-- `git fetch origin refs/pull/*/merge` — fetch merge ref
-- `git checkout --detach FETCH_HEAD` — checkout merge result
-- `git rev-parse *` — record merge parents and related refs
-- `git diff *` — verify clean state and collect status, numstat, and full diff
+- `git diff *` — collect the full merge diff and translate merge-result line
+  numbers to PR HEAD line numbers before posting
 
-The repository root, worktree state, and origin URL checks are injected into the
-skill prompt during preprocessing. The skill instructions still constrain actual
-Bash use to the documented preflight and diff commands; workflow-spawned agents
-have no Bash access.
-
-All other Bash commands are denied.
+All other Bash commands are denied; workflow-spawned agents have no Bash
+access.
 
 ### GitHub MCP Permissions
 
@@ -191,10 +210,13 @@ type. That agent allows GitHub PR reads and disallows shell, local file, web, an
 file mutation tools so large MCP responses do not lead to generated Python,
 `jq`, `gh`, or other ad-hoc parsing scripts.
 
-Specialist reviewers run through `pr-review-analysis-readonly`, which blocks
-shell and mutation tools while allowing read-only repository inspection and
-read-only MCP tools. In the local git path, specialists can use Read and Grep
+Specialist reviewers run through `pr-review-analysis-readonly`, which uses a
+tool allowlist (Read, Grep, Glob, GitHub PR reads, and gopls read-only tools)
+so shell, file mutation, and GitHub write tools are unavailable rather than
+merely discouraged. In the local git path, specialists can use Read and Grep
 on the merged checkout to inspect changed files and trace cross-file effects.
+To let specialists use additional read-only MCP tools (e.g. another language
+server), extend that agent's allowlist.
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
@@ -202,6 +224,10 @@ capabilities:
 - `pull_request_review_write` to create and submit a review
 - `add_comment_to_pending_review` to add approved line comments to a pending
   review
+- `add_reply_to_pull_request_comment` to post approved endorsements as
+  replies on existing review threads
+- `add_issue_comment` (address-pr-feedback only) to reply to review-body and
+  conversation comments
 
 Write tools are used only after the skill has shown the exact preview and the
 user has explicitly approved posting it.

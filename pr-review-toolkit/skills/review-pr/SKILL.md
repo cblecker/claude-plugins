@@ -27,7 +27,6 @@ allowed-tools:
 
 ## Git Environment
 
-- Origin URL: !`git remote get-url origin 2>/dev/null || echo __NO_ORIGIN_REMOTE__`
 - Checkout: !`bash "${CLAUDE_SKILL_DIR}/scripts/checkout.sh" "$pr-url"`
 
 ## Constraints
@@ -61,7 +60,6 @@ Call `pull_request_read` with method `get`. Extract and record:
 
 - `headSha`: the current head commit SHA of the PR
 - `changedFiles`: the number of changed files
-- base repository clone URL (typically `https://github.com/{owner}/{repo}`)
 
 ## Local Git Preflight
 
@@ -70,22 +68,28 @@ Read the Checkout output from Git Environment above.
 `CHECKOUT_SKIP:` → record the reason as `fallbackReason`, skip to workflow
 launch without `localGitManifest` or `fullDiff`.
 
-`CHECKOUT_OK` → parse `mergeCommit`, `baseSha`, `headSha` from the subsequent
-`key value` lines. Then:
+`CHECKOUT_OK` → parse `mergeCommit`, `baseSha`, `headSha`, `mergeDiffFileCount`,
+and (when present) `prDiffFileCount` from the subsequent `key value` lines. The
+checkout script has already verified that `origin` matches the PR base
+repository. Then:
 
-1. Verify `headSha` matches PR metadata `headSha`. Mismatch → record "HEAD^2
-   does not match PR headSha". Do not trust local diff data on mismatch.
-2. Normalize origin URL (from Git Environment) and PR base URL to
-   `{owner}/{repo}` (strip protocol, `.git` suffix; case-insensitive).
-   Mismatch → "origin does not match PR base repository".
+Verify `headSha` matches PR metadata `headSha`. Mismatch → record "HEAD^2
+does not match PR headSha" as `fallbackReason` and do not trust local diff
+data: skip to workflow launch without `localGitManifest` or `fullDiff`.
 
 ## Build Local Git Manifest
 
 Parse the `NAME_STATUS` and `NUMSTAT` sections from the checkout output.
 
-From `NAME_STATUS`, parse each line into `{path, status}`. Map `A`, `M`, `D`,
-`R*`, `C*` to `added`, `modified`, `deleted`, `renamed`, `copied`. For renames
-and copies, use the destination path.
+From `NAME_STATUS`, parse each line into `{path, status}`. Fields are
+tab-separated. Map `A`, `M`, `D`, `R*`, `C*` to `added`, `modified`,
+`deleted`, `renamed`, `copied`. For renames and copies, use the destination
+path.
+
+Paths containing special characters appear C-quoted (wrapped in double
+quotes, with `\t`, `\n`, `\"`, `\\`, and octal escapes). Decode them to the
+real path — strip the quotes and unescape — before storing, so manifest paths
+match what Read, Grep, and comment posting need.
 
 From `NUMSTAT`, parse additions and deletions per file and merge with the status
 list. For renames/copies use destination path as key. Binary files show `-` for
@@ -112,6 +116,8 @@ Invoke the Workflow tool with:
 - `args`: `owner`, `repo`, `pullNumber`, `localGitManifest` (omit if preflight
   failed), `fullDiff` (omit if not collected), and `sources`:
   - `mergeCommit`, `baseSha`, `headSha` (empty strings if preflight failed)
+  - `prDiffFileCount` and `mergeDiffFileCount`: the parsed numbers from
+    checkout output (omit when absent)
   - `fullDiffIncluded`: whether fullDiff is included
   - `fallbackReason`: reason preflight failed (or empty string)
 
@@ -136,6 +142,14 @@ Reviewers: code-reviewer, pr-test-analyzer, silent-failure-hunter.
 
 The reviewer list comes from `reviewMeta.selectedReviewers` which stores full
 agent names.
+
+If `reviewMeta.threadCollectionFailed` is true, add a warning line: existing
+review threads could not be collected, so overlap classification is
+unavailable and recommended findings may duplicate existing comments.
+
+If `reviewMeta.manifestPromptTruncation` is set, add a note: specialist
+prompts listed only the highest-signal files; the omitted count and
+categories come from that field. The complete manifest was still collected.
 
 ### 2. Recommended to post (full detail)
 
@@ -277,9 +291,13 @@ For each finding being posted as a new line comment, show:
 For each overlap finding being posted as a thread reply, show:
 
 - finding id, "Reply to thread on path:line", and body
-- if the target thread is resolved, append a warning:
+- if the target thread is known to be resolved (`isResolved` is true), append
+  a warning:
   `⚠ Target thread is resolved — reply will stay collapsed and the PR author may
   not see it.`
+- if `isResolved` is absent (the GitHub read tools did not expose resolution
+  state), append: `(thread resolution state unknown — if the thread is
+  resolved, this reply will stay collapsed)`
 
 For review body text (non-line findings), show the review body.
 
