@@ -19,11 +19,12 @@ review feedback, then post reply comments to GitHub.
 **Validate branch first:**
 
 - Run `git branch --show-current` to get the current branch
-- Get the mainline branch: run
+- Get the mainline branch from the remote (authoritative — the cached local
+  `origin/HEAD` can be stale after a default-branch rename):
+  `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'`.
+  If that fails (offline), fall back to
   `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` and strip
-  the `origin/` prefix. If that fails (origin/HEAD not set locally), fall
-  back to
-  `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'`
+  the `origin/` prefix
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution
@@ -104,8 +105,9 @@ Before analyzing, **deduplicate related items.** Multiple comments often
 address the same underlying concern (e.g., two reviewers flag the same issue,
 or one reviewer comments on both the declaration and usage of the same
 problem). Group these into a single logical item — track all associated
-`commentId`/`threadId` values so replies can be posted to each thread in
-Phase 6.
+`commentId`/`threadId` values, each with its own `isResolved` state, so
+replies can be posted to each thread in Phase 6 and resolution warnings apply
+per target rather than to the group.
 
 **For 5 or fewer items**, analyze and score inline — the context is small
 enough that agents add latency without improving quality.
@@ -241,8 +243,9 @@ item that has a draft reply.
 For each item:
 
 1. Present the draft reply text (generated in Phase 2, refined in Phase 4).
-   If the item's thread is known to be resolved (`isResolved` is true), note
-   it: a reply will stay collapsed and the reviewer may not see it.
+   For each reply target whose thread is known to be resolved (`isResolved`
+   is true for that specific target), note it: a reply there will stay
+   collapsed and the reviewer may not see it.
 2. Use `AskUserQuestion`:
 
    ```text

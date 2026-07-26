@@ -125,6 +125,7 @@ const FINDING_SCHEMA = {
 const THREAD_SCHEMA = {
   type: 'object',
   properties: {
+    collectionFailed: { type: 'boolean' },
     threads: {
       type: 'array',
       items: {
@@ -1064,7 +1065,7 @@ function enrichSignalsFromDiff(files, fullDiff) {
     'security': /\b(auth|password|token|secret|credential|jwt|bcrypt|hash|encrypt|decrypt|certificate)\b/i,
     'concurrency': /\b(mutex|Mutex|chan\s|go\s+func|async\s|await\s|WaitGroup|Semaphore|threading|concurrent)\b|Lock\(\)|RLock\(\)/,
     'public-api': /\b(export\s|pub\s+fn|public\s+func|module\.exports)\b/,
-    'comments': /(^|\n)\s*(\/\/|#\s|\/\*|\*\s|<!--|"""|''')/
+    'comments': /(^|\n)\s*(\/\/|#(?!!|include\b|define\b|undef\b|ifdef\b|ifndef\b|if\b|elif\b|else\b|endif\b|pragma\b|error\b|line\b)|\/\*|\*\s|<!--|"""|''')/
   }
 
   files.forEach(function(file) {
@@ -1577,7 +1578,7 @@ const prResult = await agent(metadataPrompt, {
 
 const pr = normalizePr(prResult)
 
-const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved only when the tool response actually exposes thread resolution state; omit it when the response does not say — never guess or default it. Do not call any GitHub write tools.`
+const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved only when the tool response actually exposes thread resolution state; omit it when the response does not say — never guess or default it. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads. Do not call any GitHub write tools.`
 const threadCollectionPromise = agent(threadCollectionPrompt, {
   label: 'collect-review-threads',
   schema: THREAD_SCHEMA,
@@ -1615,31 +1616,38 @@ if (localGitManifest && localGitManifest.length > 0) {
   filePageCount = 0
   manifestSource = 'local-git'
 
-  if (pr.changedFiles && files.length !== pr.changedFiles) {
-    // The local manifest diffs the merge result against the current base
-    // tip, while GitHub's changedFiles counts the merge-base..head PR diff.
-    // When the base branch has advanced, the counts legitimately differ;
-    // prDiffFileCount (the local merge-base..head count) is the like-for-like
-    // verification against GitHub's number, and mergeDiffFileCount (computed
-    // by checkout.sh) verifies the parsed manifest itself is complete.
-    // Note: asNumber(null, -1) is 0, so guard the property access, not the
-    // object.
-    const prDiffFileCount = asNumber(configSources ? configSources.prDiffFileCount : undefined, -1)
-    const mergeDiffFileCount = asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1)
-    if (prDiffFileCount >= 0 && prDiffFileCount === pr.changedFiles
-      && mergeDiffFileCount >= 0 && files.length === mergeDiffFileCount) {
+  // The local manifest diffs the merge result against the current base
+  // tip, while GitHub's changedFiles counts the merge-base..head PR diff.
+  // When the base branch has advanced, the counts legitimately differ;
+  // prDiffFileCount (the local merge-base..head count) is the like-for-like
+  // verification against GitHub's number, and mergeDiffFileCount (computed
+  // by checkout.sh) verifies the parsed manifest itself is complete —
+  // checked first and unconditionally, because a lossy parse can
+  // coincidentally match changedFiles while missing merge-only paths.
+  // Note: asNumber(null, -1) is 0, so guard the property access, not the
+  // object.
+  const prDiffFileCount = asNumber(configSources ? configSources.prDiffFileCount : undefined, -1)
+  const mergeDiffFileCount = asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1)
+  let manifestProblem = ''
+  if (mergeDiffFileCount >= 0 && files.length !== mergeDiffFileCount) {
+    manifestProblem = 'local manifest parse incomplete: merge diff has ' + mergeDiffFileCount + ' file(s), parsed ' + files.length
+  } else if (pr.changedFiles && files.length !== pr.changedFiles) {
+    if (prDiffFileCount >= 0 && prDiffFileCount === pr.changedFiles && mergeDiffFileCount >= 0) {
       log('Local merge-diff manifest has ' + files.length + ' file(s) vs GitHub changedFiles ' + pr.changedFiles + '; local PR diff count matches GitHub (' + prDiffFileCount + ') and the manifest matches the merge diff (' + mergeDiffFileCount + '), so the base branch has advanced. Keeping the verified local manifest.')
     } else {
-      fallbackReason = 'local git manifest count mismatch: expected ' + pr.changedFiles + ', got ' + files.length
-      log('Warning: ' + fallbackReason + '. Falling back to GitHub MCP file collection.')
-      const fileManifest = await collectCompleteFileManifest(pr)
-      files = fileManifest.files
-      filePageCount = fileManifest.pageCount
-      manifestSource = 'mcp'
-      effectiveFullDiff = null
-      recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
-      recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
+      manifestProblem = 'local git manifest count mismatch: expected ' + pr.changedFiles + ', got ' + files.length
     }
+  }
+  if (manifestProblem) {
+    fallbackReason = manifestProblem
+    log('Warning: ' + manifestProblem + '. Falling back to GitHub MCP file collection.')
+    const fileManifest = await collectCompleteFileManifest(pr)
+    files = fileManifest.files
+    filePageCount = fileManifest.pageCount
+    manifestSource = 'mcp'
+    effectiveFullDiff = null
+    recoveryAttempts = asNumber(fileManifest.recoveryAttempts, 0)
+    recoveredFileSlots = asNumber(fileManifest.recoveredFileSlots, 0)
   }
 } else {
   const fileManifest = await collectCompleteFileManifest(pr)
@@ -1654,7 +1662,7 @@ if (pr.changedFiles === 0) pr.changedFiles = files.length
 log('Awaiting review threads')
 const threadData = await threadCollectionPromise
 
-const threadCollectionFailed = !(threadData && Array.isArray(threadData.threads))
+const threadCollectionFailed = !(threadData && Array.isArray(threadData.threads)) || threadData.collectionFailed === true
 if (threadCollectionFailed) {
   log('Warning: review-thread collection failed. Existing-review overlap classification is unavailable for this run; recommended findings may duplicate existing comments.')
 }

@@ -119,12 +119,16 @@ restore_original() {
 }
 
 # Refuse to overwrite untracked local files, matching git checkout's own
-# guard: a path the merge adds that already exists on disk is untracked
-# data (preflight verified tracked content is clean), and checkout-index -f
-# would silently overwrite it — and a later rollback would delete it.
-# Runs before any mutation.
+# guard: a path the merge adds that already exists on disk as a regular
+# file or symlink is untracked data (preflight verified tracked content is
+# clean, and a tracked file at an added path is impossible), and
+# checkout-index -f would silently overwrite it — and a later rollback
+# would delete it. Runs before any mutation. A directory at an added path
+# is a dir-to-file type change: its tracked contents are removed by the
+# stale-path loop below, and untracked leftovers make checkout-index fail
+# into the rollback path instead of losing data.
 while IFS= read -r -d '' added_path; do
-    if [[ -e "${added_path}" || -L "${added_path}" ]]; then
+    if [[ -f "${added_path}" || -L "${added_path}" ]]; then
         skip "untracked files would be overwritten by the merge checkout"
     fi
 done < <(git diff --name-only -z --no-renames --diff-filter=A \

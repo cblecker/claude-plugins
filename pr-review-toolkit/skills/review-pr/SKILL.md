@@ -32,14 +32,10 @@ allowed-tools:
 ## Constraints
 
 Use only `allowed-tools`. Do not generate ad-hoc processing scripts. Workflow
-return values and MCP responses are structured JSON; read them directly. Bash is
-limited to the git patterns in `allowed-tools` for diff collection and
-line-number translation below.
-
-The workflow and its agents are read-only — they must not call GitHub write tools.
-
-GitHub write tools may be used only after an exact preview and explicit final
-posting approval from the user.
+return values and MCP responses are structured JSON; read them directly. Bash
+is limited to the `git diff` patterns used below. The workflow and its agents
+are read-only. GitHub write tools may be used only after an exact preview and
+explicit final posting approval from the user.
 
 ## Exit Plan Mode
 
@@ -69,34 +65,27 @@ Read the Checkout output from Git Environment above.
 launch without `localGitManifest` or `fullDiff`.
 
 `CHECKOUT_OK` → parse `mergeCommit`, `baseSha`, `headSha`, `mergeDiffFileCount`,
-and (when present) `prDiffFileCount` from the subsequent `key value` lines. The
-checkout script has already verified that `origin` matches the PR base
-repository. Then:
-
-Verify `headSha` matches PR metadata `headSha`. Mismatch → record "HEAD^2
-does not match PR headSha" as `fallbackReason` and do not trust local diff
-data: skip to workflow launch without `localGitManifest` or `fullDiff`.
+and (when present) `prDiffFileCount` from the `key value` lines. The script has
+already verified `origin` matches the PR base repository. Then verify `headSha`
+matches PR metadata `headSha`; on mismatch record "HEAD^2 does not match PR
+headSha" as `fallbackReason` and skip to workflow launch without
+`localGitManifest` or `fullDiff` — do not trust local diff data.
 
 ## Build Local Git Manifest
 
 Parse the `NAME_STATUS` and `NUMSTAT` sections from the checkout output.
 
-From `NAME_STATUS`, parse each line into `{path, status}`. Fields are
-tab-separated. Map `A`, `M`, `D`, `R*`, `C*` to `added`, `modified`,
-`deleted`, `renamed`, `copied`. For renames and copies, use the destination
-path.
+From `NAME_STATUS` (tab-separated), parse each line into `{path, status}`. Map
+`A`, `M`, `D`, `R*`, `C*` to `added`, `modified`, `deleted`, `renamed`,
+`copied`; for renames and copies use the destination path. Paths with special
+characters appear C-quoted (double quotes, `\t`/`\n`/`\"`/`\\`/octal escapes) —
+strip the quotes and unescape so manifest paths match what Read, Grep, and
+comment posting need.
 
-Paths containing special characters appear C-quoted (wrapped in double
-quotes, with `\t`, `\n`, `\"`, `\\`, and octal escapes). Decode them to the
-real path — strip the quotes and unescape — before storing, so manifest paths
-match what Read, Grep, and comment posting need.
-
-From `NUMSTAT`, parse additions and deletions per file and merge with the status
-list. For renames/copies use destination path as key. Binary files show `-` for
-additions/deletions; store as 0. Each entry: `{path, status, additions,
-deletions}`.
-
-The resulting array is the `localGitManifest`.
+From `NUMSTAT`, merge additions and deletions per file into the status list
+(destination path as key; binary files show `-`, store as 0). Each entry:
+`{path, status, additions, deletions}`. The resulting array is the
+`localGitManifest`.
 
 ## Collect Full Diff (Optional)
 
@@ -140,16 +129,14 @@ N findings recommended, M overlap existing threads, P discussion-worthy.
 Reviewers: code-reviewer, pr-test-analyzer, silent-failure-hunter.
 ```
 
-The reviewer list comes from `reviewMeta.selectedReviewers` which stores full
-agent names.
+The reviewer list comes from `reviewMeta.selectedReviewers` (full agent names).
 
-If `reviewMeta.threadCollectionFailed` is true, add a warning line: existing
-review threads could not be collected, so overlap classification is
-unavailable and recommended findings may duplicate existing comments.
-
-If `reviewMeta.manifestPromptTruncation` is set, add a note: specialist
-prompts listed only the highest-signal files; the omitted count and
-categories come from that field. The complete manifest was still collected.
+If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
+could not be collected, so overlap classification is unavailable and
+recommended findings may duplicate existing comments. If
+`reviewMeta.manifestPromptTruncation` is set, add a line: specialist prompts
+listed only the highest-signal files (omitted count and categories are in that
+field); the complete manifest was still collected.
 
 ### 2. Recommended to post (full detail)
 
@@ -291,19 +278,15 @@ For each finding being posted as a new line comment, show:
 For each overlap finding being posted as a thread reply, show:
 
 - finding id, "Reply to thread on path:line", and body
-- if the target thread is known to be resolved (`isResolved` is true), append
-  a warning:
-  `⚠ Target thread is resolved — reply will stay collapsed and the PR author may
-  not see it.`
-- if `isResolved` is absent (the GitHub read tools did not expose resolution
-  state), append: `(thread resolution state unknown — if the thread is
-  resolved, this reply will stay collapsed)`
-- if the overlap finding has no `commentId` (no reply target could be
-  identified), do not silently fall through to a new comment: show
-  `⚠ No reply target available — this would be posted as a new line comment
-  instead of a thread reply, which may duplicate the existing thread.` and let
-  the user choose to post it as a line comment, move it to the review body, or
-  skip it
+- if `isResolved` is true: `⚠ Target thread is resolved — reply will stay
+  collapsed and the PR author may not see it.`
+- if `isResolved` is absent (resolution state not exposed by the read tools):
+  `(thread resolution state unknown — a resolved thread keeps this reply
+  collapsed)`
+- if there is no `commentId`, do not silently fall through to a new comment:
+  show `⚠ No reply target available — posting would create a new line comment
+  that may duplicate the existing thread.` and let the user choose line
+  comment, review body, or skip
 
 For review body text (non-line findings), show the review body.
 
@@ -331,13 +314,10 @@ Use GitHub write tools only in this final approved step.
 
 If the approved preview has new line comments:
 
-1. Create a pending review with
-   `mcp__plugin_github_github__pull_request_review_write`.
-2. Add approved line comments with
-   `mcp__plugin_github_github__add_comment_to_pending_review`.
-3. Submit the pending review with
-   `mcp__plugin_github_github__pull_request_review_write` using the approved
-   event and review body.
+1. Create a pending review with `pull_request_review_write`.
+2. Add approved line comments with `add_comment_to_pending_review`.
+3. Submit the pending review with `pull_request_review_write` using the
+   approved event and review body.
 
 ### Posting thread replies for overlap findings
 
@@ -349,8 +329,8 @@ pending review submission.
 
 ### Review body only
 
-If the approved preview has only review-body text, submit the review body with
-`mcp__plugin_github_github__pull_request_review_write` using the approved event.
+If the approved preview has only review-body text, submit it with
+`pull_request_review_write` using the approved event.
 
 ### Invalid locations
 
