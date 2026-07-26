@@ -165,35 +165,41 @@ done < <(git diff --name-only -z --no-renames --diff-filter=A \
 # bits this script owns — those on sandbox-protected paths, set by a
 # previous run — so they can be reapplied after any read-tree, including
 # an idempotent rerun where the orig->merge diff is empty and the marking
-# loop below would not touch them.
+# loop below would not touch them. The full protected file list is kept
+# for classifying hidden-state entries below. ls-files -v tags
+# skip-worktree as S and lowercases the tag for assume-unchanged entries.
+protected_files=()
 skip_worktree_paths=()
 while IFS= read -r -d '' entry; do
-    if [[ "${entry}" == "S "* ]]; then
+    protected_files+=("${entry:2}")
+    if [[ "${entry:0:1}" == "S" || "${entry:0:1}" == "s" ]]; then
         skip_worktree_paths+=("${entry:2}")
     fi
-done < <(git ls-files -t -z -- "${protected_match[@]}" 2>/dev/null)
+done < <(git ls-files -v -z -- "${protected_match[@]}" 2>/dev/null)
 
-# A skip-worktree entry outside the protected set is user state (manual
-# skip-worktree or sparse checkout) that can hide local modifications the
-# clean-worktree preflight cannot see; checkout-index -f would overwrite
-# them and reapplying the bit would hide the damage. Refuse before any
-# mutation.
-while IFS= read -r -d '' entry; do
-    if [[ "${entry}" != "S "* ]]; then
-        continue
-    fi
-    entry_path="${entry:2}"
-    entry_protected=0
-    for p in ${skip_worktree_paths[@]+"${skip_worktree_paths[@]}"}; do
-        if [[ "${p}" == "${entry_path}" ]]; then
-            entry_protected=1
-            break
+is_protected_path() {
+    local candidate="$1" p
+    for p in ${protected_files[@]+"${protected_files[@]}"}; do
+        if [[ "${p}" == "${candidate}" ]]; then
+            return 0
         fi
     done
-    if [[ "${entry_protected}" -eq 0 ]]; then
-        skip "worktree has skip-worktree paths outside the sandbox-protected set"
+    return 1
+}
+
+# A skip-worktree or assume-unchanged entry outside the protected set is
+# user state (manual flags or sparse checkout) that can hide local
+# modifications the clean-worktree preflight cannot see — diff-index skips
+# both — and checkout-index -f would overwrite them. Refuse before any
+# mutation. Protected paths are exempt: checkout never writes them.
+while IFS= read -r -d '' entry; do
+    entry_tag="${entry:0:1}"
+    if [[ "${entry_tag}" == "S" || "${entry_tag}" == [a-z] ]]; then
+        if ! is_protected_path "${entry:2}"; then
+            skip "worktree has skip-worktree or assume-unchanged paths outside the sandbox-protected set"
+        fi
     fi
-done < <(git ls-files -t -z 2>/dev/null)
+done < <(git ls-files -v -z 2>/dev/null)
 
 reapply_skip_worktree() {
     local p

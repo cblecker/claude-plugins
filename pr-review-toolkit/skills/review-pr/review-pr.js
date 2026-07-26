@@ -1430,6 +1430,7 @@ function selectReviewers(files, summary) {
 // the manifest plus an explicit omission summary. The complete manifest
 // stays in workflow context; nothing is silently hidden.
 const PROMPT_FILE_CAP = 400
+const PROMPT_DIR_CAP = 100
 const LOW_SIGNAL_CATEGORIES = { vendor: true, generated: true, lockfile: true, binary: true }
 
 function promptManifest(prContext) {
@@ -1456,6 +1457,8 @@ function promptManifest(prContext) {
   // omitted areas stay actionable: specialists can Grep a directory on the
   // merged checkout, or fetch the recorded get_files page range in the MCP
   // path, without reinflating the prompt with thousands of file entries.
+  // The index itself is capped too — a PR spread across thousands of
+  // distinct directories must not reintroduce an O(files) payload.
   const byDirectory = {}
   omitted.forEach(file => {
     const segments = String(file.path || '').split('/')
@@ -1472,16 +1475,31 @@ function promptManifest(prContext) {
     }
   })
 
-  kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  return {
-    files: kept,
-    omittedSummary: {
-      omittedFileCount: omitted.length,
-      byCategory: byCategory,
-      byDirectory: byDirectory,
-      note: 'The complete manifest was collected; this prompt lists the ' + PROMPT_FILE_CAP + ' highest-signal files and summarizes the rest above. byDirectory maps each omitted directory to its file count, categories, and (in the MCP path) the get_files pageRange holding its entries — use Read/Grep on the merged checkout or fetch those pages to expand into omitted areas.'
-    }
+  let aggregatedDirectories = null
+  const dirNames = Object.keys(byDirectory)
+  if (dirNames.length > PROMPT_DIR_CAP) {
+    dirNames.sort((a, b) => (byDirectory[b].count - byDirectory[a].count) || (a < b ? -1 : 1))
+    aggregatedDirectories = { directoryCount: 0, count: 0, categories: {} }
+    dirNames.slice(PROMPT_DIR_CAP).forEach(dir => {
+      const entry = byDirectory[dir]
+      aggregatedDirectories.directoryCount++
+      aggregatedDirectories.count += entry.count
+      Object.keys(entry.categories).forEach(category => {
+        aggregatedDirectories.categories[category] = (aggregatedDirectories.categories[category] || 0) + entry.categories[category]
+      })
+      delete byDirectory[dir]
+    })
   }
+
+  kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const omittedSummary = {
+    omittedFileCount: omitted.length,
+    byCategory: byCategory,
+    byDirectory: byDirectory,
+    note: 'The complete manifest was collected; this prompt lists the ' + PROMPT_FILE_CAP + ' highest-signal files and summarizes the rest above. byDirectory maps the ' + PROMPT_DIR_CAP + ' largest omitted directories to file count, categories, and (in the MCP path) the get_files pageRange holding their entries — use Read/Grep on the merged checkout or fetch those pages to expand into omitted areas.'
+  }
+  if (aggregatedDirectories) omittedSummary.aggregatedDirectories = aggregatedDirectories
+  return { files: kept, omittedSummary: omittedSummary }
 }
 
 function contextForPrompt(prContext) {

@@ -89,10 +89,12 @@ From `NUMSTAT`, merge additions and deletions per file into the status list
 
 ## Collect Full Diff (Optional)
 
-If the manifest was built, collect the full merge diff:
+If the manifest was built, collect the full merge diff (the explicit
+prefixes keep header parsing stable under `diff.noprefix` or
+`diff.mnemonicPrefix` configuration):
 
 ```bash
-git diff --no-ext-diff --no-textconv HEAD^1 HEAD
+git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ HEAD^1 HEAD
 ```
 
 Store as `fullDiff` if 200,000 characters or fewer; otherwise omit.
