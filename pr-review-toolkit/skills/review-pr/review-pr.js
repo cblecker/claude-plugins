@@ -122,8 +122,11 @@ const FINDING_SCHEMA = {
   required: ['findings', 'positiveObservations']
 }
 
+// collectionFailed is required so a failed read can never be schema-valid
+// while looking identical to a PR that simply has no review threads.
 const THREAD_SCHEMA = {
   type: 'object',
+  required: ['collectionFailed', 'threads'],
   properties: {
     collectionFailed: { type: 'boolean' },
     threads: {
@@ -153,8 +156,7 @@ const THREAD_SCHEMA = {
         required: ['id', 'path', 'author', 'body']
       }
     }
-  },
-  required: ['threads']
+  }
 }
 
 const BOARD_ITEM_SCHEMA = {
@@ -621,6 +623,14 @@ function asNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+// Verification counts from checkout output: -1 means unknown. Number(null)
+// is 0, so null/undefined must be mapped to the sentinel explicitly or an
+// absent count would masquerade as a known zero.
+function sourceCount(sources, key) {
+  const value = sources ? sources[key] : undefined
+  return value == null ? -1 : asNumber(value, -1)
+}
+
 function firstString(values, fallback) {
   for (const value of values || []) {
     if (typeof value === 'string' && value.trim()) return value.trim()
@@ -777,15 +787,19 @@ function bestOverlap(left, right) {
   const order = { none: 0, overlaps: 1, already_covered: 2 }
   const leftStatus = (left && left.status) || 'none'
   const rightStatus = (right && right.status) || 'none'
-  // On equal status, prefer the side that carries a reply target so merging
-  // duplicates never discards a confirmed thread identity.
+  // On equal status, prefer the side with a usable reply target: commentId
+  // is what posting actually uses, so it outranks a thread-only identity.
   let selected
   if (order[rightStatus] > order[leftStatus]) {
     selected = right
   } else if (order[leftStatus] > order[rightStatus]) {
     selected = left
+  } else if (left && left.commentId) {
+    selected = left
+  } else if (right && right.commentId) {
+    selected = right
   } else {
-    selected = (left && (left.commentId || left.threadId)) ? left : (right || left)
+    selected = (left && left.threadId) ? left : (right || left)
   }
   if (!selected) return { status: 'none', threadId: '', rationale: '' }
 
@@ -846,13 +860,18 @@ function inferThreadOverlap(item, threads) {
   // bodies in context; keep its non-none status and only attach thread
   // identity here. Token matching is a fallback classifier, not an override.
   if (existing.status && existing.status !== 'none') {
+    const idsSupplied = Boolean(existing.threadId || existing.commentId)
     let matched = null
-    if (existing.threadId || existing.commentId) {
+    if (idsSupplied) {
       matched = (threads || []).find(t =>
         t && ((existing.threadId && t.id === existing.threadId) || (existing.commentId && t.commentId === existing.commentId))
       ) || null
-    }
-    if (!matched) {
+    } else {
+      // Content matching attaches a thread only when no identity was
+      // supplied. A supplied identity that does not resolve is kept as-is
+      // (posting handles invalid targets and the preview flags missing
+      // ones) — redirecting the reply to a token-matched thread could
+      // target the wrong conversation.
       const best = bestThreadMatch(item, threads)
       matched = best ? best.thread : null
     }
@@ -1637,12 +1656,14 @@ if (localGitManifest && localGitManifest.length > 0) {
   // by checkout.sh) verifies the parsed manifest itself is complete —
   // checked first and unconditionally, because a lossy parse can
   // coincidentally match changedFiles while missing merge-only paths.
-  // Note: asNumber(null, -1) is 0, so guard the property access, not the
-  // object.
-  const prDiffFileCount = asNumber(configSources ? configSources.prDiffFileCount : undefined, -1)
-  const mergeDiffFileCount = asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1)
+  // checkout.sh always emits mergeDiffFileCount, so a missing count means
+  // the contract was not followed and the manifest is not trusted.
+  const prDiffFileCount = sourceCount(configSources, 'prDiffFileCount')
+  const mergeDiffFileCount = sourceCount(configSources, 'mergeDiffFileCount')
   let manifestProblem = ''
-  if (mergeDiffFileCount >= 0 && files.length !== mergeDiffFileCount) {
+  if (mergeDiffFileCount < 0) {
+    manifestProblem = 'local manifest is missing the mergeDiffFileCount verification count'
+  } else if (files.length !== mergeDiffFileCount) {
     manifestProblem = 'local manifest parse incomplete: merge diff has ' + mergeDiffFileCount + ' file(s), parsed ' + files.length
   } else if (pr.changedFiles && files.length !== pr.changedFiles) {
     if (prDiffFileCount >= 0 && prDiffFileCount === pr.changedFiles && mergeDiffFileCount >= 0) {
@@ -1696,8 +1717,8 @@ const prContext = {
     mergeCommit: (configSources && configSources.mergeCommit) || '',
     baseSha: (configSources && configSources.baseSha) || '',
     headSha: (configSources && configSources.headSha) || pr.headSha || '',
-    prDiffFileCount: asNumber(configSources ? configSources.prDiffFileCount : undefined, -1),
-    mergeDiffFileCount: asNumber(configSources ? configSources.mergeDiffFileCount : undefined, -1),
+    prDiffFileCount: sourceCount(configSources, 'prDiffFileCount'),
+    mergeDiffFileCount: sourceCount(configSources, 'mergeDiffFileCount'),
     fullDiffIncluded: Boolean(effectiveFullDiff),
     fallbackReason: fallbackReason,
     recoveryAttempts: recoveryAttempts,

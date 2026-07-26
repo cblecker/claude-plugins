@@ -143,7 +143,9 @@ fail_checkout() {
 # and untracked leftovers make checkout-index fail into the rollback path
 # instead of losing data.
 while IFS= read -r -d '' added_path; do
-    if [[ (-e "${added_path}" || -L "${added_path}") && ! -d "${added_path}" ]]; then
+    # -L is tested independently: -d follows symlinks, so a symlink to a
+    # directory must still count as untracked data, not as a type change.
+    if [[ -L "${added_path}" || (-e "${added_path}" && ! -d "${added_path}") ]]; then
         skip "untracked files would be overwritten by the merge checkout"
     fi
 done < <(git diff --name-only -z --no-renames --diff-filter=A \

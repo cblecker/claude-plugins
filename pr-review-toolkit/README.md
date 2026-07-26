@@ -88,7 +88,8 @@ Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and
 include: not a git repository, dirty worktree, missing origin, non-github.com
 origin host, origin mismatch, merge ref fetch failure, untracked files that
 the merge would overwrite, checkout failure (after restoring the original
-state), or merge parent mismatch.
+state — the reason says so explicitly if the restore itself was incomplete),
+missing or failed manifest verification counts, or merge parent mismatch.
 
 ### Workflow
 
