@@ -29,7 +29,17 @@ git diff-index --quiet HEAD -- 2>/dev/null \
 origin_url="$(git remote get-url origin 2>/dev/null)" \
     || skip "no origin remote"
 
-# Origin must match the PR base repository before anything is fetched.
+# Origin must point at github.com and match the PR base repository before
+# anything is fetched. PR URLs are always github.com, so a same-named repo
+# on another host must not be fetched from. Host extraction: strip the
+# scheme, strip userinfo, cut at the first colon or slash.
+origin_host="$(printf '%s' "${origin_url}" \
+    | sed -E -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|^[^/@]*@||' -e 's|[:/].*$||' \
+    | tr '[:upper:]' '[:lower:]')"
+if [[ "${origin_host}" != "github.com" ]]; then
+    skip "origin host is not github.com"
+fi
+
 # Normalize both sides to lowercase {owner}/{repo}: strip trailing slashes
 # and .git, then take the last two path components (covers https, ssh,
 # and scp-style URLs).
@@ -107,6 +117,18 @@ restore_original() {
     git read-tree "${orig_head}" 2>/dev/null || return 0
     checkout_worktree 2>/dev/null || true
 }
+
+# Refuse to overwrite untracked local files, matching git checkout's own
+# guard: a path the merge adds that already exists on disk is untracked
+# data (preflight verified tracked content is clean), and checkout-index -f
+# would silently overwrite it — and a later rollback would delete it.
+# Runs before any mutation.
+while IFS= read -r -d '' added_path; do
+    if [[ -e "${added_path}" || -L "${added_path}" ]]; then
+        skip "untracked files would be overwritten by the merge checkout"
+    fi
+done < <(git diff --name-only -z --no-renames --diff-filter=A \
+    "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
 # --- Plumbing checkout (excludes sandbox-protected files) ---
 if ! git read-tree "${merge_sha}"; then

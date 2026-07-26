@@ -985,9 +985,27 @@ function signalsForFile(file) {
 function unquoteGitPath(value) {
   var escapes = { t: '\t', n: '\n', r: '\r', '"': '"', '\\': '\\', a: '\x07', b: '\b', f: '\f', v: '\v' }
   var out = ''
+  var bytes = []
+  // Octal escapes encode UTF-8 bytes, so a run of them must be decoded as
+  // one byte sequence, not per-byte code points ("caf\303\251" is café).
+  // decodeURIComponent is the sandbox-safe UTF-8 decoder — workflow scripts
+  // have no Buffer or Node APIs. Fall back per-byte on malformed sequences.
+  function flushBytes() {
+    if (bytes.length === 0) return
+    var encoded = bytes.map(function(b) {
+      return '%' + (b < 16 ? '0' : '') + b.toString(16)
+    }).join('')
+    try {
+      out += decodeURIComponent(encoded)
+    } catch (err) {
+      bytes.forEach(function(b) { out += String.fromCharCode(b) })
+    }
+    bytes = []
+  }
   for (var i = 0; i < value.length; i++) {
     var ch = value.charAt(i)
     if (ch !== '\\') {
+      flushBytes()
       out += ch
       continue
     }
@@ -997,12 +1015,14 @@ function unquoteGitPath(value) {
       while (oct.length < 3 && value.charAt(i + 1) >= '0' && value.charAt(i + 1) <= '7') {
         oct += value.charAt(++i)
       }
-      out += String.fromCharCode(parseInt(oct, 8))
+      bytes.push(parseInt(oct, 8))
     } else {
+      flushBytes()
       out += escapes[next] != null ? escapes[next] : next
       i++
     }
   }
+  flushBytes()
   return out
 }
 
@@ -1718,7 +1738,7 @@ const synthesisInput = {
   positiveObservations: allPositive
 }
 
-const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- relatedToExisting: findings that overlap with an existing review thread — either as an endorsement or with additional detail beyond what the thread covers.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify each finding against existing review threads by logical concern, not just file proximity. Set existingReviewOverlap.status to overlaps, already_covered, or none based on whether the finding's concern matches an existing thread.\n4. Do not invent posting or drafting behavior.\n5. Include positive observations when useful.`
+const synthPrompt = `You are synthesizing a human-centered PR review board from specialist candidate findings.\n\nDo not call tools. Use only the JSON input below.\n\n${JSON.stringify(synthesisInput)}\n\nBuild a review board grouped by outcome:\n- recommendedToPost: high-signal findings that look postable by a human reviewer and are not already covered by existing review threads.\n- relatedToExisting: findings that overlap with an existing review thread — either as an endorsement or with additional detail beyond what the thread covers.\n- discussionOnly: useful reviewer notes that should not be posted as comments yet.\n- alreadyCovered: findings fully covered by existing human or bot review threads.\n- discarded: weak, low-confidence, duplicate, or not-actionable findings.\n\nSynthesis rules:\n1. Merge duplicate specialist findings by logical concern before assigning a section. Same concern means the same bug, risk, missing test, comment problem, or type-design issue, even when titles differ.\n2. Preserve specialist evidence and reasoning in the existing board fields, especially evidence, whyItMatters, suggestedFix, and existingReviewOverlap.rationale. When merging duplicates, combine non-redundant evidence rather than dropping it.\n3. Classify each finding against existing review threads by logical concern, not just file proximity. Set existingReviewOverlap.status to overlaps, already_covered, or none based on whether the finding's concern matches an existing thread. When the concern matches a specific thread, copy that thread's id into existingReviewOverlap.threadId and its commentId into existingReviewOverlap.commentId from the threads input, so replies can target the right thread.\n4. Do not invent posting or drafting behavior.\n5. Include positive observations when useful.`
 
 const synthesized = await agent(synthPrompt, {
   label: 'synthesize-review-board',

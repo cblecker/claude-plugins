@@ -298,6 +298,12 @@ For each overlap finding being posted as a thread reply, show:
 - if `isResolved` is absent (the GitHub read tools did not expose resolution
   state), append: `(thread resolution state unknown — if the thread is
   resolved, this reply will stay collapsed)`
+- if the overlap finding has no `commentId` (no reply target could be
+  identified), do not silently fall through to a new comment: show
+  `⚠ No reply target available — this would be posted as a new line comment
+  instead of a thread reply, which may duplicate the existing thread.` and let
+  the user choose to post it as a line comment, move it to the review body, or
+  skip it
 
 For review body text (non-line findings), show the review body.
 

@@ -85,9 +85,10 @@ When local git is unavailable, the workflow collects changed files via GitHub MC
 `get_files` with pagination and recovery retries, as in previous versions.
 
 Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and
-include: not a git repository, dirty worktree, missing origin, origin
-mismatch, merge ref fetch failure, checkout failure (after restoring the
-original state), or merge parent mismatch.
+include: not a git repository, dirty worktree, missing origin, non-github.com
+origin host, origin mismatch, merge ref fetch failure, untracked files that
+the merge would overwrite, checkout failure (after restoring the original
+state), or merge parent mismatch.
 
 ### Workflow
 
