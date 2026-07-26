@@ -22,9 +22,12 @@ review feedback, then post reply comments to GitHub.
 - Get the mainline branch from the remote (authoritative — the cached local
   `origin/HEAD` can be stale after a default-branch rename):
   `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'`.
-  If that fails (offline), fall back to
+  The pipeline exits 0 even when `git ls-remote` fails, so judge by output:
+  if it prints nothing (offline), fall back to
   `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` and strip
-  the `origin/` prefix
+  the `origin/` prefix. If both lookups print nothing, display
+  "Error: Could not determine the mainline branch." and stop execution —
+  do not proceed with the safety check unresolved
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution

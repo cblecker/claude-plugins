@@ -118,6 +118,9 @@ restore_original() {
         "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}" 2>/dev/null)
     git read-tree "${orig_head}" 2>/dev/null || restore_ok=1
     checkout_worktree 2>/dev/null || restore_ok=1
+    # The restore read-tree clears skip-worktree bits too; reapply the ones
+    # captured before mutation (defined before any caller of this function).
+    reapply_skip_worktree
     return "${restore_ok}"
 }
 
@@ -150,6 +153,26 @@ while IFS= read -r -d '' added_path; do
     fi
 done < <(git diff --name-only -z --no-renames --diff-filter=A \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
+
+# read-tree rebuilds the index and clears skip-worktree bits. Capture the
+# paths that carry the bit now (set by a previous run of this script) so
+# they can be reapplied after any read-tree — including an idempotent rerun
+# where the orig->merge diff is empty and the marking loop below would not
+# touch them. Without this, the bit is lost and the next run sees a dirty
+# tracked worktree and falls back.
+skip_worktree_paths=()
+while IFS= read -r -d '' entry; do
+    if [[ "${entry}" == "S "* ]]; then
+        skip_worktree_paths+=("${entry:2}")
+    fi
+done < <(git ls-files -t -z 2>/dev/null)
+
+reapply_skip_worktree() {
+    local p
+    for p in ${skip_worktree_paths[@]+"${skip_worktree_paths[@]}"}; do
+        git update-index --skip-worktree -- "${p}" 2>/dev/null || true
+    done
+}
 
 # --- Plumbing checkout (excludes sandbox-protected files) ---
 git read-tree "${merge_sha}" || fail_checkout "read-tree failed"
@@ -186,6 +209,10 @@ while IFS= read -r -d '' protected_path; do
     git update-index --skip-worktree -- "${protected_path}" 2>/dev/null || true
 done < <(git diff --name-only -z --no-renames --diff-filter=AM \
     "${orig_head}" "${merge_sha}" -- "${protected_match[@]}" 2>/dev/null)
+
+# Reapply bits captured before read-tree (idempotent reruns and refreshed
+# merges leave the orig->merge diff empty for already-protected paths).
+reapply_skip_worktree
 
 # read-tree leaves index entries without stat data; refresh so the checkout
 # reads as clean to git status and to this script's own preflight on reruns.
