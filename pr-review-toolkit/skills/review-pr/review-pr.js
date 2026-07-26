@@ -862,10 +862,13 @@ function inferThreadOverlap(item, threads) {
   if (existing.status && existing.status !== 'none') {
     const idsSupplied = Boolean(existing.threadId || existing.commentId)
     let matched = null
-    if (idsSupplied) {
-      matched = (threads || []).find(t =>
-        t && ((existing.threadId && t.id === existing.threadId) || (existing.commentId && t.commentId === existing.commentId))
-      ) || null
+    if (existing.threadId) {
+      // threadId is authoritative when supplied; matching commentId as a
+      // fallback here could resolve a mangled id pair to a different
+      // conversation and send an approved reply there.
+      matched = (threads || []).find(t => t && t.id === existing.threadId) || null
+    } else if (existing.commentId) {
+      matched = (threads || []).find(t => t && t.commentId === existing.commentId) || null
     } else {
       // Content matching attaches a thread only when no identity was
       // supplied. A supplied identity that does not resolve is kept as-is

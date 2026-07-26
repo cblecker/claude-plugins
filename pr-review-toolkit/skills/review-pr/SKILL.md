@@ -323,9 +323,11 @@ If the approved preview has new line comments:
 
 Post overlapping findings as replies using
 `add_reply_to_pull_request_comment` with the numeric `commentId` and
-`pullNumber`. If `commentId` is missing or invalid, post as a new line comment
-via the pending review flow instead. Thread replies are independent of the
-pending review submission.
+`pullNumber`. If the reply API rejects the target as invalid, do not silently
+change the posting location: convert the finding to a proposed new line
+comment, show the revised preview, and ask for approval again — same as
+invalid line locations below. Thread replies are independent of the pending
+review submission.
 
 ### Review body only
 

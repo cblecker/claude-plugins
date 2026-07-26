@@ -73,7 +73,11 @@ current directory is a git repository with a clean worktree, it:
 The local manifest and optional full diff are passed to the workflow via `args`.
 Specialist agents can also use Read and Grep on the merged checkout to inspect
 files in their merged state. Sandbox-protected files listed above are the one
-exception: their worktree content stays at the pre-merge state.
+exception: their worktree content stays at the pre-merge state — modified or
+added protected paths are marked `skip-worktree`, and a protected path the PR
+deletes remains on disk as an untracked leftover (the sandbox blocks
+unlinking it). Preflight and reruns are unaffected; the full merge diff and
+manifest still carry the real change.
 
 After a successful checkout the skill does NOT auto-restore the original git
 ref. The merged checkout state keeps the Read tool useful for workflow
