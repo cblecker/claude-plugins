@@ -867,6 +867,19 @@ function inferThreadOverlap(item, threads) {
       // fallback here could resolve a mangled id pair to a different
       // conversation and send an approved reply there.
       matched = (threads || []).find(t => t && t.id === existing.threadId) || null
+      if (!matched) {
+        // The authoritative thread cannot be resolved: drop the comment
+        // target and resolution state too, because posting uses commentId
+        // and a mangled pair could still reply to the wrong thread. The
+        // preview flags the missing target and asks for a posting choice.
+        return {
+          status: existing.status,
+          threadId: existing.threadId,
+          commentId: undefined,
+          isResolved: undefined,
+          rationale: existing.rationale || 'Overlap classified during review synthesis.'
+        }
+      }
     } else if (existing.commentId) {
       matched = (threads || []).find(t => t && t.commentId === existing.commentId) || null
     } else {
@@ -1439,13 +1452,34 @@ function promptManifest(prContext) {
     byCategory[file.category] = (byCategory[file.category] || 0) + 1
   })
 
+  // Compact per-directory expansion index (first two path segments) so
+  // omitted areas stay actionable: specialists can Grep a directory on the
+  // merged checkout, or fetch the recorded get_files page range in the MCP
+  // path, without reinflating the prompt with thousands of file entries.
+  const byDirectory = {}
+  omitted.forEach(file => {
+    const segments = String(file.path || '').split('/')
+    const dir = segments.length > 1 ? segments.slice(0, Math.min(2, segments.length - 1)).join('/') : '.'
+    if (!byDirectory[dir]) byDirectory[dir] = { count: 0, categories: {} }
+    const entry = byDirectory[dir]
+    entry.count++
+    entry.categories[file.category] = (entry.categories[file.category] || 0) + 1
+    const page = asNumber(file.page, 0)
+    if (page > 0) {
+      entry.pageRange = entry.pageRange || [page, page]
+      if (page < entry.pageRange[0]) entry.pageRange[0] = page
+      if (page > entry.pageRange[1]) entry.pageRange[1] = page
+    }
+  })
+
   kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   return {
     files: kept,
     omittedSummary: {
       omittedFileCount: omitted.length,
       byCategory: byCategory,
-      note: 'The complete manifest was collected; this prompt lists the ' + PROMPT_FILE_CAP + ' highest-signal files and summarizes the rest by category above. Omitted files are still part of the PR and can be inspected directly (Read/Grep on the merged checkout, or the focused patch access instructions).'
+      byDirectory: byDirectory,
+      note: 'The complete manifest was collected; this prompt lists the ' + PROMPT_FILE_CAP + ' highest-signal files and summarizes the rest above. byDirectory maps each omitted directory to its file count, categories, and (in the MCP path) the get_files pageRange holding its entries — use Read/Grep on the merged checkout or fetch those pages to expand into omitted areas.'
     }
   }
 }

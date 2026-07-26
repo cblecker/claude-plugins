@@ -95,6 +95,13 @@ protected_pathspecs=(
     ':(glob,exclude)**/.idea/**'
 )
 
+# Include-form pathspecs for the same protected set (used to classify
+# skip-worktree entries and to mark protected paths after checkout).
+protected_match=()
+for spec in "${protected_pathspecs[@]}"; do
+    protected_match+=("${spec/,exclude/}")
+done
+
 checkout_worktree() {
     git ls-files -z -- . "${protected_pathspecs[@]}" \
         | git checkout-index -f -z --stdin
@@ -155,15 +162,36 @@ done < <(git diff --name-only -z --no-renames --diff-filter=A \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
 # read-tree rebuilds the index and clears skip-worktree bits. Capture the
-# paths that carry the bit now (set by a previous run of this script) so
-# they can be reapplied after any read-tree — including an idempotent rerun
-# where the orig->merge diff is empty and the marking loop below would not
-# touch them. Without this, the bit is lost and the next run sees a dirty
-# tracked worktree and falls back.
+# bits this script owns — those on sandbox-protected paths, set by a
+# previous run — so they can be reapplied after any read-tree, including
+# an idempotent rerun where the orig->merge diff is empty and the marking
+# loop below would not touch them.
 skip_worktree_paths=()
 while IFS= read -r -d '' entry; do
     if [[ "${entry}" == "S "* ]]; then
         skip_worktree_paths+=("${entry:2}")
+    fi
+done < <(git ls-files -t -z -- "${protected_match[@]}" 2>/dev/null)
+
+# A skip-worktree entry outside the protected set is user state (manual
+# skip-worktree or sparse checkout) that can hide local modifications the
+# clean-worktree preflight cannot see; checkout-index -f would overwrite
+# them and reapplying the bit would hide the damage. Refuse before any
+# mutation.
+while IFS= read -r -d '' entry; do
+    if [[ "${entry}" != "S "* ]]; then
+        continue
+    fi
+    entry_path="${entry:2}"
+    entry_protected=0
+    for p in ${skip_worktree_paths[@]+"${skip_worktree_paths[@]}"}; do
+        if [[ "${p}" == "${entry_path}" ]]; then
+            entry_protected=1
+            break
+        fi
+    done
+    if [[ "${entry_protected}" -eq 0 ]]; then
+        skip "worktree has skip-worktree paths outside the sandbox-protected set"
     fi
 done < <(git ls-files -t -z 2>/dev/null)
 
@@ -201,10 +229,6 @@ git update-ref --no-deref HEAD "${merge_sha}" || fail_checkout "update-ref faile
 # worktree content, so the index (merge version) would read as dirty and
 # block reruns. Mark them skip-worktree: git then treats the untouched
 # worktree copy as intentional.
-protected_match=()
-for spec in "${protected_pathspecs[@]}"; do
-    protected_match+=("${spec/,exclude/}")
-done
 while IFS= read -r -d '' protected_path; do
     git update-index --skip-worktree -- "${protected_path}" 2>/dev/null || true
 done < <(git diff --name-only -z --no-renames --diff-filter=AM \

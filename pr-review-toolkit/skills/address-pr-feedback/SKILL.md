@@ -20,14 +20,21 @@ review feedback, then post reply comments to GitHub.
 
 - Run `git branch --show-current` to get the current branch
 - Get the mainline branch from the remote (authoritative — the cached local
-  `origin/HEAD` can be stale after a default-branch rename):
-  `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'`.
-  The pipeline exits 0 even when `git ls-remote` fails, so judge by output:
-  if it prints nothing (offline), fall back to
-  `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` and strip
-  the `origin/` prefix. If both lookups print nothing, display
-  "Error: Could not determine the mainline branch." and stop execution —
-  do not proceed with the safety check unresolved
+  `origin/HEAD` can be stale after a default-branch rename). Run
+  `git ls-remote --symref origin HEAD` and check its exit status directly
+  (do not discard stderr; a pipeline's status would be the last command's,
+  not git's):
+  - Exit 0 → the mainline is the `ref: refs/heads/<branch>` line's branch
+    name. If no such line exists, display "Error: Could not determine the
+    mainline branch." and stop execution.
+  - Non-zero with a connectivity error (e.g. "Could not resolve host",
+    "unable to access") → fall back to
+    `git symbolic-ref --short refs/remotes/origin/HEAD` and strip the
+    `origin/` prefix; if that also produces nothing, display the error above
+    and stop.
+  - Non-zero for any other reason (authentication, invalid remote,
+    configuration) → fail closed: display the git error and stop. A stale
+    cached branch must not become authoritative for this safety check
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution
