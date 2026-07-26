@@ -777,7 +777,16 @@ function bestOverlap(left, right) {
   const order = { none: 0, overlaps: 1, already_covered: 2 }
   const leftStatus = (left && left.status) || 'none'
   const rightStatus = (right && right.status) || 'none'
-  const selected = (order[rightStatus] > order[leftStatus]) ? right : left
+  // On equal status, prefer the side that carries a reply target so merging
+  // duplicates never discards a confirmed thread identity.
+  let selected
+  if (order[rightStatus] > order[leftStatus]) {
+    selected = right
+  } else if (order[leftStatus] > order[rightStatus]) {
+    selected = left
+  } else {
+    selected = (left && (left.commentId || left.threadId)) ? left : (right || left)
+  }
   if (!selected) return { status: 'none', threadId: '', rationale: '' }
 
   // threadId, commentId, and isResolved must all come from the selected
@@ -1065,7 +1074,11 @@ function enrichSignalsFromDiff(files, fullDiff) {
     'security': /\b(auth|password|token|secret|credential|jwt|bcrypt|hash|encrypt|decrypt|certificate)\b/i,
     'concurrency': /\b(mutex|Mutex|chan\s|go\s+func|async\s|await\s|WaitGroup|Semaphore|threading|concurrent)\b|Lock\(\)|RLock\(\)/,
     'public-api': /\b(export\s|pub\s+fn|public\s+func|module\.exports)\b/,
-    'comments': /(^|\n)\s*(\/\/|#(?!!|include\b|define\b|undef\b|ifdef\b|ifndef\b|if\b|elif\b|else\b|endif\b|pragma\b|error\b|line\b)|\/\*|\*\s|<!--|"""|''')/
+    // Line-start comment markers, plus inline markers surrounded by
+    // whitespace (`x = 1 # note`, `y = 2 // note`) — the space-after
+    // requirement keeps CSS colors (#fff) and URLs (https://) out. String
+    // contents can false-positive; selection is liberal by design.
+    'comments': /(^|\n)\s*(\/\/|#(?!!|include\b|define\b|undef\b|ifdef\b|ifndef\b|if\b|elif\b|else\b|endif\b|pragma\b|error\b|line\b)|\/\*|\*\s|<!--|"""|''')|[^\S\n](\/\/|#)\s|\/\*.*\*\//
   }
 
   files.forEach(function(file) {

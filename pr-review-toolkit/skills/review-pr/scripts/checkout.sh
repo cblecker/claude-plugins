@@ -104,8 +104,10 @@ checkout_worktree() {
 # fails partway, so preflight stays clean for reruns and the MCP fallback
 # does not inherit a half-mutated repository. Files the merge added are
 # removed first: checkout-index never deletes, so they would otherwise
-# survive as untracked merge-content debris.
+# survive as untracked merge-content debris. Returns non-zero when the
+# tracked index/worktree state could not be confirmed restored.
 restore_original() {
+    local restore_ok=0
     while IFS= read -r -d '' added_path; do
         rm -f -- "${added_path}" 2>/dev/null || true
         added_dir="$(dirname -- "${added_path}")"
@@ -114,31 +116,41 @@ restore_original() {
         fi
     done < <(git diff --name-only -z --no-renames --diff-filter=A \
         "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}" 2>/dev/null)
-    git read-tree "${orig_head}" 2>/dev/null || return 0
-    checkout_worktree 2>/dev/null || true
+    git read-tree "${orig_head}" 2>/dev/null || restore_ok=1
+    checkout_worktree 2>/dev/null || restore_ok=1
+    return "${restore_ok}"
+}
+
+# Fail the checkout: restore the original state, then skip with a reason.
+# A failed restore is not silent — the skip reason says the repository
+# needs manual recovery so the user is never misled about its state.
+fail_checkout() {
+    if restore_original; then
+        skip "$1"
+    else
+        skip "$1; restore incomplete — run 'git reset --hard' in the review worktree to recover"
+    fi
 }
 
 # Refuse to overwrite untracked local files, matching git checkout's own
-# guard: a path the merge adds that already exists on disk as a regular
-# file or symlink is untracked data (preflight verified tracked content is
-# clean, and a tracked file at an added path is impossible), and
-# checkout-index -f would silently overwrite it — and a later rollback
-# would delete it. Runs before any mutation. A directory at an added path
-# is a dir-to-file type change: its tracked contents are removed by the
-# stale-path loop below, and untracked leftovers make checkout-index fail
-# into the rollback path instead of losing data.
+# guard: a path the merge adds that already exists on disk as any
+# non-directory inode (regular file, symlink, FIFO, socket, device) is
+# untracked data (preflight verified tracked content is clean, and a
+# tracked file at an added path is impossible), and checkout-index -f
+# would silently replace it — and a later rollback would delete it. Runs
+# before any mutation. A directory at an added path is a dir-to-file type
+# change: its tracked contents are removed by the stale-path loop below,
+# and untracked leftovers make checkout-index fail into the rollback path
+# instead of losing data.
 while IFS= read -r -d '' added_path; do
-    if [[ -f "${added_path}" || -L "${added_path}" ]]; then
+    if [[ (-e "${added_path}" || -L "${added_path}") && ! -d "${added_path}" ]]; then
         skip "untracked files would be overwritten by the merge checkout"
     fi
 done < <(git diff --name-only -z --no-renames --diff-filter=A \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
 # --- Plumbing checkout (excludes sandbox-protected files) ---
-if ! git read-tree "${merge_sha}"; then
-    restore_original
-    skip "read-tree failed"
-fi
+git read-tree "${merge_sha}" || fail_checkout "read-tree failed"
 
 # Remove files present at the original HEAD but absent from the merge
 # result (checkout-index never deletes), so stale content is not visible
@@ -147,8 +159,7 @@ fi
 # checkout-index so type changes (file -> directory) do not collide.
 while IFS= read -r -d '' stale_path; do
     if ! rm -f -- "${stale_path}"; then
-        restore_original
-        skip "stale file removal failed"
+        fail_checkout "stale file removal failed"
     fi
     stale_dir="$(dirname -- "${stale_path}")"
     if [[ "${stale_dir}" != "." ]]; then
@@ -157,15 +168,9 @@ while IFS= read -r -d '' stale_path; do
 done < <(git diff --name-only -z --no-renames --diff-filter=D \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
-if ! checkout_worktree; then
-    restore_original
-    skip "checkout-index failed"
-fi
+checkout_worktree || fail_checkout "checkout-index failed"
 
-if ! git update-ref --no-deref HEAD "${merge_sha}"; then
-    restore_original
-    skip "update-ref failed"
-fi
+git update-ref --no-deref HEAD "${merge_sha}" || fail_checkout "update-ref failed"
 
 # Protected paths the merge modified or added stay at their original
 # worktree content, so the index (merge version) would read as dirty and
