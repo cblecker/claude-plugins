@@ -152,12 +152,28 @@ fail_checkout() {
 # change: its tracked contents are removed by the stale-path loop below,
 # and untracked leftovers make checkout-index fail into the rollback path
 # instead of losing data.
+#
+# Ancestors need the same guard: if the merge adds a/new and an untracked
+# non-directory inode sits at a, the added path itself does not exist, yet
+# checkout-index -f replaces a with a directory — destroying the untracked
+# data with no rollback, since the checkout succeeds. A tracked
+# non-directory ancestor is allowed: it is a legitimate file-to-directory
+# type change whose deletion the stale-path loop applies before
+# checkout-index writes.
 while IFS= read -r -d '' added_path; do
     # -L is tested independently: -d follows symlinks, so a symlink to a
     # directory must still count as untracked data, not as a type change.
     if [[ -L "${added_path}" || (-e "${added_path}" && ! -d "${added_path}") ]]; then
         skip "untracked files would be overwritten by the merge checkout"
     fi
+    ancestor="${added_path}"
+    while [[ "${ancestor}" == */* ]]; do
+        ancestor="${ancestor%/*}"
+        if [[ -L "${ancestor}" || (-e "${ancestor}" && ! -d "${ancestor}") ]]; then
+            git ls-files --error-unmatch -- "${ancestor}" >/dev/null 2>&1 \
+                || skip "untracked files would be overwritten by the merge checkout"
+        fi
+    done
 done < <(git diff --name-only -z --no-renames --diff-filter=A \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
