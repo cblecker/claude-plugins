@@ -29,10 +29,13 @@ default-branch rename):
 - `exit_status:0` → the mainline is the branch name in the
   `ref: refs/heads/<branch>` line. If no such line exists, display "Error:
   Could not determine the mainline branch." and stop execution.
-- Non-zero exit status with a connectivity error in the output (e.g. "Could
-  not resolve host", "unable to access") → use the cached mainline fallback,
-  stripping the `origin/` prefix; if it shows `none`, display the error above
-  and stop.
+- Non-zero exit status with a transport-level connectivity error in the
+  output ("Could not resolve host", "Connection refused", "Connection timed
+  out", "Network is unreachable", "Operation timed out") → use the cached
+  mainline fallback, stripping the `origin/` prefix; if it shows `none`,
+  display the error above and stop. "unable to access" qualifies only when
+  paired with such a transport cause — with an HTTP status (401, 403, etc.)
+  it is an authentication failure, not connectivity.
 - Non-zero exit status for any other reason (authentication, invalid remote,
   configuration) → fail closed: display the captured git error and stop. A
   stale cached branch must not become authoritative for this safety check
