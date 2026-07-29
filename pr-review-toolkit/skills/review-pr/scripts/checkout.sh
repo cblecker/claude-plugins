@@ -127,7 +127,7 @@ restore_original() {
     checkout_worktree 2>/dev/null || restore_ok=1
     # The restore read-tree clears skip-worktree bits too; reapply the ones
     # captured before mutation (defined before any caller of this function).
-    reapply_skip_worktree
+    reapply_protected_flags
     return "${restore_ok}"
 }
 
@@ -161,19 +161,26 @@ while IFS= read -r -d '' added_path; do
 done < <(git diff --name-only -z --no-renames --diff-filter=A \
     "${orig_head}" "${merge_sha}" -- . "${protected_pathspecs[@]}")
 
-# read-tree rebuilds the index and clears skip-worktree bits. Capture the
-# bits this script owns — those on sandbox-protected paths, set by a
-# previous run — so they can be reapplied after any read-tree, including
+# read-tree rebuilds the index and clears skip-worktree and
+# assume-unchanged bits. Capture the flags on sandbox-protected paths —
+# set by a previous run or by the user, and exempted from the hidden-state
+# refusal below — so they can be reapplied after any read-tree, including
 # an idempotent rerun where the orig->merge diff is empty and the marking
 # loop below would not touch them. The full protected file list is kept
 # for classifying hidden-state entries below. ls-files -v tags
-# skip-worktree as S and lowercases the tag for assume-unchanged entries.
+# skip-worktree as S and lowercases the tag for assume-unchanged entries
+# (s = both flags, other lowercase = assume-unchanged only).
 protected_files=()
 skip_worktree_paths=()
+assume_unchanged_paths=()
 while IFS= read -r -d '' entry; do
     protected_files+=("${entry:2}")
-    if [[ "${entry:0:1}" == "S" || "${entry:0:1}" == "s" ]]; then
+    entry_tag="${entry:0:1}"
+    if [[ "${entry_tag}" == "S" || "${entry_tag}" == "s" ]]; then
         skip_worktree_paths+=("${entry:2}")
+    fi
+    if [[ "${entry_tag}" == [a-z] ]]; then
+        assume_unchanged_paths+=("${entry:2}")
     fi
 done < <(git ls-files -v -z -- "${protected_match[@]}" 2>/dev/null)
 
@@ -201,10 +208,13 @@ while IFS= read -r -d '' entry; do
     fi
 done < <(git ls-files -v -z 2>/dev/null)
 
-reapply_skip_worktree() {
+reapply_protected_flags() {
     local p
     for p in ${skip_worktree_paths[@]+"${skip_worktree_paths[@]}"}; do
         git update-index --skip-worktree -- "${p}" 2>/dev/null || true
+    done
+    for p in ${assume_unchanged_paths[@]+"${assume_unchanged_paths[@]}"}; do
+        git update-index --assume-unchanged -- "${p}" 2>/dev/null || true
     done
 }
 
@@ -242,7 +252,7 @@ done < <(git diff --name-only -z --no-renames --diff-filter=AM \
 
 # Reapply bits captured before read-tree (idempotent reruns and refreshed
 # merges leave the orig->merge diff empty for already-protected paths).
-reapply_skip_worktree
+reapply_protected_flags
 
 # read-tree leaves index entries without stat data; refresh so the checkout
 # reads as clean to git status and to this script's own preflight on reruns.
