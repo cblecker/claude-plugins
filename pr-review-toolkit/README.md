@@ -216,13 +216,12 @@ type. That agent allows GitHub PR reads and disallows shell, local file, web, an
 file mutation tools so large MCP responses do not lead to generated Python,
 `jq`, `gh`, or other ad-hoc parsing scripts.
 
-Specialist reviewers run through `pr-review-analysis-readonly`, which uses a
-tool allowlist (Read, Grep, Glob, GitHub PR reads, and gopls read-only tools)
-so shell, file mutation, and GitHub write tools are unavailable rather than
-merely discouraged. In the local git path, specialists can use Read and Grep
-on the merged checkout to inspect changed files and trace cross-file effects.
-To let specialists use additional read-only MCP tools (e.g. another language
-server), extend that agent's allowlist.
+Specialist reviewers run through `pr-review-analysis-readonly`, which
+disallows shell, file mutation, web, and known GitHub write tools so those are
+unavailable rather than merely discouraged, while read-only MCP tools (e.g.
+language servers for any language) remain usable when installed. In the local
+git path, specialists can use Read and Grep on the merged checkout to inspect
+changed files and trace cross-file effects.
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:

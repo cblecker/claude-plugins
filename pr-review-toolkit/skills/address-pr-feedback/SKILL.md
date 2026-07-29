@@ -16,25 +16,26 @@ review feedback, then post reply comments to GitHub.
 
 ## Phase 0: Branch Validation
 
-**Validate branch first:**
+Branch context, collected at invocation:
 
-- Run `git branch --show-current` to get the current branch
-- Get the mainline branch from the remote (authoritative — the cached local
-  `origin/HEAD` can be stale after a default-branch rename). Run
-  `git ls-remote --symref origin HEAD` and check its exit status directly
-  (do not discard stderr; a pipeline's status would be the last command's,
-  not git's):
-  - Exit 0 → the mainline is the `ref: refs/heads/<branch>` line's branch
-    name. If no such line exists, display "Error: Could not determine the
-    mainline branch." and stop execution.
-  - Non-zero with a connectivity error (e.g. "Could not resolve host",
-    "unable to access") → fall back to
-    `git symbolic-ref --short refs/remotes/origin/HEAD` and strip the
-    `origin/` prefix; if that also produces nothing, display the error above
-    and stop.
-  - Non-zero for any other reason (authentication, invalid remote,
-    configuration) → fail closed: display the git error and stop. A stale
-    cached branch must not become authoritative for this safety check
+- Current branch: !`git branch --show-current`
+- Remote mainline lookup: !`bash -c 'out=$(git ls-remote --symref origin HEAD 2>&1); printf "%s\nexit_status:%s\n" "$out" $?'`
+- Cached mainline fallback: !`git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo none`
+
+**Determine the mainline branch from the remote lookup output above**
+(authoritative — the cached local `origin/HEAD` can be stale after a
+default-branch rename):
+
+- `exit_status:0` → the mainline is the branch name in the
+  `ref: refs/heads/<branch>` line. If no such line exists, display "Error:
+  Could not determine the mainline branch." and stop execution.
+- Non-zero exit status with a connectivity error in the output (e.g. "Could
+  not resolve host", "unable to access") → use the cached mainline fallback,
+  stripping the `origin/` prefix; if it shows `none`, display the error above
+  and stop.
+- Non-zero exit status for any other reason (authentication, invalid remote,
+  configuration) → fail closed: display the captured git error and stop. A
+  stale cached branch must not become authoritative for this safety check
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution
