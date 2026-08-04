@@ -58,7 +58,7 @@ Candidates are the union of the first two searches, deduplicated by PR number an
 
 If no candidates: report the sweep result, print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
 
-**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as any context name contains `"tide"`. A candidate with other statuses but no tide context is not proof of absence — keep checking. Treat the repo as non-Prow after five candidates without a tide context.
+**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as any context name contains `"tide"`. A candidate with other statuses but no tide context is not proof of absence — keep checking. Conclude non-Prow after five candidates that returned status contexts but none containing tide (status-less candidates, such as new or draft PRs, don't count toward the five), or when candidates are exhausted.
 
 **Classify** each candidate from its search-result data (state, labels, engagement) — first matching rule wins:
 
@@ -90,7 +90,7 @@ Each agent performs these `pull_request_read` calls:
 4. `get_files(perPage: 100)` — first page only; file count ("100+" if truncated), key filenames, additions/deletions
 5. `get_commits(perPage: 100)` — commits since your last review: locate the review's `commit_id` in the ordered commit list and take everything after it (fall back to comparing dates if a force-push removed that SHA); summarize via commit messages. Skip if not yet reviewed.
 6. `get_review_comments` — count your unresolved vs resolved review threads
-7. `get_comments(perPage: 100)` — issue comments are oldest-first, so if the first page is full, follow pagination to the final page; only the most recent ~100 matter. Note mentions or questions directed at you.
+7. `get_comments(perPage: 100)` — issue comments are oldest-first, so if the first page is full, follow pagination and keep the most recent ~100 comments (the final page plus the prior page when the final page is short). Note mentions or questions directed at you.
 
 Paginate `get_reviews`, `get_commits`, and `get_review_comments` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Step 4 deliberately reads a single page.
 
@@ -160,7 +160,7 @@ For each PR where the user chose an action, execute all sub-steps in parallel ac
 **If not `HAS_PROW`:**
 
 - Unassign: `issue_write(method: "update", owner, repo, issue_number: PR, assignees: [all current assignees except USERNAME])`
-- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
+- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If the request is team-based — USERNAME absent from `requested_reviewers` but a team appears in `requested_teams` — do **not** delete the team's request (that would remove it for every teammate); report that the request came via the team and can only be unsubscribed from, not individually removed. If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
 - Both: execute both
 
 ### Clear GitHub notifications
