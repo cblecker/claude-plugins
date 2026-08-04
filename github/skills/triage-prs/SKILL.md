@@ -25,6 +25,8 @@ allowed-tools:
 
 Investigate open PRs that need your attention in the target repo, then present batched triage with options to unassign or unsubscribe.
 
+Tool names below are short forms of the GitHub MCP tools listed in `allowed-tools` (e.g. `get_me` → `mcp__plugin_github_github__get_me`).
+
 ## Repo Context
 
 - Repo argument (overrides remote detection if non-empty): $ARGUMENTS
@@ -34,7 +36,7 @@ Investigate open PRs that need your attention in the target repo, then present b
 
 **Repo identity:** if the repo argument above is non-empty, parse it as `OWNER/REPO`. Otherwise parse the detected remote URL — SSH (`git@github.com:OWNER/REPO.git`) or HTTPS (`https://github.com/OWNER/REPO`). If it is `__NO_REMOTE__` and no argument was given, print "No GitHub remote detected — re-run as `/github:triage-prs owner/repo`." and stop.
 
-**Authenticated user:** call `mcp__plugin_github_github__get_me` → store login as `USERNAME`.
+**Authenticated user:** call `get_me` → store login as `USERNAME`.
 
 ## Phase 2: Collect and Classify
 
