@@ -55,7 +55,7 @@ If no PRs found: print "No open PRs found where you are assigned or a requested 
 
 ## Phase 3: Parallel Investigation
 
-Dispatch one Agent per PR, all in parallel, using `model: "sonnet"`. Each agent prompt must be self-contained — pass `owner`, `repo`, `pr_number`, and `username` explicitly.
+Dispatch one Agent per PR using `model: "sonnet"`, in parallel batches of at most 10 PRs at a time. Each agent prompt must be self-contained — pass `owner`, `repo`, `pr_number`, and `username` explicitly.
 
 Each agent performs these MCP calls:
 
@@ -66,6 +66,8 @@ Each agent performs these MCP calls:
 5. `pull_request_read(method: "get_commits", perPage: 100)` — filter to commits dated after LAST_REVIEW_DATE; summarize via commit messages. Skip if not yet reviewed.
 6. `pull_request_read(method: "get_review_comments")` — count your unresolved vs resolved review threads
 7. `pull_request_read(method: "get_comments", perPage: 100)` — paginate through all issue comments (not just recent); note mentions or questions directed at you, and record whether USERNAME appears among comment authors as `commented_before`
+
+Every list method above is paginated: request `perPage: 100` and traverse every page (cursor pagination via `after` for `get_review_comments`) before summarizing, so late pages can't hide your latest review, open threads, or new commits.
 
 If the PR is merged or closed: return `"Merged/Closed"` and stop (this still counts as investigated — Phase 4 auto-dismisses it).
 
@@ -113,7 +115,7 @@ Before presenting anything to the user, run each investigated PR through these r
 
 Execute the auto-classified actions now, per PR:
 
-- **`dismiss`**: `list_notifications(owner, repo)`, find the thread(s) whose `subject.url` matches this PR, `dismiss_notification(threadID, state: "done")`. Do **not** call `manage_notification_subscription`.
+- **`dismiss`**: from the notification list (call `list_notifications(owner, repo)` once for this phase, paginating through all pages, and reuse it across PRs), find the thread(s) whose `subject.url` matches this PR, `dismiss_notification(threadID, state: "done")`. Do **not** call `manage_notification_subscription`.
 - **`unsubscribe`**: same lookup, then both `dismiss_notification(threadID, state: "done")` **and** `manage_notification_subscription(notificationID, action: "ignore")`.
 - **`keep`**: no action at all — don't dismiss, don't touch the subscription, don't ask about it in Phase 5. The notification stays exactly as it is.
 - **`manual`**: no action yet — these carry forward into Phase 5.
@@ -162,10 +164,10 @@ For each PR where the user chose an unassign/unsubscribe action in Phase 5, exec
 
 ### Clear GitHub notifications
 
-Call `list_notifications(owner, repo)`. For each notification matching this PR:
+Call `list_notifications(owner, repo)` once, paginating through all pages, and reuse the results across PRs. For each notification matching this PR:
 
 1. `dismiss_notification(threadID, state: "done")`
-2. `manage_notification_subscription(notificationID, action: "ignore")`
+2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles). If a role remains — e.g. "Unassign me" chosen but you're still a requested reviewer — dismiss only, so future activity still notifies you.
 
 ### Summary
 
