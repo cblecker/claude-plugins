@@ -30,10 +30,11 @@ HTTP-based MCP server connected to `api.githubcopilot.com`. The server is config
 
 - **triage-prs** (`/github:triage-prs [owner/repo]`) — triages open PRs where you are
   assigned or a requested reviewer. Auto-classifies PRs from search data first —
-  skipping ones you've already engaged with, and clearing notifications for closed
-  PRs (and, on Prow-managed repos, for `needs-rebase` and `lgtm`+`approved` PRs) —
-  then investigates only the remainder with parallel subagents and presents batched
-  options to unassign, remove review requests, or unsubscribe. Explicit invocation only —
+  skipping ones you've already engaged with and, on Prow-managed repos, dismissing
+  notifications for `needs-rebase` PRs and unsubscribing entirely from
+  `lgtm`+`approved` PRs — then investigates only the remainder with parallel
+  subagents and presents batched options to unassign, remove review requests, or
+  unsubscribe. Explicit invocation only —
   Claude never triggers it automatically. The target repo is taken from the
   optional `owner/repo` argument, or detected from the `upstream` (preferred)
   or `origin` git remote. Prow-managed repos are auto-detected and acted on via

@@ -2,9 +2,10 @@
 name: triage-prs
 description: >-
   Triage open pull requests that need the user's attention — PRs where they are
-  assigned or a requested reviewer. Auto-classifies and clears notifications for
-  PRs that need no attention, investigates the rest in parallel, then presents
-  batched triage options to unassign, remove review requests, or unsubscribe.
+  assigned or a requested reviewer. Auto-classifies PRs first, dismissing or
+  muting notifications for ones that need no attention, investigates the rest
+  in parallel, then presents batched triage options to unassign, remove review
+  requests, or unsubscribe.
 disable-model-invocation: true
 argument-hint: '[owner/repo]'
 allowed-tools:
@@ -53,7 +54,7 @@ Candidates are the union of the first two searches, deduplicated by PR number an
 
 If no candidates: print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
 
-**Detect Prow:** call `pull_request_read(method: "get_status")` on the first candidate. `HAS_PROW = true` if any status context name contains `"tide"`.
+**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates until one returns status contexts (up to three — new or draft PRs may have none yet). `HAS_PROW = true` if any context name contains `"tide"`.
 
 **Classify** each candidate from its search-result data (state, labels, engagement) — first matching rule wins:
 
@@ -85,11 +86,11 @@ Each agent performs these `pull_request_read` calls:
 2. `get_check_runs` **and** `get_status` — merge both (external CI such as Prow reports via status contexts); aggregate to: X/Y passing, Z failing [names], W pending
 3. `get_reviews` — date of your most recent review (any state); for your effective decision use your latest `APPROVED` or `CHANGES_REQUESTED` review, since a later `COMMENTED` review does not supersede it; note all other reviewers and their states
 4. `get_files(perPage: 100)` — first page only; file count ("100+" if truncated), key filenames, additions/deletions
-5. `get_commits(perPage: 100)` — commits dated after your last review; summarize via commit messages. Skip if not yet reviewed.
+5. `get_commits(perPage: 100)` — commits since your last review: locate the review's `commit_id` in the ordered commit list and take everything after it (fall back to comparing dates if a force-push removed that SHA); summarize via commit messages. Skip if not yet reviewed.
 6. `get_review_comments` — count your unresolved vs resolved review threads
-7. `get_comments(perPage: 100)` — most recent page only; note mentions or questions directed at you
+7. `get_comments(perPage: 100)` — issue comments are oldest-first, so if the first page is full, follow pagination to the final page; only the most recent ~100 matter. Note mentions or questions directed at you.
 
-Paginate `get_reviews`, `get_commits`, and `get_review_comments` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Steps 4 and 7 deliberately read a single page.
+Paginate `get_reviews`, `get_commits`, and `get_review_comments` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Step 4 deliberately reads a single page.
 
 If the PR is merged or closed: return `"Merged/Closed"` — run the `dismiss` action for it.
 
@@ -114,6 +115,7 @@ Recommended Action: ACTION_CATEGORY
 
 **Action categories** (pick highest-priority that applies):
 
+- **Draft** — PR is marked draft; not actionable for review or merge unless you were explicitly asked
 - **Author addressed feedback** — you requested changes; author pushed new commits and/or resolved threads
 - **Review needed** — not yet reviewed by you
 - **Re-review needed** — new commits since your last review (you hadn't requested changes)
@@ -139,6 +141,8 @@ Sort the agent results by urgency (order matches the category list above). Prese
 | `reviewer` only | Skip / Remove review request |
 | both | Skip / Unassign me / Remove review request / Unsubscribe (both) |
 
+In each option's description, disclose when the action will also mute the PR: any choice that removes your only remaining role (and `Unsubscribe (both)`) stops all future notifications for that PR (see Phase 5).
+
 ## Phase 5: Execute Actions
 
 For each PR where the user chose an action, execute all sub-steps in parallel across PRs.
@@ -162,7 +166,7 @@ For each PR where the user chose an action, execute all sub-steps in parallel ac
 Using the Notification lookup from Phase 2 (fresh call for this phase), for each thread matching the PR:
 
 1. `dismiss_notification(threadID, state: "done")`
-2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles) **and every removal step actually executed** (e.g. don't ignore when the `gh` call was skipped as unavailable). If a role remains or a removal was skipped, dismiss only, so future activity still notifies you.
+2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles) **and the removal is confirmed**: a skipped `gh` call doesn't count, and a Prow comment only queues the bot command — re-read the PR (`get`) and check the role is actually gone; if it is still present, dismiss only and report the removal as pending. If a role remains or a removal is unconfirmed, dismiss only, so future activity still notifies you.
 
 ### Summary
 
