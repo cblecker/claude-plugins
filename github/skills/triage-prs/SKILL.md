@@ -24,7 +24,7 @@ allowed-tools:
 
 # Triage PRs
 
-Investigate open PRs that need your attention in the target repo, then present batched triage with options to unassign or unsubscribe.
+Investigate open PRs that need your attention in the target repo, then present batched triage with options to unassign, remove review requests, or unsubscribe.
 
 Tool names below are short forms of the GitHub MCP tools listed in `allowed-tools` (e.g. `get_me` → `mcp__plugin_github_github__get_me`).
 
@@ -54,7 +54,7 @@ Candidates are the union of the first two searches, deduplicated by PR number an
 
 If no candidates: print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
 
-**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates until one returns status contexts (up to three — new or draft PRs may have none yet). `HAS_PROW = true` if any context name contains `"tide"`.
+**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as any context name contains `"tide"`. A candidate with other statuses but no tide context is not proof of absence — keep checking. Treat the repo as non-Prow after five candidates without a tide context.
 
 **Classify** each candidate from its search-result data (state, labels, engagement) — first matching rule wins:
 
@@ -84,7 +84,7 @@ Each agent performs these `pull_request_read` calls:
 
 1. `get` — title, author, draft status, labels, timestamps
 2. `get_check_runs` **and** `get_status` — merge both (external CI such as Prow reports via status contexts); aggregate to: X/Y passing, Z failing [names], W pending
-3. `get_reviews` — date of your most recent review (any state); for your effective decision use your latest `APPROVED` or `CHANGES_REQUESTED` review, since a later `COMMENTED` review does not supersede it; note all other reviewers and their states
+3. `get_reviews` — date of your most recent review (any state); for your effective decision use your latest **active** `APPROVED` or `CHANGES_REQUESTED` review — `DISMISSED` reviews are inactive history, and a later `COMMENTED` review does not supersede the decision; note all other reviewers and their states
 4. `get_files(perPage: 100)` — first page only; file count ("100+" if truncated), key filenames, additions/deletions
 5. `get_commits(perPage: 100)` — commits since your last review: locate the review's `commit_id` in the ordered commit list and take everything after it (fall back to comparing dates if a force-push removed that SHA); summarize via commit messages. Skip if not yet reviewed.
 6. `get_review_comments` — count your unresolved vs resolved review threads
