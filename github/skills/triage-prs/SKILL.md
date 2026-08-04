@@ -2,10 +2,10 @@
 name: triage-prs
 description: >-
   Triage open pull requests that need the user's attention — PRs where they are
-  assigned or a requested reviewer. Auto-classifies PRs first, dismissing or
-  muting notifications for ones that need no attention, investigates the rest
-  in parallel, then presents batched triage options to unassign, remove review
-  requests, or unsubscribe.
+  assigned or a requested reviewer. Sweeps stale notifications left by closed or
+  merged PRs, auto-classifies open PRs — dismissing or muting notifications for
+  ones that need no attention — investigates the rest in parallel, then presents
+  batched triage options to unassign, remove review requests, or unsubscribe.
 disable-model-invocation: true
 argument-hint: '[owner/repo]'
 allowed-tools:
@@ -52,7 +52,11 @@ search_pull_requests(query: "reviewed-by:@me is:open", owner, repo)       # enga
 
 Candidates are the union of the first two searches, deduplicated by PR number and tagged with roles `assigned`, `reviewer`, or both. A candidate is **engaged** if its number appears in either engagement search.
 
-If no candidates: print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
+**Notification lookup** (used here and in Phase 5): call `list_notifications(owner, repo, filter: "include_read_notifications")` once per phase — read notifications are excluded by default — paginate all pages, and match threads by the PR their `subject.url` points at.
+
+**Sweep stale closed-PR notifications:** take `PullRequest`-type threads from the lookup whose PR number is not among the candidates. For each, call `pull_request_read(method: "get")`; if that PR is closed or merged, `dismiss_notification(threadID, state: "done")` — dismiss only, never ignore, so a reopened PR still notifies you. Threads whose PR is still open stay untouched.
+
+If no candidates: report the sweep result, print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
 
 **Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as any context name contains `"tide"`. A candidate with other statuses but no tide context is not proof of absence — keep checking. Treat the repo as non-Prow after five candidates without a tide context.
 
@@ -64,9 +68,7 @@ If no candidates: print "No open PRs found where you are assigned or a requested
 4. **`HAS_PROW` and both `lgtm` and `approved` labels** → `unsubscribe`
 5. **Otherwise** → `manual`
 
-**Notification lookup** (used here and in Phase 5): call `list_notifications(owner, repo, filter: "include_read_notifications")` once per phase — read notifications are excluded by default — paginate all pages, and match threads whose `subject.url` points at the PR.
-
-Execute the classifications now:
+Execute the classifications now, using the notification lookup above:
 
 - **`dismiss`**: `dismiss_notification(threadID, state: "done")` on matching threads. Do **not** touch the subscription.
 - **`unsubscribe`**: `dismiss_notification(threadID, state: "done")` **and** `manage_notification_subscription(notificationID, action: "ignore")`.
@@ -74,7 +76,7 @@ Execute the classifications now:
 
 > **Dismiss vs. unsubscribe:** `dismiss` clears only the current notification thread — new PR activity notifies again, which is what `dismiss` cases (closed, needs-rebase) want. Only `ignore` stops future notifications, so it is reserved for `unsubscribe`.
 
-Report a summary line, e.g.: "Auto-dismissed 3 (2 closed, 1 needs-rebase). Auto-unsubscribed 1 (lgtm+approved). Kept 2 (already engaged). Investigating 4."
+Report a summary line, e.g.: "Swept 5 stale closed-PR notifications. Auto-dismissed 3 (2 closed, 1 needs-rebase). Auto-unsubscribed 1 (lgtm+approved). Kept 2 (already engaged). Investigating 4."
 
 ## Phase 3: Parallel Investigation
 

@@ -29,7 +29,8 @@ HTTP-based MCP server connected to `api.githubcopilot.com`. The server is config
 ### Skills
 
 - **triage-prs** (`/github:triage-prs [owner/repo]`) — triages open PRs where you are
-  assigned or a requested reviewer. Auto-classifies PRs from search data first —
+  assigned or a requested reviewer. Sweeps stale notification threads left by PRs
+  that have since closed or merged, then auto-classifies open PRs from search data —
   skipping ones you've already engaged with and, on Prow-managed repos, dismissing
   notifications for `needs-rebase` PRs and unsubscribing entirely from
   `lgtm`+`approved` PRs — then investigates only the remainder with parallel
