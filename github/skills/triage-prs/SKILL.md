@@ -60,8 +60,8 @@ Dispatch one Agent per PR using `model: "sonnet"`, in parallel batches of at mos
 Each agent performs these MCP calls:
 
 1. `pull_request_read(method: "get")` — title, author, draft status, labels, timestamps
-2. `pull_request_read(method: "get_check_runs")` — aggregate to: X/Y passing, Z failing [names], W pending
-3. `pull_request_read(method: "get_reviews")` — find your most recent review (state + date); note all other reviewers and their states; record whether USERNAME appears at all (any state) as `reviewed_before`
+2. `pull_request_read(method: "get_check_runs")` **and** `pull_request_read(method: "get_status")` — merge both sources (Prow and other external CI report via commit status contexts, not check runs); aggregate to: X/Y passing, Z failing [names], W pending
+3. `pull_request_read(method: "get_reviews")` — record the date of your most recent review (any state); for your effective decision use your latest `APPROVED` or `CHANGES_REQUESTED` review, since a later `COMMENTED` review does not supersede it; note all other reviewers and their states; record whether USERNAME appears at all (any state) as `reviewed_before`
 4. `pull_request_read(method: "get_files")` — file count, key filenames, total additions/deletions
 5. `pull_request_read(method: "get_commits", perPage: 100)` — filter to commits dated after LAST_REVIEW_DATE; summarize via commit messages. Skip if not yet reviewed.
 6. `pull_request_read(method: "get_review_comments")` — count your unresolved vs resolved review threads
@@ -115,7 +115,7 @@ Before presenting anything to the user, run each investigated PR through these r
 
 Execute the auto-classified actions now, per PR:
 
-- **`dismiss`**: from the notification list (call `list_notifications(owner, repo)` once for this phase, paginating through all pages, and reuse it across PRs), find the thread(s) whose `subject.url` matches this PR, `dismiss_notification(threadID, state: "done")`. Do **not** call `manage_notification_subscription`.
+- **`dismiss`**: from the notification list (call `list_notifications(owner, repo, filter: "include_read_notifications")` once for this phase — read notifications are excluded by default — paginating through all pages, and reuse it across PRs), find the thread(s) whose `subject.url` matches this PR, `dismiss_notification(threadID, state: "done")`. Do **not** call `manage_notification_subscription`.
 - **`unsubscribe`**: same lookup, then both `dismiss_notification(threadID, state: "done")` **and** `manage_notification_subscription(notificationID, action: "ignore")`.
 - **`keep`**: no action at all — don't dismiss, don't touch the subscription, don't ask about it in Phase 5. The notification stays exactly as it is.
 - **`manual`**: no action yet — these carry forward into Phase 5.
@@ -164,10 +164,10 @@ For each PR where the user chose an unassign/unsubscribe action in Phase 5, exec
 
 ### Clear GitHub notifications
 
-Call `list_notifications(owner, repo)` once, paginating through all pages, and reuse the results across PRs. For each notification matching this PR:
+Call `list_notifications(owner, repo, filter: "include_read_notifications")` once, paginating through all pages, and reuse the results across PRs. For each notification matching this PR:
 
 1. `dismiss_notification(threadID, state: "done")`
-2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles). If a role remains — e.g. "Unassign me" chosen but you're still a requested reviewer — dismiss only, so future activity still notifies you.
+2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles) **and every removal step actually executed** (e.g. don't ignore when the `gh` call was skipped as unavailable). If a role remains or a removal was skipped, dismiss only, so future activity still notifies you.
 
 ### Summary
 
