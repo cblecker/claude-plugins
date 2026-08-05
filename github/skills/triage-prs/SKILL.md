@@ -84,7 +84,7 @@ For `manual` PRs only, dispatch one Agent per PR using `model: "sonnet"`, in par
 
 Each agent performs these `pull_request_read` calls:
 
-1. `get` — title, author, draft status, labels, timestamps
+1. `get` — title, author, draft status, labels, timestamps; whether your review request is individual (USERNAME in `requested_reviewers`) or team-based (only via `requested_teams`)
 2. `get_check_runs` **and** `get_status` — merge both (external CI such as Prow reports via status contexts); aggregate to: X/Y passing, Z failing [names], W pending
 3. `get_reviews` — date of your most recent review (any state); for your effective decision use your latest **active** `APPROVED` or `CHANGES_REQUESTED` review — `DISMISSED` reviews are inactive history, and a later `COMMENTED` review does not supersede the decision; note all other reviewers and their states
 4. `get_files(perPage: 100)` — first page only; file count ("100+" if truncated), key filenames, additions/deletions
@@ -92,7 +92,7 @@ Each agent performs these `pull_request_read` calls:
 6. `get_review_comments` — count your unresolved vs resolved review threads
 7. `get_comments(perPage: 100)` — issue comments are oldest-first, so if the first page is full, follow pagination and keep the most recent ~100 comments (the final page plus the prior page when the final page is short). Note mentions or questions directed at you.
 
-Paginate `get_reviews`, `get_commits`, and `get_review_comments` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Step 4 deliberately reads a single page.
+Paginate `get_reviews`, `get_commits`, `get_review_comments`, `get_check_runs`, and `get_status` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Step 4 deliberately reads a single page.
 
 If the PR is merged or closed: return `"Merged/Closed"` — run the `dismiss` action for it.
 
@@ -101,10 +101,10 @@ If the PR is merged or closed: return `"Merged/Closed"` — run the `dismiss` ac
 ```text
 PR #NUMBER: TITLE
 Author: AUTHOR | Created: DATE | Updated: DATE | Draft: yes/no
-Role: [assigned] [reviewer]
+Role: [assigned] [reviewer — individual/team]
 Labels: LABEL1, LABEL2
 
-CI: X/Y passing, Z failing [CHECK_NAMES], W pending → green/red/yellow/pending
+CI: X/Y passing, Z failing [CHECK_NAMES], W pending → green/red/pending
 My Last Review: STATE on DATE  (or: Not yet reviewed)
 Changes Since Review: N new commits — SUMMARY  (or: None / N/A)
 My Open Threads: N unresolved of M total
@@ -143,7 +143,9 @@ Sort the agent results by urgency (order matches the category list above). Prese
 | `reviewer` only | Skip / Remove review request |
 | both | Skip / Unassign me / Remove review request / Unsubscribe (both) |
 
-In each option's description, disclose when the action will also mute the PR: any choice that removes your only remaining role (and `Unsubscribe (both)`) stops all future notifications for that PR (see Phase 5).
+When the review request is team-based, replace "Remove review request" with "Unsubscribe" — a team request can't be individually removed, so muting is the only opt-out.
+
+In each option's description, disclose when the action will also mute the PR: any choice that removes your only remaining role, and any explicit Unsubscribe, stops all future notifications for that PR (see Phase 5).
 
 ## Phase 5: Execute Actions
 
@@ -159,8 +161,8 @@ For each PR where the user chose an action, execute all sub-steps in parallel ac
 
 **If not `HAS_PROW`:**
 
-- Unassign: `issue_write(method: "update", owner, repo, issue_number: PR, assignees: [all current assignees except USERNAME])`
-- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If the request is team-based — USERNAME absent from `requested_reviewers` but a team appears in `requested_teams` — do **not** delete the team's request (that would remove it for every teammate); report that the request came via the team and can only be unsubscribed from, not individually removed. If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
+- Unassign: re-read the PR (`get`) first and build the list from that response — `issue_write` replaces the full assignee set, so stale investigation data would silently drop assignees added meanwhile. Then `issue_write(method: "update", owner, repo, issue_number: PR, assignees: [current assignees except USERNAME])`
+- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If the request is team-based — USERNAME absent from `requested_reviewers` but a team appears in `requested_teams` — do **not** delete the team's request (that would remove it for every teammate); Phase 4 offers Unsubscribe for these instead. If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
 - Both: execute both
 
 ### Clear GitHub notifications
@@ -168,7 +170,7 @@ For each PR where the user chose an action, execute all sub-steps in parallel ac
 Using the Notification lookup from Phase 2 (fresh call for this phase), for each thread matching the PR:
 
 1. `dismiss_notification(threadID, state: "done")`
-2. `manage_notification_subscription(notificationID, action: "ignore")` — **only if the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles) **and the removal is confirmed**: a skipped `gh` call doesn't count, and a Prow comment only queues the bot command — re-read the PR (`get`) and check the role is actually gone; if it is still present, dismiss only and report the removal as pending. If a role remains or a removal is unconfirmed, dismiss only, so future activity still notifies you.
+2. `manage_notification_subscription(notificationID, action: "ignore")` — when the user explicitly chose **Unsubscribe**, or when **the chosen action removed every role you held on the PR** (unassign when you were only assigned, remove review request when you were only a reviewer, or both removals when you held both roles) **and the removal is confirmed**: a skipped `gh` call doesn't count, and a Prow comment only queues the bot command — re-read the PR (`get`) and check the role is actually gone; if it is still present, dismiss only and report the removal as pending. If a role remains or a removal is unconfirmed (and Unsubscribe wasn't explicitly chosen), dismiss only, so future activity still notifies you.
 
 ### Summary
 
