@@ -58,7 +58,7 @@ Candidates are the union of the first two searches, deduplicated by PR number an
 
 If no candidates: report the sweep result, print "No open PRs found where you are assigned or a requested reviewer in OWNER/REPO." and stop.
 
-**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as any context name contains `"tide"`. A candidate with other statuses but no tide context is not proof of absence — keep checking. Conclude non-Prow after five candidates that returned status contexts but none containing tide (status-less candidates, such as new or draft PRs, don't count toward the five), or when candidates are exhausted.
+**Detect Prow:** call `pull_request_read(method: "get_status")` on candidates in order, setting `HAS_PROW = true` as soon as a status context named exactly `tide` appears (substring matches like `tideways` are unrelated CI, not Prow). A candidate with other statuses but no `tide` context is not proof of absence — keep checking. Conclude non-Prow after five candidates that returned status contexts but none named `tide` (status-less candidates, such as new or draft PRs, don't count toward the five), or when candidates are exhausted.
 
 **Classify** each candidate from its search-result data (state, labels, engagement) — first matching rule wins:
 
@@ -80,11 +80,11 @@ Report a summary line, e.g.: "Swept 5 stale closed-PR notifications. Auto-dismis
 
 ## Phase 3: Parallel Investigation
 
-For `manual` PRs only, dispatch one Agent per PR using `model: "sonnet"`, in parallel batches of at most 10. Each agent prompt must be self-contained — pass `owner`, `repo`, `pr_number`, and `username` explicitly.
+For `manual` PRs only, dispatch one Agent per PR using `model: "sonnet"`, in parallel batches of at most 10. Each agent prompt must be self-contained — pass `owner`, `repo`, `pr_number`, `username`, and the PR's roles explicitly.
 
 Each agent performs these `pull_request_read` calls:
 
-1. `get` — title, author, draft status, labels, timestamps; whether your review request is individual (USERNAME in `requested_reviewers`) or team-based (only via `requested_teams`)
+1. `get` — title, author, draft status, labels, timestamps; review-request source: individual if USERNAME appears in `requested_reviewers`, otherwise team-based (the PR carries the `reviewer` role from the search but you aren't individually requested — the response does not include `requested_teams`)
 2. `get_check_runs` **and** `get_status` — merge both (external CI such as Prow reports via status contexts); aggregate to: X/Y passing, Z failing [names], W pending
 3. `get_reviews` — date of your most recent review (any state); for your effective decision use your latest **active** `APPROVED` or `CHANGES_REQUESTED` review — `DISMISSED` reviews are inactive history, and a later `COMMENTED` review does not supersede the decision; note all other reviewers and their states
 4. `get_files(perPage: 100)` — first page only; file count ("100+" if truncated), key filenames, additions/deletions
@@ -92,7 +92,7 @@ Each agent performs these `pull_request_read` calls:
 6. `get_review_comments` — count your unresolved vs resolved review threads
 7. `get_comments(perPage: 100)` — issue comments are oldest-first, so if the first page is full, follow pagination and keep the most recent ~100 comments (the final page plus the prior page when the final page is short). Note mentions or questions directed at you.
 
-Paginate `get_reviews`, `get_commits`, `get_review_comments`, `get_check_runs`, and `get_status` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Step 4 deliberately reads a single page.
+Paginate `get_reviews`, `get_commits`, `get_review_comments`, and `get_check_runs` fully (`perPage: 100`; cursor via `after` for `get_review_comments`). Call `get_status` once — the server does not paginate it — and mark the CI summary incomplete if its `total_count` exceeds the contexts returned. Step 4 deliberately reads a single page.
 
 If the PR is merged or closed: return `"Merged/Closed"` — run the `dismiss` action for it.
 
@@ -162,7 +162,7 @@ For each PR where the user chose an action, execute all sub-steps in parallel ac
 **If not `HAS_PROW`:**
 
 - Unassign: re-read the PR (`get`) first and build the list from that response — `issue_write` replaces the full assignee set, so stale investigation data would silently drop assignees added meanwhile. Then `issue_write(method: "update", owner, repo, issue_number: PR, assignees: [current assignees except USERNAME])`
-- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If the request is team-based — USERNAME absent from `requested_reviewers` but a team appears in `requested_teams` — do **not** delete the team's request (that would remove it for every teammate); Phase 4 offers Unsubscribe for these instead. If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
+- Remove review: `gh api repos/OWNER/REPO/pulls/PR/requested_reviewers -X DELETE -f 'reviewers[]=USERNAME'` (no GitHub MCP tool can remove a review request). If the request is team-based — the PR carries the `reviewer` role but USERNAME is absent from `requested_reviewers` — do **not** attempt to delete the team's request (that would remove it for every teammate); Phase 4 offers Unsubscribe for these instead. If `gh` is unavailable or unauthenticated, skip this call, note in the final summary that the review request must be removed manually, and continue with the remaining actions.
 - Both: execute both
 
 ### Clear GitHub notifications
