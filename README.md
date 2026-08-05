@@ -17,7 +17,7 @@ claude plugin marketplace add cblecker/claude-plugins
 | Plugin                                       | Description                                                                                      |
 |----------------------------------------------|--------------------------------------------------------------------------------------------------|
 | [git](./git)                                 | Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails |
-| [github](./github)                           | GitHub MCP server with selected toolsets enabled, always loaded, plus a PR triage skill          |
+| [github](./github)                           | GitHub MCP server with selected toolsets enabled and always loaded, plus a PR triage skill       |
 | [pr-review-toolkit](./pr-review-toolkit)     | Comprehensive PR review board using shared workflow context                                      |
 | [gws](./gws)                                 | Google Workspace CLI skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, and Meet          |
 | [rh-dataverse](./rh-dataverse)               | Red Hat Dataverse MCP server                                                                    |
