@@ -12,6 +12,13 @@ disallowedTools:
   - WebSearch
   - mcp__plugin_github_github__pull_request_review_write
   - mcp__plugin_github_github__add_comment_to_pending_review
+  - mcp__plugin_github_github__add_reply_to_pull_request_comment
+  - mcp__plugin_github_github__add_issue_comment
+  - mcp__plugin_github_github__issue_write
+  - mcp__plugin_github_github__push_files
+  - mcp__plugin_github_github__create_or_update_file
+  - mcp__plugin_github_github__merge_pull_request
+  - mcp__plugin_github_github__resolve_review_thread
 ---
 
 Analyze the PR using read-only context only.

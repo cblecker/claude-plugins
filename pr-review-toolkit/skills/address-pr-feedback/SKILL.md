@@ -16,18 +16,37 @@ review feedback, then post reply comments to GitHub.
 
 ## Phase 0: Branch Validation
 
-**Validate branch first:**
+Branch context, collected at invocation:
 
-- Run `git branch --show-current` to get the current branch
-- Run `git ls-remote --symref origin HEAD 2>/dev/null | grep "^ref:" | awk '{print $2}' | sed 's|refs/heads/||'` to get the mainline branch
+- Current branch: !`git branch --show-current`
+- Remote mainline lookup: !`bash -c 'out=$(git ls-remote --symref origin HEAD 2>&1); printf "%s\nexit_status:%s\n" "$out" $?'`
+- Cached mainline fallback: !`git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo none`
+
+**Determine the mainline branch from the remote lookup output above**
+(authoritative — the cached local `origin/HEAD` can be stale after a
+default-branch rename):
+
+- `exit_status:0` → the mainline is the branch name in the
+  `ref: refs/heads/<branch>` line. If no such line exists, display "Error:
+  Could not determine the mainline branch." and stop execution.
+- Non-zero exit status with a transport-level connectivity error in the
+  output ("Could not resolve host", "Connection refused", "Connection timed
+  out", "Network is unreachable", "Operation timed out") → use the cached
+  mainline fallback, stripping the `origin/` prefix; if it shows `none`,
+  display the error above and stop. "unable to access" qualifies only when
+  paired with such a transport cause — with an HTTP status (401, 403, etc.)
+  it is an authentication failure, not connectivity.
+- Non-zero exit status for any other reason (authentication, invalid remote,
+  configuration) → fail closed: display the captured git error and stop. A
+  stale cached branch must not become authoritative for this safety check
 - If the current branch matches the mainline branch:
   - Display: "Error: You're on the mainline branch. Please checkout a feature branch and retry this skill."
   - Stop execution
 
 **Then ensure plan mode is active:**
 
-- If plan mode is not already active, call `EnterPlanMode` and wait for user
-  approval
+- If plan mode is not already active, call `EnterPlanMode` to switch into
+  planning before collecting and analyzing feedback
 - If plan mode is already active (check for "Plan mode is active" in system
   context), proceed directly
 
@@ -71,6 +90,8 @@ Check if the argument contains `--interactive`. If it does, use the
    - `commentId` — numeric comment ID (for reply posting)
    - `threadId` — thread node ID (inline comments) or null
    - `type` — `"review"` | `"inline"` | `"conversation"`
+   - `isResolved` — thread resolution state when the API response exposes it;
+     null when unknown (do not guess)
 
 ### Interactive Collection Path (`--interactive`)
 
@@ -84,8 +105,9 @@ Loop until user says "done":
    - Extract feedback text
    - Extract author (if available)
    - Extract file/line location (if available)
-   - Normalize into structured format with `commentId`, `threadId`, and `type`
-     fields (set to null if not available from pasted content)
+   - Normalize into structured format with `commentId`, `threadId`, `type`,
+     and `isResolved` fields (set to null if not available from pasted
+     content or the fetched comment data)
 3. Acknowledge: "Recorded item [N]: [brief summary]"
 4. Continue loop
 
@@ -97,8 +119,9 @@ Before analyzing, **deduplicate related items.** Multiple comments often
 address the same underlying concern (e.g., two reviewers flag the same issue,
 or one reviewer comments on both the declaration and usage of the same
 problem). Group these into a single logical item — track all associated
-`commentId`/`threadId` values so replies can be posted to each thread in
-Phase 6.
+`commentId`/`threadId` values, each with its own `isResolved` state, so
+replies can be posted to each thread in Phase 6 and resolution warnings apply
+per target rather than to the group.
 
 **For 5 or fewer items**, analyze and score inline — the context is small
 enough that agents add latency without improving quality.
@@ -233,7 +256,10 @@ item that has a draft reply.
 
 For each item:
 
-1. Present the draft reply text (generated in Phase 2, refined in Phase 4)
+1. Present the draft reply text (generated in Phase 2, refined in Phase 4).
+   For each reply target whose thread is known to be resolved (`isResolved`
+   is true for that specific target), note it: a reply there will stay
+   collapsed and the reviewer may not see it.
 2. Use `AskUserQuestion`:
 
    ```text
