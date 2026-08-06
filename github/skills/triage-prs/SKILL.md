@@ -9,6 +9,7 @@ description: >-
 disable-model-invocation: true
 argument-hint: '[owner/repo]'
 allowed-tools:
+  - Bash(git remote get-url *)
   - Bash(gh api */pulls/*/requested_reviewers -X DELETE *)
   - mcp__plugin_github_github__get_me
   - mcp__plugin_github_github__search_pull_requests
