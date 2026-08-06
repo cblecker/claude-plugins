@@ -26,6 +26,24 @@ HTTP-based MCP server connected to `api.githubcopilot.com`. The server is config
 
 - **SessionStart** — instructs Claude to prefer GitHub MCP tools over the `gh` CLI and `WebFetch` for all GitHub operations
 
+### Skills
+
+- **triage-prs** (`/github:triage-prs [owner/repo]`) — triages open PRs where you are
+  assigned or a requested reviewer. Sweeps stale notification threads left by PRs
+  that have since closed or merged, then auto-classifies open PRs from search data —
+  skipping ones you've already engaged with and, on Prow-managed repos, dismissing
+  notifications for `needs-rebase` PRs and unsubscribing entirely from
+  `lgtm`+`approved` PRs — then investigates only the remainder with parallel
+  subagents and presents batched options to unassign, remove review requests, or
+  unsubscribe. Explicit invocation only —
+  Claude never triggers it automatically. The target repo is taken from the
+  optional `owner/repo` argument, or detected from the `upstream` (preferred)
+  or `origin` git remote. Prow-managed repos are auto-detected and acted on via
+  bot commands (`/unassign`, `/uncc`); on other repos, removing a review request
+  requires an authenticated `gh` CLI (the one operation the GitHub MCP server
+  does not cover) — without it, that single action is reported for manual
+  follow-up instead.
+
 ## Configuration
 
 This plugin requires the `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable to be set with a valid GitHub Personal Access Token.
