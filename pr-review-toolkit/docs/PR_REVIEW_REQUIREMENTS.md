@@ -69,7 +69,9 @@ optimized first as separate user-facing commands.
 
 ### Safe And Predictable Tooling
 
-- GitHub data should be fetched through GitHub MCP tools.
+- GitHub API data (metadata, review threads) and review posting should
+  go through GitHub MCP tools; repository content may come from
+  read-only local git.
 - GitHub read operations and GitHub write operations should be clearly separated.
 - Posting should only happen after explicit user approval.
 - The toolkit should avoid ad-hoc, model-generated parsing scripts for GitHub
@@ -276,7 +278,8 @@ The user should be able to edit or remove drafted comments before posting.
 
 - Analysis should avoid tools capable of modifying the repository unless the
   user explicitly requests a different workflow.
-- GitHub data access should use GitHub MCP read tools.
+- GitHub API data access should use GitHub MCP read tools; repository
+  content may come from read-only local git.
 - GitHub posting should use GitHub MCP write tools.
 - Generated parsing scripts should not be used for GitHub data.
 - Reusable helper scripts, if used, should be bundled with the plugin and
