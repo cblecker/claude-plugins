@@ -1,5 +1,17 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 reviews:
+  auto_review:
+    enabled: false  # Reviews are requested manually with @coderabbitai review
+  request_changes_workflow: true
+  pre_merge_checks:
+    title:
+      mode: "error"
+    description:
+      mode: "error"
+    issue_assessment:
+      mode: "error"
+    docstrings:
+      mode: "off"  # No docstring-bearing code in this repo
   path_filters:
     - "!gws/skills/**"  # Vendored upstream gws generate-skills output
   tools:

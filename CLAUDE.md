@@ -54,14 +54,12 @@ structure.
   changes now warrant a higher semver level (e.g., patch already bumped but a new
   skill was added — upgrade to minor)
 - Use plugin-dev skills: `/plugin-dev:create-plugin`, `/plugin-dev:skill-reviewer`, `/plugin-dev:plugin-validator`
+- CodeRabbit auto-review is disabled (`reviews.auto_review.enabled: false` in
+  `.coderabbit.yaml`). Reviews are rate-limited, so request one manually with an
+  `@coderabbitai review` comment only when the branch is ready — not after every push
 - When addressing automated review feedback on a PR (Copilot, CodeRabbit): wait until
   every reviewer has finished reviewing the current head, then push fixes for all
-  findings as a single commit — one push per review round, not one per reviewer.
-  CodeRabbit auto-reviews every push and its incremental reviews are rate-limited,
-  so per-reviewer pushes burn the allowance on intermediate states
-- For a burst of iterative pushes on an open PR, pause auto-reviews first with an
-  `@coderabbitai pause` comment, then `@coderabbitai resume` followed by
-  `@coderabbitai review` once the branch is stable
+  findings as a single commit — one push per review round, not one per reviewer
 
 ## Documentation
 
