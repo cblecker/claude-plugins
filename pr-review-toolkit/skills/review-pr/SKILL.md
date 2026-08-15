@@ -27,11 +27,9 @@ allowed-tools:
 
 ## Precondition
 
-This skill takes no arguments. It requires only that the current directory is
-a git checkout of the PR head commit — how it got there is irrelevant: a
-Claude Code worktree (`claude --worktree "#123"` fetches `pull/N/head` and is
-the convenient path), `gh pr checkout N`, or the author's own up-to-date
-branch.
+This skill takes no arguments. The current directory must be a git checkout
+of the PR head commit — a Claude Code worktree (`claude --worktree "#123"`),
+`gh pr checkout N`, or the author's own up-to-date branch.
 
 ## Constraints
 
@@ -40,20 +38,16 @@ return values and MCP responses are structured JSON; read them directly. Bash
 is limited to the read-only git commands used below plus one `git fetch` of
 the base branch. The workflow and its agents are read-only. GitHub write
 tools may be used only after an exact preview and explicit final posting
-approval from the user.
-
-## Exit Plan Mode
-
-If plan mode is active, call `ExitPlanMode` now before proceeding.
+approval from the user. If plan mode is active, call `ExitPlanMode` before
+proceeding.
 
 ## Resolve The PR
 
-Determine which PR this checkout belongs to. The next section verifies any
-candidate against PR metadata (the PR's head SHA must equal the local HEAD),
-so resolution only has to produce the right candidate, not prove it. Record
-the local head SHA (`git rev-parse HEAD`) and parse `{owner}/{repo}` from
-`git remote get-url origin` (the host must be github.com), then use the
-first route that yields a candidate:
+Determine which PR this checkout belongs to. The next section verifies the
+candidate's head SHA, so resolution only has to produce the right candidate,
+not prove it. Record the local head SHA (`git rev-parse HEAD`) and parse
+`{owner}/{repo}` from `git remote get-url origin` (the host must be
+github.com), then use the first route that yields a candidate:
 
 1. **Branch config** — on a named branch, run
    `git config --get branch.{branch}.merge`. `gh pr checkout` writes
@@ -81,23 +75,21 @@ state, `base.ref`, the base repository full name, head SHA, and
 `mergeable` / `mergeable_state`.
 
 Verify `git rev-parse HEAD` equals the PR's head SHA. On mismatch, stop with
-an honest error and name the fix: unpushed local commits need a push first
-(the review must describe what GitHub will see), and a stale checkout after
-a new push needs the new head fetched and checked out.
+an honest error and name the fix: unpushed local commits need a push first,
+and a stale checkout after a new push needs the new head fetched and checked
+out.
 
-Run `git status --porcelain`. If the working tree is dirty, warn — do not
-block: file reads would see the uncommitted edits, while the diff itself is
-tree-to-tree and unaffected.
+Run `git status --porcelain`; if the working tree is dirty, warn but do not
+block (file reads see uncommitted edits; the diff itself is tree-to-tree).
 
 ## Pin The Review Range
 
-Verify the `origin` URL (recorded above) points at the PR's base repository
-from the metadata. In a fork clone origin points at the fork, and fetching
-the fork's base branch would silently compute a wrong merge base — stop with
-an honest error on mismatch.
+Verify the `origin` URL points at the PR's base repository from the metadata
+— in a fork clone it points at the fork, and fetching the fork's base branch
+would compute a wrong merge base; stop with an honest error on mismatch.
 
-Then fetch the base branch unconditionally, so the base is current at review
-time. This is the skill's only network git command:
+Fetch the base branch unconditionally (the skill's only network git command),
+so the base is current at review time:
 
 ```bash
 git fetch origin <base.ref>
@@ -122,9 +114,8 @@ Invoke the Workflow tool with:
   - `mergeBase`: the pinned `merge_base`
 
 No bulk data rides `args` — workflow agents gather their own diff context
-from the checkout. The workflow collects review threads via MCP, selects
-review lenses from the diff, runs specialist analysis against the checkout,
-and returns grouped findings with review metadata.
+from the checkout, and the workflow returns grouped findings with review
+metadata.
 
 ## Present Review Board
 
@@ -135,16 +126,12 @@ Present the review board before drafting or posting anything. Use this order:
 Format: `owner/repo#number — PR title`
 
 Below the heading, include a one-line summary with section counts derived
-from section array lengths:
-
-```text
-N findings recommended, M overlap existing threads, P discussion-worthy.
-Reviewers: code-reviewer, pr-test-analyzer, silent-failure-hunter.
-```
-
-The reviewer list comes from `reviewMeta.selectedReviewers` (full agent
-names). If `reviewMeta.lensSelection.source` is `all-lenses-fallback`, add a
-line: the lens selector returned invalid output, so every lens ran.
+from section array lengths, plus the reviewer list from
+`reviewMeta.selectedReviewers` (full agent names): `N findings recommended,
+M overlap existing threads, P discussion-worthy. Reviewers: code-reviewer,
+pr-test-analyzer.` If `reviewMeta.lensSelection.source` is
+`all-lenses-fallback`, add a line: the lens selector returned invalid
+output, so every lens ran.
 
 Then show merge signals from the metadata and the pinned range:
 
