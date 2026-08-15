@@ -100,6 +100,41 @@ Current overrides:
 - Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
 - Signed-off-by safety rule added (AI must never add DCO sign-off)
 - "NEVER commit directly to mainline" safety rule added (upstream has no equivalent)
+- `-u` dropped from the push instruction; the flag errors in the Claude Code
+  sandbox (upstream says "Push to remote with -u flag if needed")
+- `gh` usage and the "Other common operations" section dropped in favour of the
+  GitHub MCP tools (see the `github` plugin dependency)
+- Git stash safety folded into the safety protocol (upstream keeps it in a
+  separate System Prompt fragment)
+- Post-staging secrets review folded into the safety protocol (upstream carries
+  it in "Executing actions with care", outside the git instructions)
+- Existing-PR update path and repository PR-template handling added to the PR
+  section; upstream supplies these via runtime-injected variables
+  (`REPO_PR_TEMPLATE_CONTEXT_BLOCK`, `gh pr edit` with no selector) that a static
+  hook cannot render
+
+## Upstream Alignment
+
+Last reviewed against [`Piebald-AI/claude-code-system-prompts`][ccsp] at
+**v2.1.233** (2026-08-15). Previous full alignment was v2.1.126.
+
+The upstream source of truth is
+`system-prompts/tool-description-bash-git-commit-and-pr-creation-instructions.md`;
+its prose was unchanged between v2.1.126 and v2.1.233 (only template-variable
+plumbing moved). Relevant adjacent fragments and what we did with them:
+
+| Upstream change | Version | Disposition |
+|-----------------|---------|-------------|
+| System Prompt: Shared git stash safety | 2.1.198 | Adopted, condensed into the safety protocol |
+| Executing actions with care — review a broad `git add`, `git status` before discarding work | 2.1.199–2.1.200 | Adopted as two safety-protocol bullets |
+| Agent Prompt: Quick PR creation — repo PR-template context | 2.1.205 | Adopted as a PR-template check in the PR section |
+| Agent Prompt: Quick PR creation — `gh pr edit` with no selector updates the branch's existing PR | 2.1.229 | Adopted as an `update_pull_request` path |
+| Agent Prompt: Quick git commit / Pull request creation hardening | 2.1.229 | Already covered; our instructions carried these rules |
+| Tool Description: Bash (pre-commit skill checks) | 2.1.225 | **Not adopted.** Requires a runtime-rendered list of the session's applicable verify/simplify/code-review skills; a static hook cannot name them, and a generic "run your checks" restatement is weaker than the harness version, which still fires when it applies |
+| Tool Description: PowerShell (git guidance) | 2.1.229 | **Not adopted.** The hook is a bash script emitting HEREDOC examples; PowerShell here-string variants would only matter for a non-bash host that cannot run the hook anyway |
+| Background/forked worktree isolation guidance | 2.1.198–2.1.221 | **Not adopted.** Harness-level session behavior, not repository git workflow |
+
+[ccsp]: https://github.com/Piebald-AI/claude-code-system-prompts
 
 ## Maintenance
 

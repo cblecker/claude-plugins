@@ -30,13 +30,16 @@ At session start, the plugin runs a detection script that:
 Then injects tailored git instructions covering:
 
 - **Git Safety Protocol** -- never force push mainline, never skip hooks, prefer
-  specific file staging, prefer new commits over amending
+  specific file staging, prefer new commits over amending, no bare `git stash`
+  (the stash stack is shared across worktrees and sessions), review staged files
+  for secrets before committing
 - **Commit workflow** -- review changes, stage specific files, HEREDOC format,
   conventional commits format when detected
 - **Branch workflow** -- create from mainline, conventional prefixes when detected,
   kebab-case naming
-- **PR workflow** -- use GitHub MCP tools, fork-aware PR creation, structured body
-  format (Summary + Test plan)
+- **PR workflow** -- use GitHub MCP tools, fork-aware PR creation, update an
+  existing PR instead of opening a duplicate, follow the repository's PR template
+  when it has one (otherwise Summary + Test plan)
 
 ## Usage
 
