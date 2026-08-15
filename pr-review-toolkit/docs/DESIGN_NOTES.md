@@ -39,10 +39,11 @@ recovery retries.
 
 ## Always fetch the base
 
-`git fetch origin <base.ref>` runs unconditionally before pinning
-`merge_base`, so the base is current at review time; the pin and the
-base-movement count compare against `FETCH_HEAD`, which is exact regardless
-of the clone's refspec configuration. Origin must be verified against the PR's base
+`git fetch origin refs/heads/<base.ref>` runs unconditionally before
+pinning `merge_base`, so the base is current at review time; the fully
+qualified ref cannot be parsed as an option or a same-named tag, and the
+pin and base-movement count compare against `FETCH_HEAD`, which is exact
+regardless of the clone's refspec configuration. Origin must be verified against the PR's base
 repository first: in a fork clone origin points at the fork, and fetching
 the fork's branch of the same name would silently compute a wrong
 merge-base.

@@ -107,10 +107,13 @@ movement against `FETCH_HEAD` — exact regardless of the clone's refspec
 configuration:
 
 ```bash
-git fetch origin <base.ref>
+git fetch origin refs/heads/<base.ref>
 git merge-base FETCH_HEAD HEAD                 # record as merge_base
 git rev-list --count <merge_base>..FETCH_HEAD  # record as base_ahead_count
 ```
+
+The fully qualified ref cannot be parsed as an option or a tag of the same
+name.
 
 ## Launch Analysis Workflow
 

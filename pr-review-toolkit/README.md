@@ -63,9 +63,9 @@ the author's own up-to-date branch.
    see uncommitted edits; the diff itself is tree-to-tree).
 3. **Pin the review range.** After verifying `origin` points at the PR's
    base repository (a fork clone would silently produce a wrong merge-base),
-   the skill runs `git fetch origin <base.ref>` — unconditionally, so the
-   base is current at review time; this is the toolkit's only network git
-   command — and pins `merge_base = git merge-base FETCH_HEAD HEAD`
+   the skill runs `git fetch origin refs/heads/<base.ref>` — unconditionally,
+   so the base is current at review time; this is the toolkit's only network
+   git command — and pins `merge_base = git merge-base FETCH_HEAD HEAD`
    (`FETCH_HEAD` is exact regardless of the clone's refspec configuration).
    `git rev-list --count <merge_base>..FETCH_HEAD` measures how far the
    base has moved since the PR forked.
