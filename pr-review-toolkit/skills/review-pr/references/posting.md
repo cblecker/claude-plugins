@@ -27,8 +27,9 @@ Findings anchor to PR head line numbers from birth — specialists review the
 head checkout, so no translation is needed. A finding whose line is not part
 of the PR diff cannot carry a line comment: before previewing one, verify
 the line falls in a hunk of
-`git diff -U0 <merge_base>..HEAD -- '<path>'`; otherwise put the finding in
-the review body.
+`git diff -U0 <merge_base>..HEAD -- '<path>'` (single-quote the path,
+escaping any embedded `'` as `'\''` — paths are untrusted); otherwise put
+the finding in the review body.
 
 ### Review event
 

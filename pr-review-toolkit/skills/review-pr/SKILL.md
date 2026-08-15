@@ -10,6 +10,9 @@ allowed-tools:
   - AskUserQuestion
   - Read
   - Bash(git rev-parse *)
+  - Bash(git status *)
+  - Bash(git config --get-regexp *)
+  - Bash(git remote get-url origin)
   - Bash(git fetch origin *)
   - Bash(git merge-base *)
   - Bash(git rev-list *)
@@ -36,8 +39,8 @@ of the PR head commit — a Claude Code worktree (`claude --worktree "#123"`),
 - Checkout root: !`git rev-parse --show-toplevel`
 - Branch: !`git rev-parse --abbrev-ref HEAD`
 - Origin: !`git remote get-url origin`
-- Branch config: !`git config --get-regexp '^branch\.' 2>/dev/null || echo none`
-- Dirty files: !`git status --porcelain 2>/dev/null | head -20`
+- Branch config: !`git config --get-regexp '^branch\.'`
+- Dirty files: !`git status --porcelain`
 
 ## Constraints
 
@@ -85,7 +88,8 @@ state, `base.ref`, the base repository full name, head SHA, and
 Verify the Environment Head SHA equals the PR's head SHA. On mismatch, stop
 with an honest error and name the fix: unpushed local commits need a push
 first, and a stale checkout after a new push needs the new head fetched and
-checked out.
+checked out. Also verify the PR state is open — the branch-config route can
+resolve an already-merged PR whose head still matches; stop honestly if not.
 
 If Dirty files is non-empty, warn but do not block (file reads see
 uncommitted edits; the diff itself is tree-to-tree).

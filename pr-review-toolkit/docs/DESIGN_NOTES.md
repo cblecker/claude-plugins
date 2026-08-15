@@ -15,7 +15,7 @@ posting, and made conflicted PRs unreviewable. 2.0 reviews the PR head
 directly: findings anchor to head line numbers from birth, a
 merge-conflicted PR reviews fine, and mergeability is a metadata signal on
 the board. Integration breakage is CI's job; base movement is reported
-honestly (`git rev-list --count <merge_base>..origin/<base.ref>`) instead
+honestly (`git rev-list --count <merge_base>..FETCH_HEAD`) instead
 of analyzing GitHub's synthetic merge tree.
 
 ## Checkout as precondition
@@ -40,8 +40,9 @@ recovery retries.
 ## Always fetch the base
 
 `git fetch origin <base.ref>` runs unconditionally before pinning
-`merge_base`, so the base is current at review time and the base-movement
-count measures reality. Origin must be verified against the PR's base
+`merge_base`, so the base is current at review time; the pin and the
+base-movement count compare against `FETCH_HEAD`, which is exact regardless
+of the clone's refspec configuration. Origin must be verified against the PR's base
 repository first: in a fork clone origin points at the fork, and fetching
 the fork's branch of the same name would silently compute a wrong
 merge-base.
