@@ -1,7 +1,7 @@
 {
   "name": "git",
   "version": "1.7.0",
-  "description": "Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, Kubernetes conventions, and safety guardrails",
+  "description": "Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails",
   "author": {
     "name": "cblecker",
     "email": "admin@toph.ca"

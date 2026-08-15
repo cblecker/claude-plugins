@@ -89,13 +89,17 @@ Detection matches the remote owner rather than the repository name so it covers
 `upstream` remote. A false positive only makes Claude more conservative (omit a
 trailer, add a disclosure line), so the prefix match is deliberately loose.
 
-Owner extraction handles every remote URL form git accepts — `https://`, `ssh://`
-(with or without a port), `git://`, scp-style `git@host:owner/repo`, and local
-paths — with or without a `.git` suffix or trailing slash. It reads
-`git remote get-url --all`, so a remote configured with several URLs is matched
-on any of them, not just the first. `detect_fork` and `detect_fork_owner` use the
-same regex against a single `get-url` and do not strip a trailing slash, so a
-trailing-slash `upstream` URL still reads as no fork.
+Owner extraction handles `https://`, `ssh://` (with or without a port), `git://`,
+scp-style `git@host:owner/repo`, and absolute or `../`-relative local paths, with
+or without a `.git` suffix or trailing slash. It reads `git remote get-url --all`,
+so a remote configured with several URLs is matched on any of them, not just the
+first.
+
+Two known gaps, both from the shared owner regex requiring a separator *before*
+the owner: a bare relative path (`kubernetes/repo`) is not matched, and
+`detect_fork` / `detect_fork_owner` run the same regex against a single `get-url`
+without stripping a trailing slash, so a trailing-slash `upstream` URL still reads
+as no fork. Worth fixing together the next time this file changes.
 
 Output for non-Kubernetes repositories is byte-identical to the pre-Kubernetes
 script, forks included: the blank line separating the fork and Kubernetes
