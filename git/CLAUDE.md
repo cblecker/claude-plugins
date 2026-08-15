@@ -12,8 +12,9 @@ SessionStart → git-instructions.sh → stdout (instructions injected as contex
               1. Detect mainline branch
               2. Detect conventional commits
               3. Detect fork setup
-              4. Output instructions with detected values
-              5. Write git config env overrides (if CLAUDE_ENV_FILE available)
+              4. Detect Kubernetes project
+              5. Output instructions with detected values
+              6. Write git config env overrides (if CLAUDE_ENV_FILE available)
 ```
 
 ### Prerequisite
@@ -24,7 +25,8 @@ git instructions. This plugin replaces them with enhanced, project-aware version
 ### Single Script (`scripts/git-instructions.sh`)
 
 Consolidates all detection logic (mainline branch, conventional commits, fork
-setup) and outputs replacement git instructions via heredoc template.
+setup, Kubernetes project) and outputs replacement git instructions via heredoc
+template.
 
 - Pure bash, no external dependencies beyond git
 - Graceful degradation: defaults to `main`, no conventions, no fork
@@ -36,6 +38,7 @@ setup) and outputs replacement git instructions via heredoc template.
 | Mainline branch | `git ls-remote --symref origin HEAD`, fallback to local |
 | Conventional commits | commitlint config files, last 10 commits |
 | Fork setup | `git remote get-url upstream` |
+| Kubernetes project | Owner of any remote URL matches `kubernetes` or `kubernetes-*` |
 
 ## Design Decisions
 
@@ -62,6 +65,32 @@ includes an instruction telling Claude to check its own context for duplicate gi
 instructions and warn the user if both built-in and plugin instructions are
 present. This keeps detection logic out of the script and lets Claude handle it
 contextually.
+
+### Kubernetes project conventions
+
+Kubernetes projects want AI assistance disclosed on the pull request rather than
+in commit trailers. When any remote is owned by `kubernetes` or a `kubernetes-*`
+org, the script swaps two things:
+
+- The `Assisted-by` trailer is dropped from the commit step, the HEREDOC example,
+  and reinforced with a safety-protocol bullet prohibiting AI attribution
+  trailers
+- The PR section gains an AI usage disclosure requirement, pointing at the
+  template's AI usage disclosure field when the repository has one
+
+Detection matches the remote owner rather than the repository name so it covers
+`kubernetes-sigs`, `kubernetes-csi`, and friends. Forks are covered through their
+`upstream` remote. A false positive only makes Claude more conservative (omit a
+trailer, add a disclosure line), so the prefix match is deliberately loose.
+
+Owner extraction handles every remote URL form git accepts — `https://`, `ssh://`
+(with or without a port), `git://`, scp-style `git@host:owner/repo`, and local
+paths — with or without a `.git` suffix or trailing slash. `detect_fork` and
+`detect_fork_owner` use the same regex but do not strip a trailing slash, so a
+trailing-slash `upstream` URL still reads as no fork.
+
+The existing "never add Signed-off-by" rule already covers Kubernetes' DCO
+requirement, so it stays unconditional.
 
 ### Git config overrides via environment
 
@@ -91,6 +120,8 @@ Current overrides:
 - "If a hook fails, investigate and fix" merged inline (same)
 - Conventional commits section added (conditional on detection)
 - Fork workflow section added (conditional on upstream remote)
+- Kubernetes project section added (conditional on detection): no AI attribution
+  trailers, AI usage disclosure in the PR body
 - Branch workflow section added
 - The upstream tool prohibition is spelled out tool-agnostically as
   `task-tracking tools (TaskCreate, TodoWrite) or the Agent tool`. Upstream
@@ -151,6 +182,12 @@ Test the script standalone:
 
 ```bash
 cd <any-git-repo> && bash /path/to/git/scripts/git-instructions.sh
+```
+
+Lint the script (clean at default severity):
+
+```bash
+uvx --from shellcheck-py shellcheck git/scripts/git-instructions.sh
 ```
 
 Lint markdown:

@@ -114,6 +114,34 @@ detect_fork() {
 }
 
 ###############################################################################
+# Detection: Kubernetes project
+###############################################################################
+detect_kubernetes() {
+  local remote url owner
+
+  for remote in $(git remote 2>/dev/null || true); do
+    url=$(git remote get-url "$remote" 2>/dev/null || true)
+
+    if [ -z "$url" ]; then
+      continue
+    fi
+
+    # Handles https://, ssh://, git://, scp-style git@host:owner/repo, and
+    # local paths, with or without a .git suffix or a trailing slash
+    owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
+    owner="${owner,,}"
+
+    # kubernetes, kubernetes-sigs, kubernetes-csi, kubernetes-client, etc.
+    if [[ "$owner" =~ ^kubernetes(-[a-z0-9._-]+)?$ ]]; then
+      echo "yes"
+      return
+    fi
+  done
+
+  echo "no"
+}
+
+###############################################################################
 # Main
 ###############################################################################
 
@@ -122,6 +150,7 @@ MAINLINE=$(detect_mainline 2>/dev/null || echo "main")
 CONVENTIONS=$(detect_conventions 2>/dev/null || echo "no")
 FORK_RESULT=$(detect_fork 2>/dev/null || echo "no")
 FORK_OWNER=$(detect_fork_owner 2>/dev/null || echo "your-username")
+IS_KUBERNETES=$(detect_kubernetes 2>/dev/null || echo "no")
 
 IS_FORK="no"
 UPSTREAM_OWNER=""
@@ -167,7 +196,8 @@ if [[ "$IS_FORK" == "yes" ]]; then
 This repository is a fork. The upstream owner is ${UPSTREAM_OWNER}.
 - Push branches to origin (your fork)
 - Create PRs targeting the upstream repository (owner: ${UPSTREAM_OWNER})
-- When using the GitHub MCP create_pull_request tool, set owner to ${UPSTREAM_OWNER} and use ${FORK_OWNER}:branch-name as the head parameter"
+- When using the GitHub MCP create_pull_request tool, set owner to ${UPSTREAM_OWNER} and use ${FORK_OWNER}:branch-name as the head parameter
+"
 fi
 
 # Build branch naming section
@@ -176,6 +206,68 @@ if [[ "$CONVENTIONS" == "yes" || "$CONVENTIONS" == "maybe" ]]; then
   BRANCH_NAMING="- Use conventional prefixes: feat/, fix/, docs/, chore/, refactor/, test/, ci/, perf/"
 else
   BRANCH_NAMING="- Use descriptive names"
+fi
+
+# Build attribution and disclosure variants
+#
+# Default: commits carry an Assisted-by trailer and PRs need no AI disclosure.
+# Kubernetes projects: no AI attribution trailers in commit messages, and the PR
+# body carries an AI usage disclosure instead.
+K8S_TRAILER_RULE=""
+K8S_PR_SECTION=""
+KUBERNETES_SECTION=""
+
+# shellcheck disable=SC2016  # backticks and <placeholders> are literal output
+COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6).'
+
+COMMIT_EXAMPLE=$(cat <<'EXAMPLE_EOF'
+git commit -m "$(cat <<'COMMIT_EOF'
+   Commit message here.
+
+   Assisted-by: Claude:<model-id>
+   COMMIT_EOF
+   )"
+EXAMPLE_EOF
+)
+
+if [[ "$IS_KUBERNETES" == "yes" ]]; then
+  K8S_TRAILER_RULE=$(cat <<'K8S_RULE_EOF'
+
+- NEVER add AI attribution trailers (Assisted-by, Co-Authored-By, Generated-by, or similar) to commits in this repository. Kubernetes projects expect AI assistance to be disclosed in the pull request description, not in commit messages
+K8S_RULE_EOF
+)
+
+  COMMIT_TRAILER_STEP='   - Create the commit with the drafted message. Do NOT append an Assisted-by trailer or any other AI attribution trailer.'
+
+  COMMIT_EXAMPLE=$(cat <<'EXAMPLE_EOF'
+git commit -m "$(cat <<'COMMIT_EOF'
+   Commit message here.
+   COMMIT_EOF
+   )"
+EXAMPLE_EOF
+)
+
+  K8S_PR_SECTION=$(cat <<'K8S_PR_EOF'
+
+AI usage disclosure (required for this repository):
+- The pull request body MUST disclose that AI tooling was used. If the pull request template has an AI usage disclosure section, fill it in with YES plus a brief description of how AI was used. Otherwise add a line to the description such as "This PR was created with the assistance of AI tooling."
+- Tell the user in your response that they are responsible for all submitted changes, and refer them to the repository's AGENTS.md and CONTRIBUTING.md
+K8S_PR_EOF
+)
+  K8S_PR_SECTION="${K8S_PR_SECTION}"$'\n'
+
+  KUBERNETES_SECTION=$(cat <<'K8S_SECTION_EOF'
+
+# Kubernetes project conventions
+
+This repository belongs to a Kubernetes project.
+
+- Commit messages carry no AI attribution trailers (no Assisted-by, no Co-Authored-By, no Generated-by)
+- AI assistance is disclosed in the pull request description instead
+- The human author remains responsible for all submitted changes
+K8S_SECTION_EOF
+)
+  KUBERNETES_SECTION="${KUBERNETES_SECTION}"$'\n'
 fi
 
 # Output instructions
@@ -204,7 +296,7 @@ Git Safety Protocol:
 - When staging files, prefer adding specific files by name rather than using "git add -A" or "git add .", which can accidentally include sensitive files (.env, credentials) or large binaries
 - After staging, review what was actually included by running git status. If anything looks like it could reveal secrets, check that file's contents before committing or pushing, even if the filename looks innocuous
 - NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
-- NEVER add Signed-off-by tags to commits. If asked to do so, abort the request and let the user know. Only humans can certify the Developer Certificate of Origin (DCO). The human submitter is responsible for adding their own Signed-off-by tag.
+- NEVER add Signed-off-by tags to commits. If asked to do so, abort the request and let the user know. Only humans can certify the Developer Certificate of Origin (DCO). The human submitter is responsible for adding their own Signed-off-by tag.${K8S_TRAILER_RULE}
 
 1. Run the following bash commands in parallel, each using the Bash tool:
   - Run a git status command to see all untracked files. IMPORTANT: Never use the -uall flag as it can cause memory issues on large repos.
@@ -217,7 +309,7 @@ Git Safety Protocol:
   - Ensure it accurately reflects the changes and their purpose
 3. Run the following commands in parallel:
    - Add relevant untracked files to the staging area.
-   - Create the commit with a message ending with the Assisted-by trailer, in the format \`Assisted-by: Claude:<your-model-id>\` where you substitute your actual model identifier (e.g. claude-opus-4-6).
+${COMMIT_TRAILER_STEP}
    - Run git status after the commit completes to verify success.
    Note: git status depends on the commit completing, so run it sequentially after the commit.
 4. If the commit fails due to pre-commit hook: fix the issue and create a NEW commit
@@ -231,12 +323,7 @@ Important notes:
 - If there are no changes to commit (i.e., no untracked files and no modifications), do not create an empty commit
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
 <example>
-git commit -m "\$(cat <<'COMMIT_EOF'
-   Commit message here.
-
-   Assisted-by: Claude:<model-id>
-   COMMIT_EOF
-   )"
+${COMMIT_EXAMPLE}
 </example>
 ${CONVENTIONAL_SECTION}
 
@@ -267,11 +354,11 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 ## Test plan
 [Bulleted markdown checklist of TODOs for testing the pull request...]
 </example>
-
+${K8S_PR_SECTION}
 Important:
 - DO NOT use task-tracking tools (TaskCreate, TodoWrite) or the Agent tool
 - Return the PR URL when you're done, so the user can see it
-${FORK_SECTION}
+${FORK_SECTION}${KUBERNETES_SECTION}
 # Branch workflow
 
 - Create branches from ${MAINLINE}

@@ -25,7 +25,9 @@ At session start, the plugin runs a detection script that:
 1. **Detects your mainline branch** (via `origin HEAD`, falls back to `main`/`master`)
 2. **Detects conventional commits** (commitlint config or commit history analysis)
 3. **Detects fork setup** (checks for `upstream` remote)
-4. **Sets git config overrides** via `CLAUDE_ENV_FILE` environment variables
+4. **Detects Kubernetes projects** (any remote owned by `kubernetes` or a
+   `kubernetes-*` organization)
+5. **Sets git config overrides** via `CLAUDE_ENV_FILE` environment variables
 
 Then injects tailored git instructions covering:
 
@@ -40,6 +42,8 @@ Then injects tailored git instructions covering:
 - **PR workflow** -- use GitHub MCP tools, fork-aware PR creation, update an
   existing PR instead of opening a duplicate, follow the repository's PR template
   when it has one (otherwise Summary + Test plan)
+- **Kubernetes conventions** (when detected) -- no AI attribution trailers in
+  commit messages, AI usage disclosed in the PR description instead
 
 ## Usage
 
@@ -56,6 +60,21 @@ The plugin auto-detects repository conventions at session start.
 | Mainline branch | `git ls-remote --symref origin HEAD`, local fallback |
 | Conventional commits | commitlint config files, commit history pattern matching |
 | Fork setup | Presence of `upstream` remote |
+| Kubernetes project | Any remote URL owned by `kubernetes` or `kubernetes-*` |
+
+### Kubernetes Projects
+
+Kubernetes contributions have two extra requirements, applied automatically when
+a `kubernetes` / `kubernetes-*` remote is detected:
+
+| Requirement | Effect |
+|-------------|--------|
+| No AI attribution trailers | Commits omit `Assisted-by` (and any `Co-Authored-By` / `Generated-by` equivalent) |
+| AI usage disclosure | The PR body states that AI tooling was used -- filling in the template's AI usage disclosure section when it has one, otherwise adding a line such as "This PR was created with the assistance of AI tooling." |
+
+The existing rule that Claude never adds `Signed-off-by` (only the human
+submitter can certify the DCO) already covers the other half of Kubernetes'
+trailer requirements.
 
 ### Git Config Overrides
 
