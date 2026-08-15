@@ -207,13 +207,8 @@ Total items: [count]
 
 ## Execution Instructions
 
-**IMPORTANT:** Use TaskCreate to create a task for each item below FIRST before
-implementing any changes.
-
-1. Create tasks for all items
-2. Implement in order (highest score first)
-3. Mark tasks complete as you go
-4. Verify all changes before re-requesting review
+1. Implement in order (highest score first)
+2. Verify all changes before re-requesting review
 
 ## Feedback Items
 
@@ -232,7 +227,6 @@ implementing any changes.
 
 ## Verification Checklist
 
-- [ ] All tasks created via TaskCreate
 - [ ] All implementations complete
 - [ ] Tests pass
 - [ ] Code follows project standards
@@ -245,9 +239,8 @@ Call `ExitPlanMode` to signal planning is complete and request user approval.
 
 After user approval, execution begins:
 
-1. Tasks are created using TaskCreate
-2. Each item is implemented following the plan
-3. Tasks are marked complete as work progresses
+1. Each item is implemented following the plan, in score order
+2. The plan file is the record of what has been addressed
 
 ## Phase 6: Reply Posting
 

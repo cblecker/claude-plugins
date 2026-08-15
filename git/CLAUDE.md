@@ -92,7 +92,10 @@ Current overrides:
 - Conventional commits section added (conditional on detection)
 - Fork workflow section added (conditional on upstream remote)
 - Branch workflow section added
-- `TodoWrite or Agent tools` references removed (not relevant to plugin context)
+- Todo/task-tracking tool references dropped from the upstream `TodoWrite or Task
+  tools` prohibition; only the `Agent` tool ban is kept, since those tools were
+  removed from Opus 4.8, Sonnet 5, Fable 5, Mythos 5, and newer models in
+  Claude Code 2.1.233
 - Claude Code attribution line removed from PR body template
 - Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
 - Signed-off-by safety rule added (AI must never add DCO sign-off)
