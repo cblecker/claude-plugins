@@ -120,22 +120,23 @@ detect_kubernetes() {
   local remote url owner
 
   for remote in $(git remote 2>/dev/null || true); do
-    url=$(git remote get-url "$remote" 2>/dev/null || true)
+    # --all covers remotes configured with more than one URL
+    while IFS= read -r url; do
+      if [ -z "$url" ]; then
+        continue
+      fi
 
-    if [ -z "$url" ]; then
-      continue
-    fi
+      # Handles https://, ssh://, git://, scp-style git@host:owner/repo, and
+      # local paths, with or without a .git suffix or a trailing slash
+      owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
+      owner="${owner,,}"
 
-    # Handles https://, ssh://, git://, scp-style git@host:owner/repo, and
-    # local paths, with or without a .git suffix or a trailing slash
-    owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
-    owner="${owner,,}"
-
-    # kubernetes, kubernetes-sigs, kubernetes-csi, kubernetes-client, etc.
-    if [[ "$owner" =~ ^kubernetes(-[a-z0-9._-]+)?$ ]]; then
-      echo "yes"
-      return
-    fi
+      # kubernetes, kubernetes-sigs, kubernetes-csi, kubernetes-client, etc.
+      if [[ "$owner" =~ ^kubernetes(-[a-z0-9._-]+)?$ ]]; then
+        echo "yes"
+        return
+      fi
+    done < <(git remote get-url --all "$remote" 2>/dev/null || true)
   done
 
   echo "no"
@@ -196,8 +197,7 @@ if [[ "$IS_FORK" == "yes" ]]; then
 This repository is a fork. The upstream owner is ${UPSTREAM_OWNER}.
 - Push branches to origin (your fork)
 - Create PRs targeting the upstream repository (owner: ${UPSTREAM_OWNER})
-- When using the GitHub MCP create_pull_request tool, set owner to ${UPSTREAM_OWNER} and use ${FORK_OWNER}:branch-name as the head parameter
-"
+- When using the GitHub MCP create_pull_request tool, set owner to ${UPSTREAM_OWNER} and use ${FORK_OWNER}:branch-name as the head parameter"
 fi
 
 # Build branch naming section
@@ -268,6 +268,12 @@ This repository belongs to a Kubernetes project.
 K8S_SECTION_EOF
 )
   KUBERNETES_SECTION="${KUBERNETES_SECTION}"$'\n'
+
+  # The fork section carries no trailing newline, so add the separating blank
+  # line here rather than there — that keeps non-Kubernetes output untouched
+  if [[ "$IS_FORK" == "yes" ]]; then
+    KUBERNETES_SECTION=$'\n'"${KUBERNETES_SECTION}"
+  fi
 fi
 
 # Output instructions

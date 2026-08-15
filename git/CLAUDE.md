@@ -85,9 +85,16 @@ trailer, add a disclosure line), so the prefix match is deliberately loose.
 
 Owner extraction handles every remote URL form git accepts — `https://`, `ssh://`
 (with or without a port), `git://`, scp-style `git@host:owner/repo`, and local
-paths — with or without a `.git` suffix or trailing slash. `detect_fork` and
-`detect_fork_owner` use the same regex but do not strip a trailing slash, so a
+paths — with or without a `.git` suffix or trailing slash. It reads
+`git remote get-url --all`, so a remote configured with several URLs is matched
+on any of them, not just the first. `detect_fork` and `detect_fork_owner` use the
+same regex against a single `get-url` and do not strip a trailing slash, so a
 trailing-slash `upstream` URL still reads as no fork.
+
+Output for non-Kubernetes repositories is byte-identical to the pre-Kubernetes
+script, forks included: the blank line separating the fork and Kubernetes
+sections is prepended to `KUBERNETES_SECTION` when a fork is detected rather than
+appended to `FORK_SECTION`.
 
 The existing "never add Signed-off-by" rule already covers Kubernetes' DCO
 requirement, so it stays unconditional.
