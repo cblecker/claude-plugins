@@ -92,10 +92,13 @@ Current overrides:
 - Conventional commits section added (conditional on detection)
 - Fork workflow section added (conditional on upstream remote)
 - Branch workflow section added
-- Todo/task-tracking tool references dropped from the upstream `TodoWrite or Task
-  tools` prohibition; only the `Agent` tool ban is kept, since those tools were
-  removed from Opus 4.8, Sonnet 5, Fable 5, Mythos 5, and newer models in
-  Claude Code 2.1.233
+- The upstream tool prohibition is spelled out tool-agnostically as
+  `task-tracking tools (TaskCreate, TodoWrite) or the Agent tool`. Upstream
+  renders it from `${GET_TODO_TOOL_FN}` and `${TASK_TOOL_NAME}`, where the todo
+  getter resolves to `TaskCreate` or `TodoWrite` depending on whether the tasks
+  feature is enabled and `TASK_TOOL_NAME` is the subagent tool (renamed `Agent`
+  while the variable name stuck). Naming both keeps the rule correct in either
+  configuration; a static hook cannot resolve the getter
 - Claude Code attribution line removed from PR body template
 - Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
 - Signed-off-by safety rule added (AI must never add DCO sign-off)

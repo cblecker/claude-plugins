@@ -224,7 +224,7 @@ Git Safety Protocol:
 
 Important notes:
 - NEVER run additional commands to read or explore code, besides git bash commands
-- NEVER use the Agent tool
+- NEVER use task-tracking tools (TaskCreate, TodoWrite) or the Agent tool
 - DO NOT push to the remote repository unless the user explicitly asks you to do so
 - IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.
 - IMPORTANT: Do not use --no-edit with git rebase commands, as the --no-edit flag is not a valid option for git rebase.
@@ -269,7 +269,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 </example>
 
 Important:
-- DO NOT use the Agent tool
+- DO NOT use task-tracking tools (TaskCreate, TodoWrite) or the Agent tool
 - Return the PR URL when you're done, so the user can see it
 ${FORK_SECTION}
 # Branch workflow
