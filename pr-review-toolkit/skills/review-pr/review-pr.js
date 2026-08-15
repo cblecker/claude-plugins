@@ -8,37 +8,6 @@ export const meta = {
   ]
 }
 
-const SELECTOR_SCHEMA = {
-  type: 'object',
-  required: ['lenses', 'shape'],
-  properties: {
-    lenses: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['name', 'rationale'],
-        properties: {
-          name: { type: 'string' },
-          rationale: { type: 'string' }
-        }
-      }
-    },
-    shape: {
-      type: 'object',
-      required: ['fileCount', 'additions', 'deletions', 'notableAreas'],
-      properties: {
-        fileCount: { type: 'number' },
-        additions: { type: 'number' },
-        deletions: { type: 'number' },
-        notableAreas: {
-          type: 'array',
-          items: { type: 'string' }
-        }
-      }
-    }
-  }
-}
-
 const FINDING_SCHEMA = {
   type: 'object',
   properties: {
@@ -597,6 +566,40 @@ const REVIEWERS = {
     lens: 'concurrency',
     runsWhen: 'Changes touch mutexes, locks, channels, goroutines, async, or parallel code.',
     prompt: REVIEWER_PROMPTS['concurrency-reviewer']
+  }
+}
+
+// Lens names are enum-constrained to the REVIEWERS registry, so schema
+// validation retries an invalid name at the tool-call layer instead of the
+// workflow silently dropping it after the fact.
+const SELECTOR_SCHEMA = {
+  type: 'object',
+  required: ['lenses', 'shape'],
+  properties: {
+    lenses: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'rationale'],
+        properties: {
+          name: { type: 'string', enum: Object.keys(REVIEWERS) },
+          rationale: { type: 'string' }
+        }
+      }
+    },
+    shape: {
+      type: 'object',
+      required: ['fileCount', 'additions', 'deletions', 'notableAreas'],
+      properties: {
+        fileCount: { type: 'number' },
+        additions: { type: 'number' },
+        deletions: { type: 'number' },
+        notableAreas: {
+          type: 'array',
+          items: { type: 'string' }
+        }
+      }
+    }
   }
 }
 

@@ -48,10 +48,14 @@ the author's own up-to-date branch.
 
 ### Preflight
 
-1. **Resolve the PR.** The local HEAD SHA and the `origin` owner/repo
-   identify the PR via GitHub MCP search (`search_pull_requests`, with
-   `list_pull_requests` as fallback for search-index lag). Exactly one open
-   PR must match; zero or several is an honest error.
+1. **Resolve the PR.** Cheapest sure route first: branch config
+   (`gh pr checkout` writes `refs/pull/N/head` to
+   `branch.<name>.merge` — zero network calls), then a server-side `head`
+   filter on `list_pull_requests` for the author's own branch, then SHA
+   search as the detached-HEAD last resort. Every candidate is verified
+   against the PR's head SHA, so resolution only has to produce the right
+   candidate, not prove it. Exactly one open PR must match; zero or several
+   is an honest error.
 2. **Verify the head.** PR metadata comes from one `pull_request_read`
    call. `git rev-parse HEAD` must equal the PR's head SHA — unpushed local
    commits or a stale checkout after a push produce an honest error naming
@@ -183,7 +187,9 @@ The skill's `allowed-tools` frontmatter permits only the read-only git
 commands the flow actually runs — `git rev-parse`, `git status`,
 `git remote get-url origin`, `git merge-base`, `git rev-list` — plus
 `git fetch origin` for the single base-branch fetch. The skill never builds
-a checkout and never mutates the repository.
+a checkout and never touches the working tree or index; the base-branch
+fetch is the only command that writes anything (objects and the
+remote-tracking ref).
 
 ### Workflow Agents
 

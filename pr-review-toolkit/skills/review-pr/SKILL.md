@@ -10,6 +10,7 @@ allowed-tools:
   - AskUserQuestion
   - Bash(git rev-parse *)
   - Bash(git status *)
+  - Bash(git config --get branch.*)
   - Bash(git remote get-url origin)
   - Bash(git fetch origin *)
   - Bash(git merge-base *)
@@ -47,17 +48,26 @@ If plan mode is active, call `ExitPlanMode` now before proceeding.
 
 ## Resolve The PR
 
-Determine which PR this checkout belongs to, using only the steps required to
-answer that:
+Determine which PR this checkout belongs to. The next section verifies any
+candidate against PR metadata (the PR's head SHA must equal the local HEAD),
+so resolution only has to produce the right candidate, not prove it. Record
+the local head SHA (`git rev-parse HEAD`) and parse `{owner}/{repo}` from
+`git remote get-url origin` (the host must be github.com), then use the
+first route that yields a candidate:
 
-1. `git rev-parse HEAD` — the local head SHA.
-2. `git remote get-url origin` — parse `{owner}/{repo}`. The host must be
-   github.com.
-3. Find open PRs whose head is this commit: call `search_pull_requests` with
-   query `repo:{owner}/{repo} is:pr is:open {headSha}`, then confirm each
-   candidate's head SHA via its metadata. If the search returns nothing (the
-   search index can lag recent pushes), call `list_pull_requests` with state
-   `open` and match `head.sha` against the local HEAD SHA.
+1. **Branch config** — on a named branch, run
+   `git config --get branch.{branch}.merge`. `gh pr checkout` writes
+   `refs/pull/N/head` there: N is the PR number, with zero network calls.
+2. **Head filter** — on a named branch without a pull ref (the author's own
+   branch), call `list_pull_requests` with state `open` and head
+   `{owner}:{branch}` — one exact server-side filter, no pagination.
+3. **SHA search** — detached HEAD or nothing above matched: call
+   `search_pull_requests` with query
+   `repo:{owner}/{repo} is:pr is:open {headSha}`, then confirm each
+   candidate's head SHA via its metadata. If no candidate is confirmed — the
+   search index can lag recent pushes, and search can surface PRs that merely
+   mention the SHA — call `list_pull_requests` with state `open`, paginating
+   to the end, and match `head.sha` against the local HEAD SHA.
 
 Exactly one open PR matches: proceed. Zero or several: stop with an honest
 error that names the SHA and repository checked and what the user can do
