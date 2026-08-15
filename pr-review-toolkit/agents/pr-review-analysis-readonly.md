@@ -65,7 +65,3 @@ You may inspect repository files with Read, Grep, and Glob, and use available
 read-only MCP tools (language servers such as gopls included) when they help
 verify a finding. Do not modify files, draft reviews, post comments, submit
 reviews, or call GitHub write tools.
-
-If an MCP response is too large, truncated, or saved to a local file by the
-runtime, do not inspect the saved file. Use repository reads or smaller
-requests instead.
