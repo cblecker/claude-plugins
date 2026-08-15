@@ -28,7 +28,10 @@ Consolidates all detection logic (mainline branch, conventional commits, fork
 setup, Kubernetes project) and outputs replacement git instructions via heredoc
 template.
 
-- Pure bash, no external dependencies beyond git
+- Bash plus git and the POSIX text utilities every platform ships with (`sed`,
+  `grep`, `awk`, `tr`) — mainline detection has piped through `grep`/`awk`/`sed`
+  since the first version. No other runtime dependencies: nothing that has to be
+  installed (`jq`, `yq`, python, node)
 - Bash 3.2 compatible — macOS ships bash 3.2 as the system shell, and under
   `set -euo pipefail` a bash 4+ construct (`${var,,}`, `declare -A`, `mapfile`)
   aborts the hook before it emits any instructions
