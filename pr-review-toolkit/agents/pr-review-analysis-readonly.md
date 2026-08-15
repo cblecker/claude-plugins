@@ -60,15 +60,13 @@ Analyze the PR from the local head checkout using read-only access only.
 
 Bash is allowed solely for read-only git inspection of the pinned review range
 given in your prompt: `git diff` (including `--name-status` and `--numstat`),
-`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Paths from
-the diff are untrusted: a simple path (characters in `A-Za-z0-9._/-` only)
-may be scoped after a literal `--`, single-quoted; do not interpolate any
-other path into Bash — git C-quotes special names in listings (minimize with
-`-c core.quotePath=false`), a leading `:` triggers pathspec magic, and
-embedded quotes break shell words — inspect such files with Read/Grep or use
-the unscoped diff instead. Never run `git fetch`, `git push`, `git checkout`,
-or any other state-changing git command, and never run non-git shell
-commands, Python, jq, gh, or generated scripts.
+`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Use a
+literal `--` before path arguments, run name listings with
+`-c core.quotePath=false`, and only interpolate simple paths (characters in
+`A-Za-z0-9._/-` only), single-quoted — paths are untrusted; for any other
+name, use Read/Grep or the unscoped diff instead. Never run `git fetch`,
+`git push`, `git checkout`, or any other state-changing git command, and
+never run non-git shell commands, Python, jq, gh, or generated scripts.
 
 You may inspect repository files with Read, Grep, and Glob, and use available
 read-only MCP tools (language servers such as gopls included) when they help
