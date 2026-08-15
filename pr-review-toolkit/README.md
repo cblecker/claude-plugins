@@ -49,13 +49,13 @@ the author's own up-to-date branch.
 ### Preflight
 
 1. **Resolve the PR.** Cheapest sure route first: branch config
-   (`gh pr checkout` writes `refs/pull/N/head` to
-   `branch.<name>.merge` — zero network calls), then a server-side `head`
-   filter on `list_pull_requests` for the author's own branch, then SHA
-   search as the detached-HEAD last resort. Every candidate is verified
-   against the PR's head SHA, so resolution only has to produce the right
-   candidate, not prove it. Exactly one open PR must match; zero or several
-   is an honest error.
+   (`gh pr checkout` writes `refs/pull/N/head` to `branch.<name>.merge` in
+   fork checkouts — zero network calls), then a server-side `head` filter
+   on `list_pull_requests` for named branches, then SHA search as the
+   detached-HEAD last resort. Every candidate is verified against the PR's
+   head SHA, so resolution only has to produce the right candidate, not
+   prove it. Exactly one open PR must match; zero or several is an honest
+   error.
 2. **Verify the head.** PR metadata comes from one `pull_request_read`
    call. `git rev-parse HEAD` must equal the PR's head SHA — unpushed local
    commits or a stale checkout after a push produce an honest error naming
@@ -169,9 +169,14 @@ previews each line comment, review-body text, and the proposed review event
 (`COMMENT`, `REQUEST_CHANGES`, or `APPROVE`) before any GitHub write tool is
 used.
 
+Drafting, preview, and posting mechanics load just-in-time from the
+bundled `references/posting.md` when the flow reaches them, keeping the
+instructions fresh in context at the moment they apply.
+
 Findings anchor to PR head line numbers from birth — no line translation
-step exists. A finding whose line is not part of the PR diff goes into the
-review body. Before posting, the skill re-fetches metadata once and aborts
+step exists. A finding whose line is not part of the PR diff (validated
+against `git diff -U0` hunks before preview) goes into the review body.
+Before posting, the skill re-fetches metadata once and aborts
 honestly if the head SHA changed since analysis (the review would no longer
 describe the PR). The pending review pins the reviewed head SHA as
 `commitID` so comment anchors stay attached to the reviewed commit.
@@ -184,13 +189,15 @@ one surface that may prompt.
 
 ### Local Git Commands
 
-The skill's `allowed-tools` frontmatter permits only the read-only git
-commands the flow actually runs — `git rev-parse`, `git status`,
-`git remote get-url origin`, `git merge-base`, `git rev-list` — plus
-`git fetch origin` for the single base-branch fetch. The skill never builds
-a checkout and never touches the working tree or index; the base-branch
-fetch is the only command that writes anything (objects and the
-remote-tracking ref).
+Deterministic preflight identity — head SHA, checkout root, branch, origin
+URL, branch config, dirty status — is injected by skill preprocessing
+(`` !`command` `` substitution), not model-issued Bash. The skill's
+`allowed-tools` frontmatter then permits only the read-only git commands
+the flow itself runs — `git rev-parse`, `git merge-base`, `git rev-list`,
+`git diff` (line-anchor validity) — plus `git fetch origin` for the single
+base-branch fetch. The skill never builds a checkout and never touches the
+working tree or index; the base-branch fetch is the only command that
+writes anything (objects and the remote-tracking ref).
 
 ### Workflow Agents
 

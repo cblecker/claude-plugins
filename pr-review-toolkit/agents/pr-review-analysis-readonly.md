@@ -6,8 +6,9 @@ description: Read-only PR analysis agent for pr-review-toolkit specialist review
 # github plugin's full write surface, audited against the github-mcp-server
 # toolsets the plugin enables (default, actions, orgs, labels,
 # notifications, discussions, gists, projects, code_security,
-# secret_protection, dependabot, security_advisories). Re-audit this list
-# whenever the github plugin dependency updates.
+# secret_protection, dependabot, security_advisories). Entries not present
+# in the current tool registry are harmless forward-guards. Re-audit this
+# list whenever the github plugin dependency updates.
 disallowedTools:
   - Write
   - Edit
@@ -33,6 +34,7 @@ disallowedTools:
   - mcp__plugin_github_github__dismiss_notification
   - mcp__plugin_github_github__enable_pr_auto_merge
   - mcp__plugin_github_github__fork_repository
+  - mcp__plugin_github_github__issue_dependency_write
   - mcp__plugin_github_github__issue_write
   - mcp__plugin_github_github__label_write
   - mcp__plugin_github_github__manage_notification_subscription
@@ -45,8 +47,10 @@ disallowedTools:
   - mcp__plugin_github_github__request_copilot_review
   - mcp__plugin_github_github__resolve_review_thread
   - mcp__plugin_github_github__run_secret_scanning
+  - mcp__plugin_github_github__star_repository
   - mcp__plugin_github_github__sub_issue_write
   - mcp__plugin_github_github__unresolve_review_thread
+  - mcp__plugin_github_github__unstar_repository
   - mcp__plugin_github_github__update_gist
   - mcp__plugin_github_github__update_pull_request
   - mcp__plugin_github_github__update_pull_request_branch
