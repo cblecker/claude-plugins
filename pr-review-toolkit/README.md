@@ -2,20 +2,23 @@
 
 Reimplementation of Anthropic's
 [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit)
-as a single Workflow-based skill. The workflow collects shared PR context,
-runs specialist reviewers, and returns an interactive review board for the
-human reviewer.
+as a single Workflow-based skill. The workflow selects review lenses from the
+real diff, runs specialist reviewers against a local checkout of the PR head,
+and returns an interactive review board for the human reviewer.
 
 ## Skills
 
 ### review-pr
 
 ```text
-/pr-review-toolkit:review-pr <github-pr-url>
+/pr-review-toolkit:review-pr
 ```
 
 Conduct a comprehensive PR review and return an interactive review board.
-See [Review Flow](#review-flow) below.
+The skill takes no arguments: check out the PR first (e.g.
+`claude --worktree '<pr-url>'` or `gh pr checkout N`), then run
+`/pr-review-toolkit:review-pr` from that checkout. See
+[Review Flow](#review-flow) below.
 
 ### address-pr-feedback
 
@@ -38,115 +41,95 @@ posting.
 
 ## Review Flow
 
-The skill parses a GitHub PR URL and launches the bundled workflow. The skill
-first attempts to set up a verified local git checkout of the PR merge result for
-efficient diff collection. If local git is unavailable or verification fails, it
-falls back to GitHub MCP-based file collection.
+The skill requires only that the current directory is a git checkout of the
+PR head commit — however it got there: a Claude Code worktree
+(`claude --worktree "#123"` fetches `pull/N/head`), `gh pr checkout N`, or
+the author's own up-to-date branch.
 
-### Local Git Diff Provider (Preferred)
+### Preflight
 
-The bundled `checkout.sh` script runs during skill preprocessing. When the
-current directory is a git repository with a clean worktree, it:
-
-1. Verifies `origin` matches the PR base repository (parsed from the PR URL)
-   before fetching anything
-2. Fetches GitHub's `refs/pull/N/merge` synthetic merge ref from `origin`
-3. Checks out the merge result as a detached HEAD using plumbing commands
-   (`read-tree`, `checkout-index`, `update-ref`) so sandbox-protected files
-   (shell profiles, `.mcp.json`, `.claude/`, editor config) are skipped
-   instead of failing the checkout; files deleted by the merge are removed
-   from the worktree, and a mid-checkout failure restores the original index
-   and tracked worktree content (including removing files the partial
-   checkout added) before falling back to MCP
-4. Emits a compact file manifest from `git diff --name-status` and
-   `git diff --numstat` (paths with special characters appear C-quoted, as in
-   normal git output, and are decoded during parsing), plus two verification
-   counts: `prDiffFileCount` — the merge-base..head file count cross-checked
-   against GitHub's `changedFiles` when the base branch has advanced — and
-   `mergeDiffFileCount`, which the workflow compares against the parsed
-   manifest length before trusting it (both recorded as `-1` in
-   `reviewMeta.sources` when unavailable)
-5. The skill then verifies the merge commit's second parent (`HEAD^2`)
-   matches the PR's `headSha` from GitHub metadata, and optionally collects
-   the full merge diff when it fits within a 200K character cap
-
-The local manifest and optional full diff are passed to the workflow via `args`.
-Specialist agents can also use Read and Grep on the merged checkout to inspect
-files in their merged state. Sandbox-protected files listed above are the one
-exception: their worktree content stays at the pre-merge state — modified or
-added protected paths are marked `skip-worktree`, and a protected path the PR
-deletes remains on disk as an untracked leftover (the sandbox blocks
-unlinking it). Preflight and reruns are unaffected; the full merge diff and
-manifest still carry the real change.
-
-After a successful checkout the skill does NOT auto-restore the original git
-ref. The merged checkout state keeps the Read tool useful for workflow
-subagents. Running in a dedicated worktree is recommended.
-
-### MCP Fallback
-
-When local git is unavailable, the workflow collects changed files via GitHub MCP
-`get_files` with pagination and recovery retries, as in previous versions.
-
-Fallback reasons are recorded in `reviewMeta.sources.fallbackReason` and
-include: not a git repository, dirty worktree, missing origin, non-github.com
-origin host, origin mismatch, merge ref fetch failure, untracked files that
-the merge would overwrite, checkout failure (after restoring the original
-state — the reason says so explicitly if the restore itself was incomplete),
-missing or failed manifest verification counts, or merge parent mismatch.
+1. **Resolve the PR.** The local HEAD SHA and the `origin` owner/repo
+   identify the PR via GitHub MCP search (`search_pull_requests`, with
+   `list_pull_requests` as fallback for search-index lag). Exactly one open
+   PR must match; zero or several is an honest error.
+2. **Verify the head.** PR metadata comes from one `pull_request_read`
+   call. `git rev-parse HEAD` must equal the PR's head SHA — unpushed local
+   commits or a stale checkout after a push produce an honest error naming
+   the fix. A dirty working tree warns but does not block (file reads would
+   see uncommitted edits; the diff itself is tree-to-tree).
+3. **Pin the review range.** After verifying `origin` points at the PR's
+   base repository (a fork clone would silently produce a wrong merge-base),
+   the skill runs `git fetch origin <base.ref>` — unconditionally, so the
+   base is current at review time; this is the toolkit's only network git
+   command — and pins `merge_base = git merge-base origin/<base.ref> HEAD`.
+   `git rev-list --count <merge_base>..origin/<base.ref>` measures how far
+   the base has moved since the PR forked.
 
 ### Workflow
 
-The workflow:
+The skill launches the bundled workflow with a small `args` payload: the PR
+metadata subset, the checkout path, and the pinned `merge_base`. No bulk data
+rides `args` — workflow agents gather their own diff context from the
+checkout. The workflow:
 
-- collects PR metadata and review threads through GitHub MCP read tools
-- uses the local git manifest when provided, or falls back to MCP file
-  collection
-- selects relevant reviewer lenses from the manifest
-- passes the full merge diff to specialists when available, or instructs them
-  to use Read/Grep on the merged checkout
-- asks specialists for evidence-rich candidate findings
-- synthesizes findings into a review board grouped by posting recommendation,
-  existing-review overlap, and discussion value
+- collects existing review threads through GitHub MCP read tools (collector
+  agent) in parallel with a **selector** agent that runs the diff itself
+  (`git diff --name-status` / `--numstat` and the hardened diff over the
+  pinned range) and returns which lenses should run, a one-line rationale
+  each, and the PR's shape
+- falls back to running **all** lenses when selector output fails validation
+  — selection is disclosed in `reviewMeta.lensSelection`, never silent
+- fans out the selected specialists in parallel; each reads the checkout
+  directly — Read/Grep/Glob for contents, read-only
+  `git log`/`blame`/`show`/`diff` over `<merge_base>..HEAD` for history and
+  patches — so findings carry PR head line numbers by construction
+- synthesizes findings into a review board grouped by posting
+  recommendation, existing-review overlap, and discussion value
 
 The workflow does not draft or post comments. Drafting happens in the skill
-conversation after the user selects findings. Posting requires an exact preview
-and explicit final approval.
+conversation after the user selects findings. Posting requires an exact
+preview and explicit final approval.
 
 The control flow is:
 
 ```text
-skill command
-  |-- preflight: verify local git, checkout merge ref, build manifest
-  |-- fallback: skip local git if any check fails
+skill command (in a PR head checkout)
+  |-- resolve PR, verify HEAD == PR head, fetch base, pin merge_base
   v
 Workflow(review-pr.js) -> workflow agent() calls
-  collection agents -> pr-review-github-collector -> GitHub MCP reads (metadata, threads)
-  specialist agents -> pr-review-analysis-readonly -> read-only repo/MCP inspection
+  collector  -> pr-review-github-collector  -> GitHub MCP reads (threads)
+  selector   -> pr-review-selector          -> read-only git over the pinned range
+  specialists-> pr-review-analysis-readonly -> read-only repo/git/MCP inspection
+  synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
 
-The root skill handles local git checkout and manifest building with scoped Bash
-commands. The workflow script owns MCP collection (when needed), pagination,
-retries, validation, and merging. Spawned collection agents only perform focused
-GitHub reads and return structured output. Specialist agents may inspect
-repository files and use available read-only MCP tools to verify findings.
+### Merge signals
+
+The board reports mergeability from metadata instead of analyzing GitHub's
+synthetic merge ref: "merge conflicts with base" (or "mergeability still
+computing" while GitHub's `mergeable` is null), and "base has moved N
+commits since this PR forked" when the base advanced. A merge-conflicted PR
+still reviews fine — integration breakage is CI's job. See
+`docs/DESIGN_NOTES.md` for the head-anchoring rationale.
 
 ## Review Agents
 
 | Agent | When it runs | What it does |
 |-------|-------------|--------------|
-| code-reviewer | Always | Reviews code for bugs, style, and guideline adherence (runs on Opus) |
+| code-reviewer | Always | Reviews code for bugs, style, and guideline adherence |
 | silent-failure-hunter | Changes touch error handling, try/catch, or fallback logic | Identifies silent failures and inadequate error handling |
 | pr-test-analyzer | Functional code that should have corresponding tests | Analyzes test coverage completeness |
-| comment-analyzer | Changes touch docs files, or — when the local full diff is available — add or modify comments or docstrings | Checks comment accuracy and maintainability |
+| comment-analyzer | Changes touch docs files, comments, or docstrings | Checks comment accuracy and maintainability |
 | type-design-analyzer | Changes introduce or modify type definitions in typed languages | Evaluates type design and invariant quality |
 | security-reviewer | Changes touch auth, crypto, tokens, credentials, or security-related code | Reviews for security vulnerabilities and unsafe patterns |
 | api-compat-reviewer | Changes touch public APIs, exports, or client-facing interfaces | Checks API compatibility and breaking changes |
 | concurrency-reviewer | Changes touch mutexes, locks, channels, goroutines, or parallel code | Reviews concurrency patterns for races and deadlocks |
 
-Agent selection is liberal: when in doubt, the agent runs. All agents execute in
-parallel within a single workflow from the collected PR manifest and thread
-context.
+The selector agent picks lenses from the real diff with a liberal posture:
+when in doubt, the lens runs, and general correctness (code-reviewer) always
+runs. Specialist model is inherited from the session — no hardcoded model
+pins (they become silent downgrades as models advance); effort is the only
+dial. All specialists execute in parallel within a single workflow.
 
 ## Review Board
 
@@ -162,14 +145,13 @@ The workflow returns a review board grouped by outcome:
 
 Each finding preserves the specialist's claim, evidence, reasoning, suggested
 fix, confidence, source lens, and existing-review overlap rationale. The board
-also includes positive observations, PR metadata, and review metadata. Thread
+also includes positive observations, PR metadata, and review metadata:
+`reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
+lenses ran, why, and whether the all-lenses fallback engaged. Thread
 resolution state (`isResolved`) is recorded only when the GitHub read tools
 expose it. If review-thread collection fails, the board says so
 (`reviewMeta.threadCollectionFailed`) instead of silently skipping overlap
-classification. For very large PRs, specialist prompts carry the
-highest-signal subset of the manifest with an explicit per-category summary of
-the rest (`reviewMeta.manifestPromptTruncation`); the complete manifest is
-always collected.
+classification.
 
 ## Interaction And Posting
 
@@ -182,20 +164,47 @@ previews each line comment, review-body text, and the proposed review event
 (`COMMENT`, `REQUEST_CHANGES`, or `APPROVE`) before any GitHub write tool is
 used.
 
+Findings anchor to PR head line numbers from birth — no line translation
+step exists. A finding whose line is not part of the PR diff goes into the
+review body. Before posting, the skill re-fetches metadata once and aborts
+honestly if the head SHA changed since analysis (the review would no longer
+describe the PR). The pending review pins the reviewed head SHA as
+`commitID` so comment anchors stay attached to the reviewed commit.
+
 ## Permissions
+
+The target is auto permission mode; the skill's pre-approved patterns still
+run prompt-free under stricter modes, where specialist/selector Bash is the
+one surface that may prompt.
 
 ### Local Git Commands
 
-Preflight, fetch, and checkout run inside the bundled, reviewable
-`scripts/checkout.sh` helper during skill preprocessing — they are not
-model-issued Bash calls. The skill's `allowed-tools` frontmatter then permits
-only one git command pattern:
+The skill's `allowed-tools` frontmatter permits only the read-only git
+commands the flow actually runs — `git rev-parse`, `git status`,
+`git remote get-url origin`, `git merge-base`, `git rev-list` — plus
+`git fetch origin` for the single base-branch fetch. The skill never builds
+a checkout and never mutates the repository.
 
-- `git diff *` — collect the full merge diff and translate merge-result line
-  numbers to PR HEAD line numbers before posting
+### Workflow Agents
 
-All other Bash commands are denied; workflow-spawned agents have no Bash
-access.
+Skill `allowed-tools` constrains only the orchestrator — workflow-spawned
+agents get their tool surface from their own bundled agent definitions:
+
+- **pr-review-github-collector** — allowlist: `pull_request_read` only. No
+  shell, no local files, no web, so large MCP responses never lead to
+  generated Python, `jq`, `gh`, or other ad-hoc parsing scripts.
+- **pr-review-selector** — `Bash`, `Read`, `Grep`, with an
+  instruction-level read-only git contract: `diff`/`log`/`show` over the
+  pinned range only, literal `--` before paths.
+- **pr-review-analysis-readonly** (specialists) — a denylist agent so
+  read-only MCP tools (language servers such as gopls) stay usable. Bash is
+  allowed under the same instruction-level read-only git contract; every
+  GitHub write tool in the github plugin's toolsets is hard-denied
+  (re-audited when the dependency updates), as are file mutation tools,
+  `Task`, and web tools.
+- **pr-review-synthesis** — no tools at all. It works from prompt JSON, and
+  it is the agent fed the most untrusted text (finding bodies, thread
+  comments) — exactly the agent that should hold no capabilities.
 
 ### GitHub MCP Permissions
 
@@ -203,25 +212,9 @@ The plugin depends on the [github](../github) plugin.
 
 Analysis requires these read capabilities:
 
+- `search_pull_requests` / `list_pull_requests` to resolve the checkout's PR
 - `pull_request_read` with `get`
-- `pull_request_read` with `get_files` (MCP fallback only)
 - `pull_request_read` with `get_review_comments`
-
-The workflow and workflow-spawned agents must use read tools only. They are
-explicitly instructed not to call write tools, draft pending reviews, submit
-reviews, add comments, or resolve threads.
-
-Collection agents run through the bundled `pr-review-github-collector` agent
-type. That agent allows GitHub PR reads and disallows shell, local file, web, and
-file mutation tools so large MCP responses do not lead to generated Python,
-`jq`, `gh`, or other ad-hoc parsing scripts.
-
-Specialist reviewers run through `pr-review-analysis-readonly`, which
-disallows shell, file mutation, web, and known GitHub write tools so those are
-unavailable rather than merely discouraged, while read-only MCP tools (e.g.
-language servers for any language) remain usable when installed. In the local
-git path, specialists can use Read and Grep on the merged checkout to inspect
-changed files and trace cross-file effects.
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
@@ -252,25 +245,29 @@ Representative PR validation should cover:
 - PRs where existing human or bot comments fully cover a candidate finding
 - partial-overlap and plus-one cases
 - discussion-only findings
-- large PRs with hundreds of files
+- large PRs with hundreds of files (complete review with no API pagination;
+  selector reports true scale)
 - large PRs dominated by vendor, generated, or lockfile changes
 - missing-test, error-handling, comment/doc, and type/model/interface changes
 - PRs with meaningful positive observations
-- local git worktree where `HEAD^2` matches PR `headSha`
-- wrong `origin` remote (should fall back to MCP)
-- dirty worktree (should fall back to MCP)
-- PR with merge conflicts (merge ref fetch fails, should fall back to MCP)
+- a merge-conflicted PR (must review fine, with the conflict surfaced as a
+  board signal)
+- a stale checkout or unpushed local commits (honest error naming the fix)
+- a detached-HEAD worktree checkout (PR resolution still works)
+- a dirty working tree (warns, proceeds)
+- a selector returning invalid output (all-lenses fallback engages, disclosed
+  in `reviewMeta.lensSelection`)
 - PRs with renames, copies, deletes, binary files, and paths with special
   characters
 
 For each run, verify that PR metadata and review-thread context come from MCP
-tools, local-git runs record manifest/full-diff provenance in
-`reviewMeta.sources`, and MCP fallback runs record the fallback reason and
-recovery counts. Also verify no generated parsing scripts are used, existing
-review context affects recommendations, the review board is understandable, the
-drafts remain editable, and posting requires explicit
-approval.
+tools, findings carry PR head line numbers, lens selection is disclosed in
+`reviewMeta.lensSelection`, no generated parsing scripts are used, existing
+review context affects recommendations, the review board is understandable,
+the drafts remain editable, and posting requires explicit approval.
 
 ## Prerequisites
 
 - [github](../github) plugin (provides MCP tools for PR operations)
+- a local git checkout of the PR head (`claude --worktree '<pr-url>'` or
+  `gh pr checkout N`)

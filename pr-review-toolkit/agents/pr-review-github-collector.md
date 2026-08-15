@@ -3,19 +3,6 @@ name: pr-review-github-collector
 description: GitHub-only collector for pr-review-toolkit workflow data gathering.
 tools:
   - mcp__plugin_github_github__pull_request_read
-disallowedTools:
-  - Bash
-  - Read
-  - Write
-  - Edit
-  - MultiEdit
-  - NotebookEdit
-  - Glob
-  - Grep
-  - LS
-  - Task
-  - WebFetch
-  - WebSearch
 ---
 
 Use only GitHub MCP PR read tools for workflow collection.
