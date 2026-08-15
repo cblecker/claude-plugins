@@ -12,7 +12,7 @@ allowed-tools:
   - Bash(git rev-parse *)
   - Bash(git status *)
   - Bash(git config --get-regexp *)
-  - Bash(git remote get-url origin)
+  - Bash(git remote get-url origin *)
   - Bash(git fetch origin *)
   - Bash(git merge-base *)
   - Bash(git rev-list *)
@@ -38,7 +38,7 @@ of the PR head commit — a Claude Code worktree (`claude --worktree "#123"`),
 - Head SHA: !`git rev-parse HEAD`
 - Checkout root: !`git rev-parse --show-toplevel`
 - Branch: !`git rev-parse --abbrev-ref HEAD`
-- Origin: !`git remote get-url origin`
+- Origin: !`git remote get-url origin | sed -E 's#^([a-z+]+://)[^@/]+@#\1#'`
 - Branch config: !`git config --get-regexp '^branch\.'`
 - Dirty files: !`git status --porcelain`
 
@@ -145,7 +145,10 @@ from section array lengths, plus the reviewer list from
 M overlap existing threads, P discussion-worthy. Reviewers: code-reviewer,
 pr-test-analyzer.` If `reviewMeta.lensSelection.source` is
 `all-lenses-fallback`, add a line: the lens selector returned invalid
-output, so every lens ran.
+output, so every lens ran. Add a one-line shape summary from `summary`
+(file count, additions/deletions, scale, notable areas — or that the shape
+is unavailable); per-lens rationales live in
+`reviewMeta.lensSelection.rationales` when the user asks.
 
 Then show merge signals from the metadata and the pinned range:
 
