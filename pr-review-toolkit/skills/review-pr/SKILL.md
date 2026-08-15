@@ -13,6 +13,7 @@ allowed-tools:
   - Bash(git status *)
   - Bash(git config --get-regexp *)
   - Bash(git remote get-url origin *)
+  - Bash(cut *)
   - Bash(git fetch origin *)
   - Bash(git merge-base *)
   - Bash(git rev-list *)
@@ -38,7 +39,7 @@ of the PR head commit — a Claude Code worktree (`claude --worktree "#123"`),
 - Head SHA: !`git rev-parse HEAD`
 - Checkout root: !`git rev-parse --show-toplevel`
 - Branch: !`git rev-parse --abbrev-ref HEAD`
-- Origin: !`git remote get-url origin | sed -E 's#^([a-z+]+://)[^@/]+@#\1#'`
+- Origin: !`git remote get-url origin | cut -d@ -f2-`
 - Branch config: !`git config --get-regexp '^branch\.'`
 - Dirty files: !`git status --porcelain`
 
