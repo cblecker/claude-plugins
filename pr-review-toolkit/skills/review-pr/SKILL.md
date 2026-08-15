@@ -113,7 +113,8 @@ git rev-list --count <merge_base>..FETCH_HEAD  # record as base_ahead_count
 ```
 
 The fully qualified ref cannot be parsed as an option or a tag of the same
-name.
+name. If `merge-base` fails, the checkout is likely shallow: stop honestly
+and suggest `git fetch --unshallow origin`.
 
 ## Launch Analysis Workflow
 

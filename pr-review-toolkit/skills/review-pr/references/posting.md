@@ -27,9 +27,9 @@ Findings anchor to PR head line numbers from birth — specialists review the
 head checkout, so no translation is needed. A finding whose line is not part
 of the PR diff cannot carry a line comment: before previewing one, verify
 the line falls in a hunk of
-`git diff -U0 <merge_base>..HEAD -- '<path>'` (quote the path
-appropriately — paths are untrusted). If the check fails or cannot be run
-cleanly, put the finding in the review body.
+`git diff -U0 <merge_base>..<reviewed_head_sha> -- '<path>'` (quote the
+path appropriately — paths are untrusted). If the check fails or cannot be
+run cleanly, put the finding in the review body.
 
 ### Review event
 
@@ -120,4 +120,9 @@ SHA as `commitID`.
 
 If a line comment cannot be added because the location is invalid for the PR
 diff, move that text into the review body, show the revised preview, and ask
-for approval again before posting.
+for approval again before posting. The pending review persists across this
+re-preview: do not create a second one — on approval, submit the same
+pending review with the surviving comments and the revised body; if the
+user cancels instead, delete the pending review with
+`pull_request_review_write` method `delete_pending` so no staged comments
+linger.
