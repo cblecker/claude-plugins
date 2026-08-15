@@ -65,9 +65,10 @@ the author's own up-to-date branch.
    base repository (a fork clone would silently produce a wrong merge-base),
    the skill runs `git fetch origin <base.ref>` — unconditionally, so the
    base is current at review time; this is the toolkit's only network git
-   command — and pins `merge_base = git merge-base origin/<base.ref> HEAD`.
-   `git rev-list --count <merge_base>..origin/<base.ref>` measures how far
-   the base has moved since the PR forked.
+   command — and pins `merge_base = git merge-base FETCH_HEAD HEAD`
+   (`FETCH_HEAD` is exact regardless of the clone's refspec configuration).
+   `git rev-list --count <merge_base>..FETCH_HEAD` measures how far the
+   base has moved since the PR forked.
 
 ### Workflow
 

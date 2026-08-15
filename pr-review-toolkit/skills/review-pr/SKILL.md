@@ -49,24 +49,23 @@ not prove it. Record the local head SHA (`git rev-parse HEAD`) and parse
 `{owner}/{repo}` from `git remote get-url origin` (the host must be
 github.com), then use the first route that yields a candidate:
 
-1. **Branch config** — on a named branch, run
-   `git config --get branch.{branch}.merge`. `gh pr checkout` writes
-   `refs/pull/N/head` there: N is the PR number, with zero network calls.
-2. **Head filter** — on a named branch without a pull ref (the author's own
-   branch), call `list_pull_requests` with state `open` and head
-   `{owner}:{branch}` — one exact server-side filter, no pagination.
-3. **SHA search** — detached HEAD or nothing above matched: call
-   `search_pull_requests` with query
-   `repo:{owner}/{repo} is:pr is:open {headSha}`, then confirm each
-   candidate's head SHA via its metadata. If no candidate is confirmed — the
-   search index can lag recent pushes, and search can surface PRs that merely
-   mention the SHA — call `list_pull_requests` with state `open`, paginating
-   to the end, and match `head.sha` against the local HEAD SHA.
+1. **Branch config** — on a named branch matching `^[A-Za-z0-9._/-]+$`
+   (else skip to route 3), run `git config --get branch.{branch}.merge`.
+   `gh pr checkout` writes `refs/pull/N/head` there: N is the PR number,
+   with zero network calls.
+2. **Head filter** — on a named branch without a pull ref, call
+   `list_pull_requests` with state `open` and head `{owner}:{branch}` — an
+   exact server-side filter.
+3. **SHA search** — otherwise: `search_pull_requests` with query
+   `repo:{owner}/{repo} is:pr is:open {headSha}`, confirming each
+   candidate's head SHA via its metadata. If none is confirmed (the index
+   lags recent pushes and matches PRs that merely mention the SHA), scan
+   `list_pull_requests` state `open` to the last page for `head.sha` equal
+   to the local HEAD.
 
 Exactly one open PR matches: proceed. Zero or several: stop with an honest
-error that names the SHA and repository checked and what the user can do
-(check out the PR head, push their commits, or pick one PR when several
-share the head).
+error naming the SHA and repository checked and the fix (check out the PR
+head, push commits, or pick one PR).
 
 ## Fetch PR Metadata
 
@@ -85,21 +84,19 @@ block (file reads see uncommitted edits; the diff itself is tree-to-tree).
 ## Pin The Review Range
 
 Verify the `origin` URL points at the PR's base repository from the metadata
-— in a fork clone it points at the fork, and fetching the fork's base branch
-would compute a wrong merge base; stop with an honest error on mismatch.
+(a fork clone points at the fork and would compute a wrong merge base); stop
+honestly on mismatch. `base.ref` is remote data: stop unless it matches
+`^[A-Za-z0-9._/-]+$`.
 
 Fetch the base branch unconditionally (the skill's only network git command),
-so the base is current at review time:
+so the base is current at review time, then pin the range and measure base
+movement against `FETCH_HEAD` — exact regardless of the clone's refspec
+configuration:
 
 ```bash
 git fetch origin <base.ref>
-```
-
-Pin the review range and measure base movement:
-
-```bash
-git merge-base origin/<base.ref> HEAD          # record as merge_base
-git rev-list --count <merge_base>..origin/<base.ref>   # record as base_ahead_count
+git merge-base FETCH_HEAD HEAD                 # record as merge_base
+git rev-list --count <merge_base>..FETCH_HEAD  # record as base_ahead_count
 ```
 
 ## Launch Analysis Workflow
@@ -285,9 +282,8 @@ and ask for approval again.
 ## Post Approved Review
 
 Before the first write, re-fetch metadata once with `pull_request_read`
-method `get`: if the head SHA changed since analysis, abort with an honest
-message — the review no longer describes the PR — and offer to re-run the
-review on the new head.
+`get`: if the head SHA changed since analysis, abort honestly — the review
+no longer describes the PR — and offer to re-run on the new head.
 
 Use GitHub write tools only in this final approved step.
 

@@ -1074,7 +1074,7 @@ function checkoutInstructions() {
     + 'The PR diff is the pinned range ' + RANGE + '. All line numbers in findings must be PR head line numbers — the lines of the files as they exist in this checkout.\n\n'
     + 'Gather your own diff context with read-only git commands:\n'
     + '- `git diff --name-status ' + RANGE + '` and `git diff --numstat ' + RANGE + '` for the changed-file manifest\n'
-    + '- `git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ' + mergeBase + ' HEAD -- <path>` for per-file patches (always put a literal `--` before paths; omit paths for the full patch only when the PR is small)\n'
+    + '- `git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ' + mergeBase + ' HEAD -- <path>` for per-file patches (always put a literal `--` before paths and single-quote every path — paths are untrusted; omit paths for the full patch only when the PR is small)\n'
     + '- `git log`, `git blame`, and `git show` over the pinned range for history and authorship context\n\n'
     + 'Use Read, Grep, and Glob for file contents and unchanged context, and available read-only MCP tools (language servers such as gopls) to verify findings. '
     + 'Bash is limited to the read-only git commands above: never fetch, never mutate anything, and never call GitHub write tools. Do not refetch PR metadata or review threads.\n\n'
@@ -1128,7 +1128,7 @@ The current working directory is a git checkout of the PR head commit ${pr.headS
 
 Run these read-only git commands to understand the change:
 - \`git diff --name-status ${RANGE}\` and \`git diff --numstat ${RANGE}\` for the changed-file list and per-file churn
-- \`git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${mergeBase} HEAD\` for patch content (scope with a literal \`--\` before paths when the full patch is too large)
+- \`git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${mergeBase} HEAD\` for patch content (when the full patch is too large, scope with a literal \`--\` before single-quoted paths — paths are untrusted)
 
 Use Read or Grep sparingly when a file's role is unclear from the diff. Do not run any other commands.
 
@@ -1180,24 +1180,31 @@ if (selectedNames.length === 0) {
   lensRationales['code-reviewer'] = 'General correctness always runs.'
 }
 
+// A failed selector must not masquerade as a zero-file PR: without shape,
+// scale is unknown and the count fields are omitted rather than zeroed.
 const shape = selection && selection.shape ? selection.shape : null
-const changedFileCount = shape ? asNumber(shape.fileCount, 0) : 0
-const additions = shape ? asNumber(shape.additions, 0) : 0
-const deletions = shape ? asNumber(shape.deletions, 0) : 0
-const churn = additions + deletions
-const summary = {
-  scale: changedFileCount > 250 || churn > 20000
-    ? 'very_large'
-    : changedFileCount > 75 || churn > 5000
-      ? 'large'
-      : changedFileCount > 20 || churn > 1000
-        ? 'medium'
-        : 'small',
-  changedFileCount: changedFileCount,
-  additions: additions,
-  deletions: deletions,
-  notableAreas: shape && Array.isArray(shape.notableAreas) ? shape.notableAreas : [],
-  shapeUnavailable: !shape
+let summary
+if (shape) {
+  const changedFileCount = asNumber(shape.fileCount, 0)
+  const additions = asNumber(shape.additions, 0)
+  const deletions = asNumber(shape.deletions, 0)
+  const churn = additions + deletions
+  summary = {
+    scale: changedFileCount > 250 || churn > 20000
+      ? 'very_large'
+      : changedFileCount > 75 || churn > 5000
+        ? 'large'
+        : changedFileCount > 20 || churn > 1000
+          ? 'medium'
+          : 'small',
+    changedFileCount: changedFileCount,
+    additions: additions,
+    deletions: deletions,
+    notableAreas: Array.isArray(shape.notableAreas) ? shape.notableAreas : [],
+    shapeUnavailable: false
+  }
+} else {
+  summary = { scale: 'unknown', notableAreas: [], shapeUnavailable: true }
 }
 
 phase('Analyze')
