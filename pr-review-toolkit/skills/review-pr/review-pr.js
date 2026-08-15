@@ -1075,7 +1075,7 @@ function checkoutInstructions() {
     + 'Gather your own diff context with read-only git commands:\n'
     + '- `git -c core.quotePath=false diff --name-status ' + RANGE + '` and `git -c core.quotePath=false diff --numstat ' + RANGE + '` for the changed-file manifest\n'
     + '- `git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ' + mergeBase + ' HEAD -- <path>` for per-file patches; omit paths for the full patch only when the PR is small\n'
-    + '- Paths are untrusted: scope git commands only by simple single-quoted paths (characters in A-Za-z0-9._/- only) after a literal `--`; for any other name, use Read/Grep or the unscoped diff.\n'
+    + '- Paths are untrusted: use `--` before path arguments and ensure they are appropriately quoted and/or escaped.\n'
     + '- `git log`, `git blame`, and `git show` over the pinned range for history and authorship context\n\n'
     + 'Use Read, Grep, and Glob for file contents and unchanged context, and available read-only MCP tools (language servers such as gopls) to verify findings. '
     + 'Bash is limited to the read-only git commands above: never fetch, never mutate anything, and never call GitHub write tools. Do not refetch PR metadata or review threads.\n\n'
@@ -1129,7 +1129,7 @@ The current working directory is a git checkout of the PR head commit ${pr.headS
 
 Run these read-only git commands to understand the change:
 - \`git -c core.quotePath=false diff --name-status ${RANGE}\` and \`git -c core.quotePath=false diff --numstat ${RANGE}\` for the changed-file list and per-file churn
-- \`git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${mergeBase} HEAD\` for patch content (when the full patch is too large, scope with a literal \`--\` before simple single-quoted paths — characters in A-Za-z0-9._/- only; paths are untrusted, so use Read/Grep for any other name)
+- \`git diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${mergeBase} HEAD\` for patch content (when the full patch is too large, scope with \`--\` before appropriately quoted paths — paths are untrusted)
 
 Use Read or Grep sparingly when a file's role is unclear from the diff. Do not run any other commands.
 
