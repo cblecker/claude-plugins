@@ -10,7 +10,7 @@ allowed-tools:
   - AskUserQuestion
   - Bash(git rev-parse *)
   - Bash(git status *)
-  - Bash(git config --get branch.*)
+  - Bash(git config --get-regexp *)
   - Bash(git remote get-url origin)
   - Bash(git fetch origin *)
   - Bash(git merge-base *)
@@ -49,8 +49,9 @@ not prove it. Record the local head SHA (`git rev-parse HEAD`) and parse
 `{owner}/{repo}` from `git remote get-url origin` (the host must be
 github.com), then use the first route that yields a candidate:
 
-1. **Branch config** — on a named branch matching `^[A-Za-z0-9._/-]+$`
-   (else skip to route 3), run `git config --get branch.{branch}.merge`.
+1. **Branch config** — on a named branch, run
+   `git config --get-regexp '^branch\.'` (a fixed command, no name
+   interpolation) and read the current branch's `merge` key.
    `gh pr checkout` writes `refs/pull/N/head` there: N is the PR number,
    with zero network calls.
 2. **Head filter** — on a named branch without a pull ref, call
