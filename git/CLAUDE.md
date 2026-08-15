@@ -29,6 +29,9 @@ setup, Kubernetes project) and outputs replacement git instructions via heredoc
 template.
 
 - Pure bash, no external dependencies beyond git
+- Bash 3.2 compatible — macOS ships bash 3.2 as the system shell, and under
+  `set -euo pipefail` a bash 4+ construct (`${var,,}`, `declare -A`, `mapfile`)
+  aborts the hook before it emits any instructions
 - Graceful degradation: defaults to `main`, no conventions, no fork
 
 ### Detection

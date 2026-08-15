@@ -128,8 +128,9 @@ detect_kubernetes() {
 
       # Handles https://, ssh://, git://, scp-style git@host:owner/repo, and
       # local paths, with or without a .git suffix or a trailing slash
-      owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
-      owner="${owner,,}"
+      # tr rather than ${owner,,}: macOS system bash is 3.2, and a bad
+      # substitution under set -e would abort the hook before it emits anything
+      owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#' | tr '[:upper:]' '[:lower:]')
 
       # kubernetes, kubernetes-sigs, kubernetes-csi, kubernetes-client, etc.
       if [[ "$owner" =~ ^kubernetes(-[a-z0-9._-]+)?$ ]]; then
