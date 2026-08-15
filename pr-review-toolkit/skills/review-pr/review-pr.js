@@ -1114,6 +1114,10 @@ phase('Collect')
 log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.repo + '#' + pr.number)
 
 const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved only when the tool response actually exposes thread resolution state; omit it when the response does not say — never guess or default it. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads. Do not call any GitHub write tools.`
+// The rejection handler attaches at creation: the promise is not awaited
+// until after the specialist fan-out, and an unhandled rejection in that
+// window would abort the whole review instead of taking the documented
+// threadCollectionFailed degradation path.
 const threadCollectionPromise = agent(threadCollectionPrompt, {
   label: 'collect-review-threads',
   schema: THREAD_SCHEMA,
@@ -1121,6 +1125,9 @@ const threadCollectionPromise = agent(threadCollectionPrompt, {
   agentType: GITHUB_COLLECTOR_AGENT_TYPE,
   model: 'haiku',
   effort: 'low'
+}).catch(error => {
+  log('Review-thread collection errored: ' + (error && error.message ? error.message : String(error)))
+  return { threads: [], collectionFailed: true }
 })
 
 const lensRoster = Object.keys(REVIEWERS)

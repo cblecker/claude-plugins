@@ -192,10 +192,13 @@ one surface that may prompt.
 Deterministic preflight identity — head SHA, checkout root, branch, origin
 URL, branch config, dirty status — is injected by skill preprocessing
 (`` !`command` `` substitution), not model-issued Bash. The skill's
-`allowed-tools` frontmatter then permits only the read-only git commands
-the flow itself runs — `git rev-parse`, `git merge-base`, `git rev-list`,
+`allowed-tools` frontmatter permits the read-only git commands the flow
+itself runs — `git rev-parse`, `git merge-base`, `git rev-list`,
 `git diff` (line-anchor validity) — plus `git fetch origin` for the single
-base-branch fetch. The skill never builds a checkout and never touches the
+base-branch fetch, and also pre-approves the injected preflight commands'
+patterns (`git status`, `git config --get-regexp`,
+`git remote get-url origin`, `cut`) as deliberate belt and braces. The
+skill never builds a checkout and never touches the
 working tree or index; the base-branch fetch is the only command that
 writes anything (objects and the remote-tracking ref).
 
