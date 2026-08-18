@@ -39,6 +39,26 @@ analysis and scoring (Sonnet + Haiku agents) &rarr; per-item action
 confirmation &rarr; plan generation &rarr; implementation &rarr; reply
 posting.
 
+## Usage
+
+Review a PR in one command. `claude --worktree` checks out the PR head into an
+isolated worktree, and the trailing slash command runs the review immediately:
+
+```bash
+claude --worktree '<pr-url>' --permission-mode auto /pr-review-toolkit:review-pr
+```
+
+- `--worktree '<pr-url>'` fetches the PR head (`pull/N/head`) into a detached
+  worktree, leaving your current checkout untouched.
+- `--permission-mode auto` starts the session in Auto mode so the review's
+  read-only and GitHub MCP steps run with fewer prompts (see
+  [Permissions](#permissions)). Auto mode needs a supported model and may be
+  disabled by your settings or organization; when unavailable it falls back to
+  Manual mode. Omit the flag to use your configured default permission mode.
+
+If you review PRs often, wrap this in a shell function or alias that accepts a
+PR URL and passes it to the command above.
+
 ## Review Flow
 
 The skill requires only that the current directory is a git checkout of the
