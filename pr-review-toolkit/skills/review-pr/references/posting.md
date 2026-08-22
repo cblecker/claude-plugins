@@ -10,7 +10,9 @@ Drafts should:
 
 - sound like the user wrote them
 - be concise and actionable
-- avoid boilerplate, severity labels, and AI markers
+- avoid boilerplate, severity labels, impact tiers, and AI markers —
+  `unaddressedImpact` is reviewer-side context for deciding what to post,
+  never text for the comment itself
 - include enough context for the PR author to act
 - avoid duplicating comments already covered elsewhere
 - distinguish blocking concerns from optional suggestions

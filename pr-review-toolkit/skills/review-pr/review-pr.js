@@ -4,7 +4,8 @@ export const meta = {
   phases: [
     { title: 'Collect', detail: 'Collect review threads and select review lenses from the diff' },
     { title: 'Analyze', detail: 'Run specialist review agents against the checkout' },
-    { title: 'Synthesize', detail: 'Build a grouped review board' }
+    { title: 'Synthesize', detail: 'Build a grouped review board' },
+    { title: 'Assess', detail: 'Skeptically assess the impact of leaving each actionable finding unaddressed' }
   ]
 }
 
@@ -171,6 +172,28 @@ const REVIEW_BOARD_SCHEMA = {
     }
   },
   required: ['recommendedToPost', 'relatedToExisting', 'discussionOnly', 'alreadyCovered', 'discarded', 'positiveObservations']
+}
+
+// unaddressedImpact is deliberately absent from BOARD_ITEM_SCHEMA: the
+// synthesizer must not fabricate impact from specialist advocacy. It is
+// attached after finalizeBoard by a separate skeptical assessor.
+const IMPACT_SCHEMA = {
+  type: 'object',
+  required: ['assessments'],
+  properties: {
+    assessments: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'tier', 'consequence'],
+        properties: {
+          id: { type: 'string' },
+          tier: { type: 'string', enum: ['negligible', 'minor', 'moderate', 'serious'] },
+          consequence: { type: 'string' }
+        }
+      }
+    }
+  }
 }
 
 let config = {}
@@ -1110,6 +1133,37 @@ function analysisPrompt(name, summary) {
     + '\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.'
 }
 
+// The assessor is fed the claim and evidence (it must know what to assess)
+// but never the specialist's severity, confidence, or whyItMatters — those
+// are the finder's advocacy, and withholding them keeps the assessment from
+// anchoring on it.
+function impactPrompt(items) {
+  const findings = items.map(item => ({
+    id: item.id,
+    location: item.location,
+    lens: item.lens,
+    title: item.title,
+    claim: item.claim,
+    evidence: item.evidence,
+    suggestedFix: item.suggestedFix
+  }))
+  return 'You are a skeptical impact assessor for a PR review. For each candidate finding below, determine what would actually happen if this PR merged with the finding left unaddressed.\n\n'
+    + 'You are not the reviewer who raised these findings and you do not defend them. Review findings routinely overstate their own importance; your job is to state the real consequence of inaction, deflating where the code warrants it. Verify each claim against the checkout before assessing it — assess what the code does, not what the finding says it does.\n\n'
+    + 'For each finding, answer concretely:\n'
+    + '- What observable behavior breaks or degrades if nothing is done — and for whom?\n'
+    + '- Under what conditions does that consequence trigger, and how likely are those conditions in practice?\n'
+    + '- Does the cost of not fixing grow over time (harder to fix later, spreads by copy-paste, breaks consumers) or stay flat?\n\n'
+    + 'Rate each finding:\n'
+    + '- negligible: no observable consequence in practice; cosmetic or theoretical only\n'
+    + '- minor: a real but small or rare cost, just as easily fixed later\n'
+    + '- moderate: users or maintainers will plausibly hit this, or fixing later costs meaningfully more than fixing now\n'
+    + '- serious: likely defects, data loss or corruption, security exposure, or breakage for downstream consumers\n\n'
+    + '"Negligible" is a perfectly good answer when the code supports it — an honest low rating is worth more than a defensible high one. Keep each consequence to one to three plain sentences describing what happens, not why the finding is right.\n\n'
+    + '## Findings\n\n' + JSON.stringify(findings) + '\n\n'
+    + checkoutInstructions()
+    + '\n\n## Output\n\nReturn exactly one assessment per finding id. Do not post comments, modify anything, or call any GitHub write tools.'
+}
+
 phase('Collect')
 log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.repo + '#' + pr.number)
 
@@ -1305,4 +1359,64 @@ const synthesized = await agent(synthPrompt, {
   effort: 'high'
 })
 
-return finalizeBoard(synthesized, allFindings, allPositive, prContext)
+const board = finalizeBoard(synthesized, allFindings, allPositive, prContext)
+
+phase('Assess')
+
+// Impact is assessed only where the reviewer will weigh it: the sections a
+// human still decides on. alreadyCovered and discarded items are not
+// assessed. Assessment is presentation-only — a negligible tier never
+// re-routes or drops a finding; disagreement between specialist severity
+// and assessed impact is surfaced to the reviewer, not resolved silently.
+const actionable = board.recommendedToPost
+  .concat(board.relatedToExisting, board.discussionOnly)
+
+if (actionable.length === 0) {
+  log('No actionable findings; skipping impact assessment.')
+  board.reviewMeta.impactAssessment = { actionable: 0, assessed: 0, incomplete: false }
+  return board
+}
+
+log('Assessing unaddressed impact of ' + actionable.length + ' actionable finding(s)')
+
+const IMPACT_CHUNK_SIZE = 8
+const impactChunks = []
+for (let i = 0; i < actionable.length; i += IMPACT_CHUNK_SIZE) {
+  impactChunks.push(actionable.slice(i, i + IMPACT_CHUNK_SIZE))
+}
+
+const impactResults = await parallel(impactChunks.map((chunk, index) => () => agent(impactPrompt(chunk), {
+  label: 'assess-impact-' + (index + 1),
+  schema: IMPACT_SCHEMA,
+  phase: 'Assess',
+  agentType: ANALYSIS_AGENT_TYPE,
+  effort: 'medium'
+})))
+
+const actionableById = {}
+actionable.forEach(item => {
+  actionableById[item.id] = item
+})
+
+let assessedCount = 0
+impactResults.filter(Boolean).forEach(result => {
+  ;(result.assessments || []).forEach(entry => {
+    const item = entry && actionableById[entry.id]
+    if (!item || item.unaddressedImpact) return
+    item.unaddressedImpact = { tier: entry.tier, consequence: entry.consequence }
+    assessedCount++
+  })
+})
+
+// An unassessed finding simply carries no unaddressedImpact; the skill
+// discloses incompleteness instead of the board hiding it.
+board.reviewMeta.impactAssessment = {
+  actionable: actionable.length,
+  assessed: assessedCount,
+  incomplete: assessedCount < actionable.length
+}
+if (assessedCount < actionable.length) {
+  log('Warning: impact assessment incomplete — ' + assessedCount + ' of ' + actionable.length + ' actionable finding(s) assessed.')
+}
+
+return board

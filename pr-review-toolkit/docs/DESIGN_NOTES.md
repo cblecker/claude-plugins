@@ -58,6 +58,26 @@ and the selector's per-lens rationale land in `reviewMeta.lensSelection` —
 and invalid selector output falls back to running all lenses. The liberal
 posture is kept: when in doubt, include; general correctness always runs.
 
+## Impact from a skeptic, not the finder
+
+Every board finding answers "what would actually happen if this shipped
+unaddressed" (`unaddressedImpact`), and that answer deliberately does not
+come from the specialist that raised the finding. A specialist's
+`whyItMatters` is advocacy by construction — the agent that just found an
+issue justifies it — and the synthesis agent is tool-free, so it could only
+paraphrase that advocacy. Impact therefore comes from a separate assessor
+stage after synthesis: it reuses the read-only analysis agent type so it can
+verify claims against the checkout, it is prompted to deflate ("negligible"
+is an accepted verdict), and it is fed the claim, evidence, and location but
+*not* the specialist's severity, confidence, or why-it-matters text, so it
+cannot anchor on the inflation it exists to correct. Only actionable
+sections are assessed (recommended, related, discussion-worthy) in chunks of
+8 findings per agent, keeping the stage at roughly one extra agent per
+review. Assessment is presentation-only: a negligible tier never re-routes
+or drops a finding — severity-vs-impact disagreement is surfaced to the
+human reviewer, not resolved silently — and incomplete coverage is disclosed
+in `reviewMeta.impactAssessment` instead of hidden.
+
 ## Agent tool surfaces
 
 Skill `allowed-tools` constrains only the orchestrator (learning recorded

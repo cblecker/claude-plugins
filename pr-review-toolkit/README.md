@@ -110,6 +110,15 @@ checkout. The workflow:
   patches — so findings carry PR head line numbers by construction
 - synthesizes findings into a review board grouped by posting
   recommendation, existing-review overlap, and discussion value
+- runs a **skeptical impact assessment** over the actionable sections
+  (recommended, related-to-existing, discussion-worthy): an assessor
+  independent of the specialist that raised each finding — it never sees the
+  specialist's severity or why-it-matters advocacy — verifies against the
+  checkout what actually happens if the finding ships unaddressed, and
+  attaches `unaddressedImpact` (tier `negligible`/`minor`/`moderate`/
+  `serious` plus a concrete consequence) to each finding. Assessment is
+  presentation-only: a negligible tier informs the reviewer, it never
+  silently drops or re-routes a finding
 
 The workflow does not draft or post comments. Drafting happens in the skill
 conversation after the user selects findings. Posting requires an exact
@@ -126,6 +135,7 @@ Workflow(review-pr.js) -> workflow agent() calls
   selector   -> pr-review-selector          -> read-only git over the pinned range
   specialists-> pr-review-analysis-readonly -> read-only repo/git/MCP inspection
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
+  assessors  -> pr-review-analysis-readonly -> read-only impact verification
 ```
 
 ### Merge signals
@@ -169,7 +179,12 @@ The workflow returns a review board grouped by outcome:
 - `discarded` — weak, duplicate, low-confidence, or non-actionable findings
 
 Each finding preserves the specialist's claim, evidence, reasoning, suggested
-fix, confidence, source lens, and existing-review overlap rationale. The board
+fix, confidence, source lens, and existing-review overlap rationale.
+Actionable findings additionally carry `unaddressedImpact` — a skeptical,
+independently assessed answer to "what actually happens if this ships
+unaddressed", which may honestly contradict the specialist's severity;
+`reviewMeta.impactAssessment` records coverage (`actionable`, `assessed`,
+`incomplete`). The board
 also includes positive observations, PR metadata, and review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
 lenses ran, why, and whether the all-lenses fallback engaged. Thread
@@ -296,6 +311,11 @@ Representative PR validation should cover:
   in `reviewMeta.lensSelection`)
 - PRs with renames, copies, deletes, binary files, and paths with special
   characters
+- a finding whose assessed unaddressed impact contradicts specialist
+  severity (disagreement presented as-is, finding not re-routed)
+- an assessor agent failure (incomplete coverage disclosed via
+  `reviewMeta.impactAssessment`, unassessed findings simply lack the impact
+  line)
 
 For each run, verify that PR metadata and review-thread context come from MCP
 tools, findings carry PR head line numbers, lens selection is disclosed in

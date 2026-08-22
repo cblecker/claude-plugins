@@ -162,6 +162,10 @@ If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
 could not be collected, so overlap classification is unavailable and
 recommended findings may duplicate existing comments.
 
+If `reviewMeta.impactAssessment.incomplete` is true, warn: impact assessment
+covered only `assessed` of `actionable` actionable findings, so some findings
+show no impact line.
+
 ### 2. Recommended to post (full detail)
 
 For each finding, include:
@@ -170,6 +174,12 @@ For each finding, include:
 - claim
 - evidence
 - why it matters
+- impact if unaddressed: from `unaddressedImpact` — the tier and consequence,
+  e.g. `Impact if unaddressed: minor — <consequence>`. This comes from a
+  skeptical assessor independent of the specialist that raised the finding,
+  so it may honestly contradict the severity or the why-it-matters text —
+  present the disagreement as-is rather than reconciling it. Omit the line
+  when the finding carries no assessment.
 - suggested fix or next step
 - recommendation rationale: one sentence explaining why this finding is
   recommended for posting, synthesized from severity, confidence, and overlap
@@ -203,7 +213,9 @@ using `AskUserQuestion` with contextual options.
 ### When recommended findings exist
 
 Write a brief assessment of the recommended findings and any notable
-overlaps, then offer options:
+overlaps. Name any recommended finding whose unaddressed impact was assessed
+as negligible — those are the natural candidates to deselect. Then offer
+options:
 
 1. "Draft recommended findings" (first option — the recommended action)
 2. "Draft all including overlap endorsements"
