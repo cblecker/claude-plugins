@@ -6,7 +6,7 @@ GitHub MCP server with selected toolsets enabled for repository management, code
 
 ### MCP Server
 
-HTTP-based MCP server connected to `api.githubcopilot.com`. The server is configured with `alwaysLoad: true`, which ensures all GitHub tools are available immediately at session start without waiting for tool-search deferral. The following toolsets are enabled:
+HTTP-based MCP server connected to `api.githubcopilot.com`. Tools are deferred and loaded on demand via tool search, keeping them out of the context window until needed. The following toolsets are enabled:
 
 - `default` — repos, issues, pull requests, commits, files, users
 - `actions` — workflow runs, jobs, artifacts, logs
