@@ -67,9 +67,8 @@ For review body text (non-line findings), show the review body.
 
 Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
 
-After the preview, ask for explicit approval with `AskUserQuestion`. Use the
-`preview` field on each option so the reviewer can attach free-text notes to
-their selection (e.g., specifying exactly what to edit):
+After the preview, ask for explicit approval with `AskUserQuestion`, using
+these options:
 
 1. "Post this review"
 2. "Edit findings" — covers editing drafts, adding, or removing findings
