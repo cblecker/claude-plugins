@@ -1,6 +1,6 @@
 {
   "name": "pr-review-toolkit",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Comprehensive PR review board from a local PR head checkout",
   "author": {
     "name": "cblecker",
