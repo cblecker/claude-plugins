@@ -1,11 +1,12 @@
 {
   "name": "pr-review-toolkit",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Comprehensive PR review board from a local PR head checkout",
   "author": {
     "name": "cblecker",
     "email": "admin@toph.ca"
   },
   "keywords": ["pr-review", "code-review", "workflow", "pull-request"],
-  "dependencies": ["github"]
+  "dependencies": ["github"],
+  "workflows": ["./skills/review-pr/review-pr.js"]
 }
