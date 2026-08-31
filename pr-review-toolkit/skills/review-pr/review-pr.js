@@ -1,6 +1,6 @@
 export const meta = {
-  name: 'review-pr',
-  description: 'Comprehensive PR review board from a local PR head checkout',
+  name: 'review-pr-analysis',
+  description: 'Internal analysis workflow for the review-pr skill (requires pre-computed args: pr, checkoutPath, mergeBase) — use /pr-review-toolkit:review-pr instead',
   phases: [
     { title: 'Collect', detail: 'Collect review threads and select review lenses from the diff' },
     { title: 'Analyze', detail: 'Run specialist review agents against the checkout' },

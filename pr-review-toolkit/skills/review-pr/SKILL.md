@@ -121,7 +121,7 @@ and suggest `git fetch --unshallow origin`.
 
 Invoke the Workflow tool with:
 
-- `name`: `pr-review-toolkit:review-pr`
+- `name`: `pr-review-toolkit:review-pr-analysis`
 - `args`:
   - `pr`: `{ owner, repo, number, title, body, author, state, baseRef,
     headSha }` from the metadata
