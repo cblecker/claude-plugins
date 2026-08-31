@@ -92,7 +92,10 @@ the author's own up-to-date branch.
 
 ### Workflow
 
-The skill launches the bundled workflow with a small `args` payload: the PR
+The bundled script is registered as a plugin workflow (the `workflows` entry
+in `plugin.json`), so the skill launches it by name —
+`pr-review-toolkit:review-pr-analysis` — and Claude Code loads the script
+itself from the installed plugin. The launch carries a small `args` payload: the PR
 metadata subset, the checkout path, and the pinned `merge_base`. No bulk data
 rides `args` — workflow agents gather their own diff context from the
 checkout. The workflow:
@@ -121,12 +124,26 @@ The control flow is:
 skill command (in a PR head checkout)
   |-- resolve PR, verify HEAD == PR head, fetch base, pin merge_base
   v
-Workflow(review-pr.js) -> workflow agent() calls
+Workflow(pr-review-toolkit:review-pr-analysis) -> workflow agent() calls
   collector  -> pr-review-github-collector  -> GitHub MCP reads (threads)
   selector   -> pr-review-selector          -> read-only git over the pinned range
   specialists-> pr-review-analysis-readonly -> read-only repo/git/MCP inspection
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
+
+Name-mode invocation exists for compatibility with Claude Code's Workflow
+hardening: since 2.1.251, a `scriptPath` outside the session's readable set
+(working directory, added directories) is rejected by design — "scriptPath
+must be a script path this tool returned, or a file you can already read" —
+and the plugin cache is outside that set. Registering the script as a named
+plugin workflow lets the CLI load it as trusted plugin content instead. On
+older Claude Code versions without plugin workflows, the skill falls back to
+launching the same file via `scriptPath`, which those versions accept. The
+workflow's registered name is deliberately distinct from the skill's: named
+workflows surface as slash commands under `<plugin>:<workflow-name>`, and a
+workflow named `review-pr` would shadow the skill's
+`/pr-review-toolkit:review-pr` entry, dispatching bare workflow invocations
+without the skill's setup steps.
 
 ### Merge signals
 

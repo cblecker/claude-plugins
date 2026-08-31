@@ -121,12 +121,18 @@ and suggest `git fetch --unshallow origin`.
 
 Invoke the Workflow tool with:
 
-- `scriptPath`: `${CLAUDE_SKILL_DIR}/review-pr.js`
+- `name`: `pr-review-toolkit:review-pr-analysis`
 - `args`:
   - `pr`: `{ owner, repo, number, title, body, author, state, baseRef,
     headSha }` from the metadata
   - `checkoutPath`: the Environment Checkout root
   - `mergeBase`: the pinned `merge_base`
+
+If the tool reports that workflow name is not found (older Claude Code
+versions do not register plugin workflows), invoke it again with
+`scriptPath`: `${CLAUDE_SKILL_DIR}/review-pr.js` and the same `args`. If
+that also fails, stop with an honest error quoting both failures and
+suggest updating Claude Code.
 
 No bulk data rides `args` — workflow agents gather their own diff context
 from the checkout, and the workflow returns grouped findings with review
