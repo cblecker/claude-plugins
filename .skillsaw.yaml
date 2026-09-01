@@ -1,4 +1,26 @@
-version: "0.15.0"
+version: "0.19.0"
+
+rules:
+  security-dynamic-context:
+    enabled: auto
+    # Deliberate read-only preflight commands that skills inject at invocation
+    # via !`command`. The rule matches exactly: when a skill's command text
+    # changes, update the entry here too.
+    allowlist:
+      # pr-review-toolkit/skills/review-pr/SKILL.md
+      - "git rev-parse HEAD"
+      - "git rev-parse --show-toplevel"
+      - "git rev-parse --abbrev-ref HEAD"
+      - "git remote get-url origin | cut -d@ -f2-"
+      - "git config --get-regexp '^branch\\.'"
+      - "git status --porcelain"
+      # pr-review-toolkit/skills/address-pr-feedback/SKILL.md
+      - "git branch --show-current"
+      - |-
+        bash -c 'out=$(git ls-remote --symref origin HEAD 2>&1); printf "%s\nexit_status:%s\n" "$out" $?'
+      - "git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo none"
+      # github/skills/triage-prs/SKILL.md
+      - "git remote get-url upstream 2>/dev/null || git remote get-url origin 2>/dev/null || echo __NO_REMOTE__"
 
 exclude:
   - "gws/skills/**"

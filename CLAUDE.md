@@ -9,9 +9,12 @@ Personal Claude Code plugin marketplace
 ├── .claude-plugin/
 │   └── marketplace.json      # Marketplace manifest (lists all plugins)
 ├── git/                       # Custom plugin: git workflows & safety
-├── github/                    # MCP wrapper: GitHub tools
-├── gws/                       # Custom plugin: Google Workspace CLI skills
+├── github/                    # MCP wrapper: GitHub tools, PR triage skill
+├── gws/                       # Vendored upstream skills: Google Workspace CLI
+├── plan-review/               # Custom plugin: plan-file pre-flight review
 ├── pr-review-toolkit/         # Custom plugin: PR review workflow
+├── rh-dataverse/              # MCP wrapper: Red Hat Dataverse, Rover people skill
+├── sandbox-ssh-fix/           # Custom plugin: macOS sandbox git-over-SSH workaround
 └── CLAUDE.md
 ```
 
@@ -54,6 +57,10 @@ structure.
   changes now warrant a higher semver level (e.g., patch already bumped but a new
   skill was added — upgrade to minor)
 - Use plugin-dev skills: `/plugin-dev:create-plugin`, `/plugin-dev:skill-reviewer`, `/plugin-dev:plugin-validator`
+- `.skillsaw.yaml` pins `version` to the skillsaw release the lint workflows run. Rules newer
+  than that version are silently skipped, so when Dependabot bumps the `stbenjam/skillsaw`
+  actions, bump `version` to match and re-run `uvx skillsaw --strict`. Deliberate `` !`command` ``
+  preflight lines in skills must be added verbatim to the `security-dynamic-context` allowlist
 - CodeRabbit auto-review is disabled (`reviews.auto_review.enabled: false` in
   `.coderabbit.yaml`). Reviews are rate-limited, so request one manually with an
   `@coderabbitai review` comment only when the branch is ready — not after every push
