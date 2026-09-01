@@ -99,6 +99,11 @@ Test the script standalone in any git repository:
 bash /path/to/git/scripts/git-instructions.sh
 ```
 
+## Design Notes
+
+Detection internals, style rules, and the upstream-alignment history live in
+[docs/DESIGN_NOTES.md](./docs/DESIGN_NOTES.md).
+
 ## License
 
-MIT
+Apache License 2.0. See [LICENSE](../LICENSE) for details.

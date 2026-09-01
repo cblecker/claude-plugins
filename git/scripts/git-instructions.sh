@@ -66,20 +66,43 @@ detect_conventions() {
 }
 
 ###############################################################################
+# Helper: owner segment of a remote URL
+###############################################################################
+# Handles https://, ssh:// (with or without a port), git://, scp-style
+# git@host:owner/repo, and local paths (absolute, ../relative, or a bare
+# owner/repo), with or without a .git suffix or a trailing slash. Prints the
+# owner, or nothing when none can be extracted or it contains characters
+# outside [A-Za-z0-9._-]. Always exits 0 so callers can assign under set -e.
+owner_from_url() {
+  local url owner
+
+  url="${1%/}"
+  url="${url%.git}"
+
+  # The owner is the path segment before the repository name, so the URL
+  # needs at least one slash. Without one there is no owner to extract.
+  if [[ "$url" != */* ]]; then
+    return 0
+  fi
+
+  url="${url%/*}"
+  owner="${url##*[:/]}"
+
+  if [[ "$owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "$owner"
+  fi
+  return 0
+}
+
+###############################################################################
 # Detection: Fork setup
 ###############################################################################
 detect_fork_owner() {
   local origin_url owner
   origin_url=$(git remote get-url origin 2>/dev/null || true)
+  owner=$(owner_from_url "$origin_url")
 
-  if [ -z "$origin_url" ]; then
-    echo "your-username"
-    return
-  fi
-
-  owner=$(echo "$origin_url" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
-
-  if [ -z "$owner" ] || ! [[ "$owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  if [ -z "$owner" ]; then
     echo "your-username"
     return
   fi
@@ -90,22 +113,9 @@ detect_fork_owner() {
 detect_fork() {
   local upstream_url upstream_owner
   upstream_url=$(git remote get-url upstream 2>/dev/null || true)
-
-  if [ -z "$upstream_url" ]; then
-    echo "no"
-    return
-  fi
-
-  # Extract owner from URL (handles git@ and https:// formats)
-  upstream_owner=$(echo "$upstream_url" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#')
+  upstream_owner=$(owner_from_url "$upstream_url")
 
   if [ -z "$upstream_owner" ]; then
-    echo "no"
-    return
-  fi
-
-  # Validate owner contains only safe characters
-  if ! [[ "$upstream_owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "no"
     return
   fi
@@ -126,11 +136,9 @@ detect_kubernetes() {
         continue
       fi
 
-      # Handles https://, ssh://, git://, scp-style git@host:owner/repo, and
-      # local paths, with or without a .git suffix or a trailing slash
       # tr rather than ${owner,,}: macOS system bash is 3.2, and a bad
       # substitution under set -e would abort the hook before it emits anything
-      owner=$(echo "${url%/}" | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$#\1#' | tr '[:upper:]' '[:lower:]')
+      owner=$(owner_from_url "$url" | tr '[:upper:]' '[:lower:]')
 
       # kubernetes, kubernetes-sigs, kubernetes-csi, kubernetes-client, etc.
       if [[ "$owner" =~ ^kubernetes(-[a-z0-9._-]+)?$ ]]; then
