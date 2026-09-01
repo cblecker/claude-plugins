@@ -2,7 +2,8 @@
 name: rover-people
 description: >-
   Look up Red Hat employees by name or email, find managers and direct reports,
-  and query org charts using the rh-dataverse MCP pipeline.
+  and query org charts using the rh-dataverse MCP pipeline. Use when the user
+  asks about a Red Hat employee, their manager, their reports, or an org chart.
 when_to_use: >-
   "look up someone in rover", "find a Red Hat employee", "who is [person]'s
   manager", "who reports to [person]", "show org chart for [person]"
