@@ -102,10 +102,14 @@ on any of them, not just the first. Earlier versions ran a sed regex per
 detector; the fork detectors did not strip a trailing slash and none of them
 matched a bare relative path.
 
-Output for non-Kubernetes repositories is byte-identical to the pre-Kubernetes
-script, forks included: the blank line separating the fork and Kubernetes
-sections is prepended to `KUBERNETES_SECTION` when a fork is detected rather than
-appended to `FORK_SECTION`.
+When the Kubernetes section was added, output for non-Kubernetes repositories
+stayed byte-identical to the previous script, forks included: the blank line
+separating the fork and Kubernetes sections is prepended to `KUBERNETES_SECTION`
+when a fork is detected rather than appended to `FORK_SECTION`. The later
+`owner_from_url` change is not output-neutral for every remote: URL forms the
+old regex already recognized produce unchanged output, while trailing-slash and
+bare `owner/repo` remotes that it missed now correctly yield fork or Kubernetes
+sections.
 
 The existing "never add Signed-off-by" rule already covers Kubernetes' DCO
 requirement, so it stays unconditional.
