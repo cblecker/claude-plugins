@@ -236,7 +236,7 @@ URL, branch config, dirty status — is injected by skill preprocessing
 (`` !`command` `` substitution), not model-issued Bash. The skill's
 `allowed-tools` frontmatter permits the read-only git commands the flow
 itself runs — `git rev-parse`, `git merge-base`, `git rev-list`,
-`git diff` (line-anchor validity) — plus `git fetch origin` for the single
+`git --literal-pathspecs diff` (line-anchor validity) — plus `git fetch origin` for the single
 base-branch fetch, and also pre-approves the injected preflight commands'
 patterns (`git status`, `git config --get-regexp`,
 `git remote get-url origin`, `cut`) as deliberate belt and braces. The
@@ -254,7 +254,7 @@ agents get their tool surface from their own bundled agent definitions:
   generated Python, `jq`, `gh`, or other ad-hoc parsing scripts.
 - **pr-review-selector** — `Bash`, `Read`, `Grep`, with an
   instruction-level read-only git contract: `diff`/`log`/`show` over the
-  pinned range only, literal `--` before paths.
+  pinned range only, `--literal-pathspecs` and a literal `--` before paths.
 - **pr-review-analysis-readonly** (specialists) — a denylist agent so
   read-only MCP tools (language servers such as gopls) stay usable. Bash is
   allowed under the same instruction-level read-only git contract; every

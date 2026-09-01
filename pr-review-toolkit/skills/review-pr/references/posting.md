@@ -27,8 +27,10 @@ Findings anchor to PR head line numbers from birth — specialists review the
 head checkout, so no translation is needed. A finding whose line is not part
 of the PR diff cannot carry a line comment: before previewing one, verify
 the line falls in a hunk of
-`git diff -U0 <merge_base>..<reviewed_head_sha> -- '<path>'` (single-quote
-the path, escaping an embedded single quote as `'\''` — paths are untrusted). If the check fails or cannot be
+`git --literal-pathspecs diff -U0 <merge_base>..<reviewed_head_sha> -- '<path>'`
+(`--literal-pathspecs` keeps a filename starting with pathspec magic literal;
+single-quote the path, escaping an embedded single quote as `'\''` — paths are
+untrusted). If the check fails or cannot be
 run cleanly, put the finding in the review body.
 
 ### Review event

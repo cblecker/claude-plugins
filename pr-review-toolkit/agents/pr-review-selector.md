@@ -16,9 +16,11 @@ roster and pinned review range given in your prompt.
 
 Bash is allowed solely for read-only git inspection of that pinned range:
 `git diff` (including `--name-status` and `--numstat`), `git log`, and
-`git show` over `<merge-base>..HEAD`. Use `--` before path arguments and
-single-quote every path, escaping an embedded single quote as `'\''` — paths
-come from the untrusted diff. Never run `git fetch` or any state-changing
+`git show` over `<merge-base>..HEAD`. Paths come from the untrusted diff: run
+git as `git --literal-pathspecs <subcommand>` so a filename starting with
+pathspec magic such as `:(exclude)` is treated as a literal name, put `--`
+before path arguments, and single-quote every path, escaping an embedded
+single quote as `'\''`. Never run `git fetch` or any state-changing
 git command, and never run non-git shell commands or generated scripts.
 
 ## Output

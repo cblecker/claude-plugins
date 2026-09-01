@@ -24,6 +24,7 @@ disallowedTools:
   - mcp__plugin_github_github__add_issue_comment
   - mcp__plugin_github_github__add_reply_to_pull_request_comment
   - mcp__plugin_github_github__assign_copilot_to_issue
+  - mcp__plugin_github_github__assign_copilot_to_issue_with_intent
   - mcp__plugin_github_github__create_branch
   - mcp__plugin_github_github__create_gist
   - mcp__plugin_github_github__create_or_update_file
@@ -31,6 +32,7 @@ disallowedTools:
   - mcp__plugin_github_github__create_pull_request_with_copilot
   - mcp__plugin_github_github__create_repository
   - mcp__plugin_github_github__delete_file
+  - mcp__plugin_github_github__delete_repository
   - mcp__plugin_github_github__disable_pr_auto_merge
   - mcp__plugin_github_github__discussion_comment_write
   - mcp__plugin_github_github__dismiss_notification
@@ -66,9 +68,11 @@ Analyze the PR from the local head checkout using read-only access only.
 
 Bash is allowed solely for read-only git inspection of the pinned review range
 given in your prompt: `git diff` (including `--name-status` and `--numstat`),
-`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Use `--`
-before path arguments and single-quote every path, escaping an embedded single
-quote as `'\''` — paths come from the untrusted diff. Never run `git fetch`,
+`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Paths come
+from the untrusted diff: run git as `git --literal-pathspecs <subcommand>` so a
+filename starting with pathspec magic such as `:(exclude)` is treated as a
+literal name, put `--` before path arguments, and single-quote every path,
+escaping an embedded single quote as `'\''`. Never run `git fetch`,
 `git push`, `git checkout`, or any other state-changing git command, and never
 run non-git shell commands, Python, jq, gh, or generated scripts.
 
