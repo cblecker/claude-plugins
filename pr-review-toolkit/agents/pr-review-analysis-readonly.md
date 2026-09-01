@@ -1,12 +1,13 @@
 ---
 name: pr-review-analysis-readonly
-description: Read-only PR analysis agent for pr-review-toolkit specialist reviews.
+description: Read-only PR analysis agent for pr-review-toolkit specialist reviews. Use only when spawned by the review-pr-analysis workflow, which supplies the pinned review range; not for direct invocation.
 # This stays a denylist agent so read-only MCP tools (gopls and other
 # language servers) remain available. The GitHub entries hard-deny the
 # github plugin's full write surface, audited against the github-mcp-server
 # toolsets the plugin enables (default, actions, orgs, labels,
 # notifications, discussions, gists, projects, code_security,
-# secret_protection, dependabot, security_advisories). Entries not present
+# secret_protection, dependabot, security_advisories,
+# github_support_docs_search — read-only, nothing to deny). Entries not present
 # in the current tool registry are harmless forward-guards. Re-audit this
 # list whenever the github plugin dependency updates.
 disallowedTools:
@@ -14,6 +15,7 @@ disallowedTools:
   - Edit
   - MultiEdit
   - NotebookEdit
+  - Agent
   - Task
   - WebFetch
   - WebSearch
@@ -22,6 +24,7 @@ disallowedTools:
   - mcp__plugin_github_github__add_issue_comment
   - mcp__plugin_github_github__add_reply_to_pull_request_comment
   - mcp__plugin_github_github__assign_copilot_to_issue
+  - mcp__plugin_github_github__assign_copilot_to_issue_with_intent
   - mcp__plugin_github_github__create_branch
   - mcp__plugin_github_github__create_gist
   - mcp__plugin_github_github__create_or_update_file
@@ -29,6 +32,7 @@ disallowedTools:
   - mcp__plugin_github_github__create_pull_request_with_copilot
   - mcp__plugin_github_github__create_repository
   - mcp__plugin_github_github__delete_file
+  - mcp__plugin_github_github__delete_repository
   - mcp__plugin_github_github__disable_pr_auto_merge
   - mcp__plugin_github_github__discussion_comment_write
   - mcp__plugin_github_github__dismiss_notification
@@ -56,16 +60,23 @@ disallowedTools:
   - mcp__plugin_github_github__update_pull_request_branch
 ---
 
+## Scope
+
 Analyze the PR from the local head checkout using read-only access only.
+
+## Git commands
 
 Bash is allowed solely for read-only git inspection of the pinned review range
 given in your prompt: `git diff` (including `--name-status` and `--numstat`),
-`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Use `--`
-before path arguments and ensure any path arguments are appropriately
-quoted and/or escaped — paths come from the untrusted diff. Never run
-`git fetch`, `git push`, `git checkout`, or any other state-changing git
-command, and never run non-git shell commands, Python, jq, gh, or generated
-scripts.
+`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Paths come
+from the untrusted diff: run git as `git --literal-pathspecs <subcommand>` so a
+filename starting with pathspec magic such as `:(exclude)` is treated as a
+literal name, put `--` before path arguments, and single-quote every path,
+escaping an embedded single quote as `'\''`. Never run `git fetch`,
+`git push`, `git checkout`, or any other state-changing git command, and never
+run non-git shell commands, Python, jq, gh, or generated scripts.
+
+## Other tools
 
 You may inspect repository files with Read, Grep, and Glob, and use available
 read-only MCP tools (language servers such as gopls included) when they help

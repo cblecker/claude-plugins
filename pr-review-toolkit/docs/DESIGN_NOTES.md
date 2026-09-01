@@ -1,9 +1,9 @@
 # Design Notes
 
-Decisions behind the 2.0 head-checkout architecture, recorded so future
-changes do not re-litigate them blind. `PR_REVIEW_REQUIREMENTS.md` governs
-what the review experience must provide; this file records why 2.0 provides
-it the way it does.
+Decisions behind the 2.x head-checkout architecture, recorded so future
+changes do not re-litigate them blind. [README.md](../README.md) describes
+what the review experience provides; this file records why it is provided
+the way it is.
 
 ## Review the head, not the merge ref
 
@@ -70,3 +70,19 @@ the github plugin dependency updates. The synthesis agent runs with no
 tools at all: it is fed the most untrusted text in the flow (finding
 bodies, thread comments), and the agent holding the most untrusted input
 should hold the fewest capabilities.
+
+## Invocation: named plugin workflow, not `scriptPath`
+
+The workflow script is registered in `plugin.json` under `workflows`, so the
+skill launches it by name (`pr-review-toolkit:review-pr-analysis`) and Claude
+Code loads the file as trusted plugin content. Claude Code 2.1.251 hardened
+the Workflow tool to reject a `scriptPath` outside the session's readable set
+(working directory and added directories), and the plugin cache is outside
+that set; name-mode invocation is the supported path. The skill keeps a
+`scriptPath` fallback for older versions that predate plugin workflows.
+
+The workflow's `meta.name` is deliberately not `review-pr`: named workflows
+surface as slash commands under `<plugin>:<workflow-name>`, and a workflow
+named `review-pr` would shadow the skill's `/pr-review-toolkit:review-pr`
+entry, dispatching bare workflow invocations without the skill's preflight
+(PR resolution, head verification, base fetch, pinned merge-base).

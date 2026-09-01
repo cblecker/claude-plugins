@@ -4,9 +4,7 @@ description: >-
   Systematically collect, analyze, score, and address pull request review
   feedback, then post reply comments
 disable-model-invocation: true
-user-invocable: true
-arguments: [--interactive]
-argument-hint: [--interactive]
+argument-hint: '[--interactive]'
 ---
 
 # Address PR Feedback

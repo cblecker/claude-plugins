@@ -1,6 +1,6 @@
 ---
 name: pr-review-github-collector
-description: GitHub-only collector for pr-review-toolkit workflow data gathering.
+description: GitHub-only collector for pr-review-toolkit workflow data gathering. Use only when spawned by the review-pr-analysis workflow to read review threads; not for direct invocation.
 tools:
   - mcp__plugin_github_github__pull_request_read
 ---

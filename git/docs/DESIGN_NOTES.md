@@ -1,4 +1,7 @@
-# Git Plugin
+# Git Plugin Design Notes
+
+Maintainer documentation for the `git` plugin. User-facing documentation is in
+[README.md](../README.md).
 
 ## Architecture
 
@@ -89,22 +92,27 @@ Detection matches the remote owner rather than the repository name so it covers
 `upstream` remote. A false positive only makes Claude more conservative (omit a
 trailer, add a disclosure line), so the prefix match is deliberately loose.
 
-Owner extraction handles `https://`, `ssh://` (with or without a port), `git://`,
-scp-style `git@host:owner/repo`, and absolute or `../`-relative local paths, with
-or without a `.git` suffix or trailing slash. It reads `git remote get-url --all`,
-so a remote configured with several URLs is matched on any of them, not just the
-first.
+Owner extraction is one `owner_from_url` helper shared by the fork, fork-owner,
+and Kubernetes detectors. It handles `https://`, `ssh://` (with or without a
+port), `git://`, scp-style `git@host:owner/repo`, and local paths (absolute,
+`../`-relative, or a bare `owner/repo`), with or without a `.git` suffix or
+trailing slash, using parameter expansion only. It yields nothing for URLs with
+no owner segment (`https://host/repo`, `git@host:repo`, `../repo`): the
+authority of a `scheme://` URL is dropped before the path is inspected, and `.`
+/ `..` are rejected as owners. The Kubernetes detector reads
+`git remote get-url --all`, so a remote configured with several URLs is matched
+on any of them, not just the first. Earlier versions ran a sed regex per
+detector; the fork detectors did not strip a trailing slash and none of them
+matched a bare relative path.
 
-Two known gaps, both from the shared owner regex requiring a separator *before*
-the owner: a bare relative path (`kubernetes/repo`) is not matched, and
-`detect_fork` / `detect_fork_owner` run the same regex against a single `get-url`
-without stripping a trailing slash, so a trailing-slash `upstream` URL still reads
-as no fork. Worth fixing together the next time this file changes.
-
-Output for non-Kubernetes repositories is byte-identical to the pre-Kubernetes
-script, forks included: the blank line separating the fork and Kubernetes
-sections is prepended to `KUBERNETES_SECTION` when a fork is detected rather than
-appended to `FORK_SECTION`.
+When the Kubernetes section was added, output for non-Kubernetes repositories
+stayed byte-identical to the previous script, forks included: the blank line
+separating the fork and Kubernetes sections is prepended to `KUBERNETES_SECTION`
+when a fork is detected rather than appended to `FORK_SECTION`. The later
+`owner_from_url` change is not output-neutral for every remote: URL forms the
+old regex already recognized produce unchanged output, while trailing-slash and
+bare `owner/repo` remotes that it missed now correctly yield fork or Kubernetes
+sections.
 
 The existing "never add Signed-off-by" rule already covers Kubernetes' DCO
 requirement, so it stays unconditional.

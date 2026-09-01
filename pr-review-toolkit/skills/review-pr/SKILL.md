@@ -18,6 +18,7 @@ allowed-tools:
   - Bash(git merge-base *)
   - Bash(git rev-list *)
   - Bash(git diff *)
+  - Bash(git --literal-pathspecs diff *)
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__search_pull_requests
   - mcp__plugin_github_github__list_pull_requests

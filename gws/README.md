@@ -1,6 +1,6 @@
 # gws - Google Workspace CLI Plugin
 
-Claude Code plugin providing Google Workspace CLI (`gws`) skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, and Meet.
+Claude Code plugin providing Google Workspace CLI (`gws`) skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, Meet, and Tasks.
 
 ## Prerequisites
 
@@ -8,6 +8,10 @@ Claude Code plugin providing Google Workspace CLI (`gws`) skills for Gmail, Cale
 - **OAuth configured**: Run `gws auth login` and grant scopes for desired services
 
 ## Included Skills
+
+### Shared Reference
+
+- `gws-shared` - Authentication, global flags, and output conventions that every other skill links to
 
 ### Service Skills
 
@@ -20,12 +24,13 @@ Core API access for each Google Workspace service:
 - `gws-sheets` - Spreadsheet operations
 - `gws-slides` - Presentation operations
 - `gws-meet` - Meeting space management
+- `gws-tasks` - Task list and task management
 
 ### Helper Skills
 
 Streamlined commands for common operations:
 
-- `gws-gmail-send`, `gws-gmail-triage`, `gws-gmail-reply`, `gws-gmail-reply-all`, `gws-gmail-forward`, `gws-gmail-watch`
+- `gws-gmail-send`, `gws-gmail-read`, `gws-gmail-triage`, `gws-gmail-reply`, `gws-gmail-reply-all`, `gws-gmail-forward`, `gws-gmail-watch`
 - `gws-calendar-insert`, `gws-calendar-agenda`
 - `gws-drive-upload`
 - `gws-sheets-append`, `gws-sheets-read`
@@ -47,8 +52,8 @@ Multi-step productivity workflows:
 This plugin carries a curated subset of skills from the upstream
 [gws CLI repository](https://github.com/googleworkspace/cli). The upstream
 generates skills via `gws generate-skills` and publishes them under `skills/`
-in the repo. We carry 28 of ~74 available skills (core services, helpers,
-and workflows — no personas or recipes).
+in the repo. We carry 28 of the 44 `gws-*` skills (core services, helpers,
+and workflows); the persona and recipe skills are not carried.
 
 ### Process
 

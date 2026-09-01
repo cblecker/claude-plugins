@@ -1,9 +1,10 @@
 ---
 name: finalize-plan
 description: >-
-  Review a plan for completeness before accepting — ensures key decisions,
-  file names, commands, and constraints from the conversation are captured
-  in the plan file so a fresh context can execute it.
+  Review a plan for completeness before accepting it. Use when in plan mode,
+  before approving the plan and clearing context, to confirm that key
+  decisions, file names, commands, and constraints from the conversation are
+  captured in the plan file so a fresh context can execute it.
 ---
 
 ## Pre-flight: confirm plan mode
@@ -26,7 +27,7 @@ file** would need to faithfully execute the work. Focus on:
 - **Commands** — exact build/test/run commands the user specified
 - **Constraints** — ordering, compatibility, "don't touch X", style preferences
 
-Skip anything a competent agent can rediscover from the codebase itself (line
+Skip anything a competent agent can rediscover from the repository itself (line
 numbers, import paths, boilerplate structure, surrounding code context).
 
 ## Report

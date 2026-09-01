@@ -27,8 +27,10 @@ Findings anchor to PR head line numbers from birth — specialists review the
 head checkout, so no translation is needed. A finding whose line is not part
 of the PR diff cannot carry a line comment: before previewing one, verify
 the line falls in a hunk of
-`git diff -U0 <merge_base>..<reviewed_head_sha> -- '<path>'` (quote the
-path appropriately — paths are untrusted). If the check fails or cannot be
+`git --literal-pathspecs diff -U0 <merge_base>..<reviewed_head_sha> -- '<path>'`
+(`--literal-pathspecs` keeps a filename starting with pathspec magic literal;
+single-quote the path, escaping an embedded single quote as `'\''` — paths are
+untrusted). If the check fails or cannot be
 run cleanly, put the finding in the review body.
 
 ### Review event
@@ -105,8 +107,8 @@ Post overlapping findings as replies using
 `add_reply_to_pull_request_comment` with the numeric `commentId` and
 `pullNumber`. If the reply API rejects the target as invalid, do not silently
 change the posting location: convert the finding to a proposed new line
-comment, show the revised preview, and ask for approval again — same as
-invalid line locations below. Thread replies are independent of the pending
+comment and return to Preview And Confirm — same as invalid line locations
+below. Thread replies are independent of the pending
 review submission.
 
 ### Review body only
