@@ -159,19 +159,21 @@ still reviews fine — integration breakage is CI's job. See
 | Agent | When it runs | What it does |
 |-------|-------------|--------------|
 | code-reviewer | Always | Reviews code for bugs, style, and guideline adherence |
-| silent-failure-hunter | Changes touch error handling, try/catch, or fallback logic | Identifies silent failures and inadequate error handling |
-| pr-test-analyzer | Functional code that should have corresponding tests | Analyzes test coverage completeness |
-| comment-analyzer | Changes touch docs files, comments, or docstrings | Checks comment accuracy and maintainability |
+| silent-failure-hunter | Changes touch error handling, try/catch, retries, or fallback logic | Identifies silent failures and inadequate error handling |
+| pr-test-analyzer | Functional code changed that should have corresponding tests | Analyzes test coverage completeness |
+| comment-analyzer | Changes touch docs files, or add or modify comments or docstrings | Checks comment accuracy and maintainability |
 | type-design-analyzer | Changes introduce or modify type definitions in typed languages | Evaluates type design and invariant quality |
-| security-reviewer | Changes touch auth, crypto, tokens, credentials, or security-related code | Reviews for security vulnerabilities and unsafe patterns |
-| api-compat-reviewer | Changes touch public APIs, exports, or client-facing interfaces | Checks API compatibility and breaking changes |
-| concurrency-reviewer | Changes touch mutexes, locks, channels, goroutines, or parallel code | Reviews concurrency patterns for races and deadlocks |
+| security-reviewer | Changes touch auth, crypto, tokens, credentials, input handling at trust boundaries, or other security-sensitive code | Reviews for security vulnerabilities and unsafe patterns |
+| api-compat-reviewer | Changes touch public APIs, exports, schemas, or client-facing interfaces | Checks API compatibility and breaking changes |
+| concurrency-reviewer | Changes touch mutexes, locks, channels, goroutines, async, or parallel code | Reviews concurrency patterns for races and deadlocks |
 
 The selector agent picks lenses from the real diff with a liberal posture:
 when in doubt, the lens runs, and general correctness (code-reviewer) always
-runs. Specialist model is inherited from the session — no hardcoded model
-pins (they become silent downgrades as models advance); effort is the only
-dial. All specialists execute in parallel within a single workflow.
+runs. Specialists inherit the session model — no hardcoded model pins for
+review lenses (they become silent downgrades as models advance); effort is
+the only dial. The two mechanical stages are pinned on purpose: the thread
+collector runs on Haiku and the lens selector on Sonnet. All specialists
+execute in parallel within a single workflow.
 
 ## Review Board
 
@@ -197,9 +199,12 @@ classification.
 
 ## Interaction And Posting
 
-After the board is presented, the user can ask to draft recommended findings,
-draft specific finding ids, add a plus-one, skip findings, challenge findings,
-show already-covered findings, or cancel.
+After the board is presented, the skill offers options that depend on the
+board state: draft the recommended findings, draft everything including
+overlap endorsements, adjust the selection, endorse overlap findings, leave
+an approving review, or cancel. Free-form replies (asking about a specific
+finding id, adding a plus-one to an existing thread, challenging a finding)
+are accepted and loop back to updated options.
 
 Drafts are plain conversation text until the user approves a preview. The skill
 previews each line comment, review-body text, and the proposed review event
@@ -255,7 +260,7 @@ agents get their tool surface from their own bundled agent definitions:
   allowed under the same instruction-level read-only git contract; every
   GitHub write tool in the github plugin's toolsets is hard-denied
   (re-audited when the dependency updates), as are file mutation tools,
-  `Task`, and web tools.
+  the `Agent` tool (and its `Task` alias), and web tools.
 - **pr-review-synthesis** — no tools at all. It works from prompt JSON, and
   it is the agent fed the most untrusted text (finding bodies, thread
   comments) — exactly the agent that should hold no capabilities.
@@ -269,6 +274,8 @@ Analysis requires these read capabilities:
 - `search_pull_requests` / `list_pull_requests` to resolve the checkout's PR
 - `pull_request_read` with `get`
 - `pull_request_read` with `get_review_comments`
+- `pull_request_read` with `get_reviews` and `get_comments`
+  (address-pr-feedback only)
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
