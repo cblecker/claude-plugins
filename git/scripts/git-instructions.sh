@@ -71,22 +71,40 @@ detect_conventions() {
 # Handles https://, ssh:// (with or without a port), git://, scp-style
 # git@host:owner/repo, and local paths (absolute, ../relative, or a bare
 # owner/repo), with or without a .git suffix or a trailing slash. Prints the
-# owner, or nothing when none can be extracted or it contains characters
-# outside [A-Za-z0-9._-]. Always exits 0 so callers can assign under set -e.
+# owner, or nothing when the URL has no owner segment (https://host/repo,
+# git@host:repo, ../repo) or the segment contains characters outside
+# [A-Za-z0-9._-]. Always exits 0 so callers can assign under set -e.
 owner_from_url() {
-  local url owner
+  local url path owner
 
   url="${1%/}"
   url="${url%.git}"
 
-  # The owner is the path segment before the repository name, so the URL
+  # For scheme://authority/path URLs the owner lives in the path, so drop
+  # the authority first; otherwise host names would pass as owners
+  if [[ "$url" == *://* ]]; then
+    path="${url#*://}"
+    if [[ "$path" != */* ]]; then
+      return 0
+    fi
+    path="${path#*/}"
+  else
+    path="$url"
+  fi
+
+  # The owner is the path segment before the repository name, so the path
   # needs at least one slash. Without one there is no owner to extract.
-  if [[ "$url" != */* ]]; then
+  if [[ "$path" != */* ]]; then
     return 0
   fi
 
-  url="${url%/*}"
-  owner="${url##*[:/]}"
+  path="${path%/*}"
+  owner="${path##*[:/]}"
+
+  # . and .. are directory components of a relative path, never an owner
+  if [[ "$owner" == "." || "$owner" == ".." ]]; then
+    return 0
+  fi
 
   if [[ "$owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "$owner"

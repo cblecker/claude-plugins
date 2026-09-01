@@ -96,7 +96,10 @@ Owner extraction is one `owner_from_url` helper shared by the fork, fork-owner,
 and Kubernetes detectors. It handles `https://`, `ssh://` (with or without a
 port), `git://`, scp-style `git@host:owner/repo`, and local paths (absolute,
 `../`-relative, or a bare `owner/repo`), with or without a `.git` suffix or
-trailing slash, using parameter expansion only. The Kubernetes detector reads
+trailing slash, using parameter expansion only. It yields nothing for URLs with
+no owner segment (`https://host/repo`, `git@host:repo`, `../repo`): the
+authority of a `scheme://` URL is dropped before the path is inspected, and `.`
+/ `..` are rejected as owners. The Kubernetes detector reads
 `git remote get-url --all`, so a remote configured with several URLs is matched
 on any of them, not just the first. Earlier versions ran a sed regex per
 detector; the fork detectors did not strip a trailing slash and none of them
