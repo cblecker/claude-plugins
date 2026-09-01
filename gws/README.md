@@ -9,6 +9,10 @@ Claude Code plugin providing Google Workspace CLI (`gws`) skills for Gmail, Cale
 
 ## Included Skills
 
+### Shared Reference
+
+- `gws-shared` - Authentication, global flags, and output conventions that every other skill links to
+
 ### Service Skills
 
 Core API access for each Google Workspace service:

@@ -247,7 +247,12 @@ writes anything (objects and the remote-tracking ref).
 ### Workflow Agents
 
 Skill `allowed-tools` constrains only the orchestrator — workflow-spawned
-agents get their tool surface from their own bundled agent definitions:
+agents get their tool surface from their own bundled agent definitions. The
+session's permission mode is what enforces the read-only boundary on agent
+Bash: in auto mode every subagent action goes through the classifier with the
+parent session's rules, Manual mode prompts, and `dontAsk` denies. The
+instruction-level git contracts below are defense in depth on top of that,
+not the enforcement layer.
 
 - **pr-review-github-collector** — allowlist: `pull_request_read` only. No
   shell, no local files, no web, so large MCP responses never lead to

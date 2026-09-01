@@ -107,7 +107,7 @@ owner_from_url() {
   fi
 
   if [[ "$owner" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    echo "$owner"
+    printf '%s\n' "$owner"
   fi
   return 0
 }
