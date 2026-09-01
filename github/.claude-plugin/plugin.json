@@ -1,9 +1,10 @@
 {
   "name": "github",
   "description": "GitHub MCP server with selected toolsets for repository management, code security, discussions, notifications, and more.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": {
-    "name": "GitHub"
+    "name": "cblecker",
+    "email": "admin@toph.ca"
   },
   "homepage": "https://github.com/github/github-mcp-server",
   "keywords": ["github", "mcp", "issues", "pull-requests", "code-security"]
