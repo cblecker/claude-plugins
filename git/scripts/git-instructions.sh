@@ -246,7 +246,7 @@ K8S_PR_SECTION=""
 KUBERNETES_SECTION=""
 
 # shellcheck disable=SC2016  # backticks and <placeholders> are literal output
-COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6). Do NOT add any other trailer.'
+COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6). Do NOT add a Claude-Session trailer.'
 
 COMMIT_EXAMPLE=$(cat <<'EXAMPLE_EOF'
 git commit -m "$(cat <<'COMMIT_EOF'
