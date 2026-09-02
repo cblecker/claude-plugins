@@ -119,10 +119,11 @@ requirement, so it stays unconditional.
 
 ### Host-specific output
 
-The attribution and safety wording is host-neutral: the trailer, the
-session-link rules, and the stash rule no longer name Claude or a Claude
-model, so those instructions can be lifted into another agent's context
-(for example a Codex AGENTS.md) without editing. The output as a whole is
+The attribution and safety wording is host-neutral: the trailer no longer
+names a Claude model, the session-link rules cite `Claude-Session` and
+`claude.ai` only as examples of what not to add, and the stash rule says
+"agent sessions", so those instructions can be lifted into another agent's
+context (for example a Codex AGENTS.md) without editing. The output as a whole is
 still written for Claude Code: it names the `Bash` tool, `TaskCreate` and
 the `Agent` tool, and the GitHub MCP tools, which another host may not
 expose under those names. Parameterizing or gating those references is a
