@@ -157,6 +157,8 @@ Current overrides:
   configuration; a static hook cannot resolve the getter
 - Claude Code attribution line removed from PR body template
 - Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
+- Claude-Session trailer and PR-body session link (the claude.ai link the harness
+  attribution guidance asks for) are never added; only the session owner can open it
 - Signed-off-by safety rule added (AI must never add DCO sign-off)
 - "NEVER commit directly to mainline" safety rule added (upstream has no equivalent)
 - `-u` dropped from the push instruction; the flag errors in the Claude Code

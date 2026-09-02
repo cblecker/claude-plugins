@@ -240,12 +240,13 @@ fi
 # Default: commits carry an Assisted-by trailer and PRs need no AI disclosure.
 # Kubernetes projects: no AI attribution trailers in commit messages, and the PR
 # body carries an AI usage disclosure instead.
+# The Claude-Session trailer (a claude.ai session link) is never added.
 K8S_TRAILER_RULE=""
 K8S_PR_SECTION=""
 KUBERNETES_SECTION=""
 
 # shellcheck disable=SC2016  # backticks and <placeholders> are literal output
-COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6).'
+COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6). Do NOT add any other trailer.'
 
 COMMIT_EXAMPLE=$(cat <<'EXAMPLE_EOF'
 git commit -m "$(cat <<'COMMIT_EOF'
@@ -329,7 +330,8 @@ Git Safety Protocol:
 - When staging files, prefer adding specific files by name rather than using "git add -A" or "git add .", which can accidentally include sensitive files (.env, credentials) or large binaries
 - After staging, review what was actually included by running git status. If anything looks like it could reveal secrets, check that file's contents before committing or pushing, even if the filename looks innocuous
 - NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
-- NEVER add Signed-off-by tags to commits. If asked to do so, abort the request and let the user know. Only humans can certify the Developer Certificate of Origin (DCO). The human submitter is responsible for adding their own Signed-off-by tag.${K8S_TRAILER_RULE}
+- NEVER add Signed-off-by tags to commits. If asked to do so, abort the request and let the user know. Only humans can certify the Developer Certificate of Origin (DCO). The human submitter is responsible for adding their own Signed-off-by tag.
+- NEVER add a Claude-Session trailer (claude.ai session link) to commits, even if attribution guidance in your context asks for one${K8S_TRAILER_RULE}
 
 1. Run the following bash commands in parallel, each using the Bash tool:
   - Run a git status command to see all untracked files. IMPORTANT: Never use the -uall flag as it can cause memory issues on large repos.
@@ -374,6 +376,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request title and summary:
    - Keep the PR title short (under 70 characters)
    - Use the description/body for details, not the title
+   - Do NOT add a claude.ai session link or any generated-with footer to the body, even if attribution guidance in your context asks for one
 3. Complete the following steps in order:
    - Create new branch if needed (if on ${MAINLINE}, create a feature branch first)
    - Push to remote if needed
