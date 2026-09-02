@@ -119,9 +119,16 @@ requirement, so it stays unconditional.
 
 ### Host-specific output
 
-The instruction text is host-neutral so the same output can be reused under
-other agents (for example Codex via an AGENTS.md or SessionStart hook). Two
-parts are Claude Code only and are gated on the environment rather than
+The attribution and safety wording is host-neutral: the trailer, the
+session-link rules, and the stash rule no longer name Claude or a Claude
+model, so those instructions can be lifted into another agent's context
+(for example a Codex AGENTS.md) without editing. The output as a whole is
+still written for Claude Code: it names the `Bash` tool, `TaskCreate` and
+the `Agent` tool, and the GitHub MCP tools, which another host may not
+expose under those names. Parameterizing or gating those references is a
+separate change.
+
+Two Claude Code only parts are gated on the environment rather than
 removed:
 
 - The duplicate-instructions warning (the `includeGitInstructions` prerequisite)
@@ -130,9 +137,6 @@ removed:
 - The git config override block writes to `CLAUDE_ENV_FILE` and is skipped when
   the variable is unset, so under other hosts `branch.autosetupmerge` stays at
   the user's default
-
-Tool names in the text (`Bash` tool, `TaskCreate`, the GitHub MCP tools) are
-still Claude Code's; they are left as-is for now
 
 ### Git config overrides via environment
 
