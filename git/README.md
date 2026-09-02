@@ -34,7 +34,7 @@ Then injects tailored git instructions covering:
 - **Git Safety Protocol** -- never force push mainline, never skip hooks, prefer
   specific file staging, prefer new commits over amending, no bare `git stash`
   (the stash stack is shared across worktrees and sessions), review staged files
-  for secrets before committing, no `Claude-Session` trailer or session link in
+  for secrets before committing, no session-link trailer or session link in
   PR bodies
 - **Commit workflow** -- review changes, stage specific files, HEREDOC format,
   conventional commits format when detected

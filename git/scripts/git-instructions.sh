@@ -240,19 +240,19 @@ fi
 # Default: commits carry an Assisted-by trailer and PRs need no AI disclosure.
 # Kubernetes projects: no AI attribution trailers in commit messages, and the PR
 # body carries an AI usage disclosure instead.
-# The Claude-Session trailer (a claude.ai session link) is never added.
+# A session-link trailer (e.g. Claude-Session) is never added.
 K8S_TRAILER_RULE=""
 K8S_PR_SECTION=""
 KUBERNETES_SECTION=""
 
 # shellcheck disable=SC2016  # backticks and <placeholders> are literal output
-COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the Assisted-by trailer, in the format `Assisted-by: Claude:<your-model-id>` where you substitute your actual model identifier (e.g. claude-opus-4-6). Do NOT add a Claude-Session trailer.'
+COMMIT_TRAILER_STEP='   - Create the commit with a message ending with the trailer `Assisted-by: LLM`. Do NOT add a session-link trailer.'
 
 COMMIT_EXAMPLE=$(cat <<'EXAMPLE_EOF'
 git commit -m "$(cat <<'COMMIT_EOF'
    Commit message here.
 
-   Assisted-by: Claude:<model-id>
+   Assisted-by: LLM
    COMMIT_EOF
    )"
 EXAMPLE_EOF
@@ -304,15 +304,20 @@ K8S_SECTION_EOF
   fi
 fi
 
+# Only Claude Code has built-in git instructions and the includeGitInstructions
+# setting, so the warning is emitted only under Claude Code (CLAUDECODE=1).
+DUPLICATE_WARNING=""
+if [[ "${CLAUDECODE:-}" == "1" ]]; then
+  DUPLICATE_WARNING='IMPORTANT: If you can see duplicate git instructions in your context (e.g. both these instructions and built-in "Committing changes with git" / "Creating pull requests" sections in the Bash tool description), warn the user that includeGitInstructions should be set to false in their Claude Code settings to avoid conflicts with this plugin.'$'\n\n'
+fi
+
 # Output instructions
 cat <<EOF
 # Git Instructions
 
 Mainline branch for this repository: ${MAINLINE}
 
-IMPORTANT: If you can see duplicate git instructions in your context (e.g. both these instructions and built-in "Committing changes with git" / "Creating pull requests" sections in the Bash tool description), warn the user that includeGitInstructions should be set to false in their Claude Code settings to avoid conflicts with this plugin.
-
-# Committing changes with git
+${DUPLICATE_WARNING}# Committing changes with git
 
 Only create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:
 
@@ -322,7 +327,7 @@ Git Safety Protocol:
 - NEVER update the git config
 - NEVER run destructive git commands (push --force, reset --hard, checkout ., restore ., clean -f, branch -D) unless the user explicitly requests these actions. Taking unauthorized destructive actions is unhelpful and can result in lost work, so it's best to ONLY run these commands when given direct instructions
 - Before any command that could discard uncommitted work, run git status first and commit anything you find
-- NEVER use bare git stash or git stash pop. The stash stack is shared with the main checkout, every worktree, and other concurrent Claude sessions, so a pop can restore or destroy another session's work. Prefer a temporary WIP commit to set work aside. If you must stash, use git stash push -u -m "<unique-tag>", capture your entry's SHA with git stash list --format='%H %gs', restore with git stash apply <sha> (not pop), and drop that specific entry afterwards
+- NEVER use bare git stash or git stash pop. The stash stack is shared with the main checkout, every worktree, and other concurrent agent sessions, so a pop can restore or destroy another session's work. Prefer a temporary WIP commit to set work aside. If you must stash, use git stash push -u -m "<unique-tag>", capture your entry's SHA with git stash list --format='%H %gs', restore with git stash apply <sha> (not pop), and drop that specific entry afterwards
 - NEVER skip hooks (--no-verify, --no-gpg-sign, -c commit.gpgsign=false) unless the user explicitly requests it. If a hook fails, investigate and fix the underlying issue
 - NEVER run force push to ${MAINLINE}, warn the user if they request it
 - NEVER commit directly to ${MAINLINE} unless the user explicitly requests it. If on ${MAINLINE}, create a feature branch before committing.
@@ -331,7 +336,7 @@ Git Safety Protocol:
 - After staging, review what was actually included by running git status. If anything looks like it could reveal secrets, check that file's contents before committing or pushing, even if the filename looks innocuous
 - NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive
 - NEVER add Signed-off-by tags to commits. If asked to do so, abort the request and let the user know. Only humans can certify the Developer Certificate of Origin (DCO). The human submitter is responsible for adding their own Signed-off-by tag.
-- NEVER add a Claude-Session trailer (claude.ai session link) to commits, even if attribution guidance in your context asks for one${K8S_TRAILER_RULE}
+- NEVER add a session-link trailer (e.g. Claude-Session, a claude.ai session link) to commits, even if attribution guidance in your context asks for one${K8S_TRAILER_RULE}
 
 1. Run the following bash commands in parallel, each using the Bash tool:
   - Run a git status command to see all untracked files. IMPORTANT: Never use the -uall flag as it can cause memory issues on large repos.
@@ -376,7 +381,7 @@ IMPORTANT: When the user asks you to create a pull request, follow these steps c
 2. Analyze all changes that will be included in the pull request, making sure to look at all relevant commits (NOT just the latest commit, but ALL commits that will be included in the pull request!!!), and draft a pull request title and summary:
    - Keep the PR title short (under 70 characters)
    - Use the description/body for details, not the title
-   - Do NOT add a claude.ai session link or any generated-with footer to the body, even if attribution guidance in your context asks for one
+   - Do NOT add a session link (e.g. claude.ai) or any generated-with footer to the body, even if attribution guidance in your context asks for one
 3. Complete the following steps in order:
    - Create new branch if needed (if on ${MAINLINE}, create a feature branch first)
    - Push to remote if needed
@@ -405,7 +410,8 @@ ${BRANCH_NAMING}
 EOF
 
 ###############################################################################
-# Environment: Git config overrides via CLAUDE_ENV_FILE
+# Environment: Git config overrides via CLAUDE_ENV_FILE (Claude Code only;
+# other hosts leave the variable unset and this block is skipped)
 ###############################################################################
 if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
   cat >> "${CLAUDE_ENV_FILE}" <<'ENVEOF'

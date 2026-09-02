@@ -117,6 +117,28 @@ sections.
 The existing "never add Signed-off-by" rule already covers Kubernetes' DCO
 requirement, so it stays unconditional.
 
+### Host-specific output
+
+The attribution and safety wording is host-neutral: the trailer no longer
+names a Claude model, the session-link rules cite `Claude-Session` and
+`claude.ai` only as examples of what not to add, and the stash rule says
+"agent sessions", so those instructions can be lifted into another agent's
+context (for example a Codex AGENTS.md) without editing. The output as a whole is
+still written for Claude Code: it names the `Bash` tool, `TaskCreate` and
+the `Agent` tool, and the GitHub MCP tools, which another host may not
+expose under those names. Parameterizing or gating those references is a
+separate change.
+
+Two Claude Code only parts are gated on the environment rather than
+removed:
+
+- The duplicate-instructions warning (the `includeGitInstructions` prerequisite)
+  is emitted only when `CLAUDECODE=1`, which Claude Code sets for hook commands.
+  Other hosts get no paragraph and no extra blank line
+- The git config override block writes to `CLAUDE_ENV_FILE` and is skipped when
+  the variable is unset, so under other hosts `branch.autosetupmerge` stays at
+  the user's default
+
 ### Git config overrides via environment
 
 Rather than modifying git config files (which the safety protocol forbids), the
@@ -156,9 +178,12 @@ Current overrides:
   while the variable name stuck). Naming both keeps the rule correct in either
   configuration; a static hook cannot resolve the getter
 - Claude Code attribution line removed from PR body template
-- Assisted-by trailer used instead of Co-Authored-By (follows Linux kernel AI attribution standard)
-- Claude-Session trailer and PR-body session link (the claude.ai link the harness
-  attribution guidance asks for) are never added; only the session owner can open it
+- Assisted-by trailer used instead of Co-Authored-By, in the Linux kernel's
+  `Assisted-by: LLM` form (`Documentation/process/coding-assistants.rst`; the
+  earlier `AGENT:MODEL` form was dropped in kernel commit 816d999, August 2026)
+- Session-link trailers (Claude-Session) and the PR-body session link (the
+  claude.ai link the harness attribution guidance asks for) are never added; only
+  the session owner can open it
 - Signed-off-by safety rule added (AI must never add DCO sign-off)
 - "NEVER commit directly to mainline" safety rule added (upstream has no equivalent)
 - `-u` dropped from the push instruction; the flag errors in the Claude Code
