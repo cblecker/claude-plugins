@@ -2,9 +2,11 @@
 
 Reimplementation of Anthropic's
 [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit)
-as a single Workflow-based skill. The workflow selects review lenses from the
-real diff, runs specialist reviewers against a local checkout of the PR head,
-and returns an interactive review board for the human reviewer.
+with separate Claude and Codex implementations. Both select specialist lenses
+from the real diff, review a local PR head checkout, and build an interactive
+board for discussion and approved feedback. Claude uses a bundled Workflow;
+Codex uses native subagents. See [Codex usage](#codex-usage) for the native port.
+The sections through Prerequisites below describe the Claude implementation.
 
 ## Skills
 
@@ -337,3 +339,100 @@ the drafts remain editable, and posting requires explicit approval.
 - [github](../github) plugin (provides MCP tools for PR operations)
 - a local git checkout of the PR head (`claude --worktree '<pr-url>'` or
   `gh pr checkout N`)
+
+## Codex Usage
+
+Install the plugin from this repository's marketplace using Codex's plugin UI or
+CLI. The existing marketplace entry supports both clients; the Codex manifest
+selects `./codex/skills/`, so Claude's workflow and `address-pr-feedback` skill are
+not loaded by Codex.
+
+Prerequisites: Node.js, Git, authenticated `gh`, Git HTTPS authentication for
+private repositories, and Codex with native subagents and GitHub MCP read tools.
+Approved posting also needs the GitHub review and reply write tools. The Claude
+`github` plugin dependency does not configure GitHub MCP for Codex automatically.
+Use your normal Codex MCP configuration.
+
+Source the launcher **after** defining your authenticated `codex` alias, using the
+absolute path to this checkout or the installed plugin:
+
+```bash
+source /absolute/path/to/pr-review-toolkit/codex/bin/codex-review-pr.bash
+codex-review-pr https://github.com/OWNER/REPO/pull/123
+```
+
+Run it from a clone of the PR's base repository or a fork with that upstream
+parent. The launcher verifies the relationship, fetches over HTTPS, pins the
+head and base, calculates their merge-base, and creates a unique detached
+worktree under `~/.local/share/codex-review/worktrees/`. It preserves the starting
+checkout, including uncommitted work. Separate invocations can review different
+PRs concurrently; fetches do not use shared `FETCH_HEAD` for identity.
+
+The launcher starts a normal Codex session in the new worktree and invokes
+`$review-pr` with a small temporary startup context. `CODEX_REVIEW_PLUGIN_ROOT`
+can override the plugin location. Worktrees remain after the session exits so
+you can continue the discussion. Use `git worktree remove '<checkout-path>'`
+when finished; Git refuses removal if uncommitted changes need attention.
+Preparation failures attempt non-forced cleanup and report anything retained.
+
+You can also invoke `$review-pr <PR_URL>` in a clean checkout already at the PR
+head. The skill verifies the PR and pins the base before analysis.
+
+### Native review flow
+
+The parent collects the PR shape and selects lenses while a native collector
+reads existing GitHub review threads. Independent specialist subagents examine
+the pinned range in separate contexts, using the session's model and reasoning
+settings. Available agent capacity controls parallelism; additional lenses wait
+for a slot. General correctness always runs, and relevant lenses are included
+liberally with their selection disclosed.
+
+The parent follows up on unclear evidence, merges duplicate concerns, compares
+against human and bot threads, and presents the same board categories described
+above. The board, stable finding IDs, drafts, and posting progress live in the
+conversation. Failed reviewers and incomplete thread collection remain visible
+as coverage limitations. There is no subprocess-worker fallback.
+
+Selected feedback is drafted in your voice. Before posting, the skill verifies
+inline locations and reply targets and presents the exact text and review event
+for approval. It checks the PR head before every write and reconciles partial
+failures against GitHub before retrying.
+
+### Codex permissions and migration
+
+Codex uses your normal session sandbox, approvals, credentials, and project
+configuration. Review-only behavior and the collector/specialist division are
+instructions, not enforced per-stage tool restrictions. The launcher does not
+install a permission profile, forward credentials, or disable project settings.
+
+If you tried the earlier Codex port, keep the existing launcher source line. Its
+path and `codex-review-pr <PR_URL>` interface are unchanged. The old generated
+`codex-review` profile is unused; remove its configuration manually if desired.
+There is no CLI version gate, filesystem denial probe, worker log, JSON board,
+or preview script to maintain.
+
+### Local Codex installation and validation
+
+From the repository root:
+
+```bash
+node pr-review-toolkit/codex/bin/validate.mjs
+node --test pr-review-toolkit/codex/test/*.test.mjs
+node pr-review-toolkit/codex/bin/validate.mjs --install
+```
+
+The install check uses a temporary Codex home, installs from this local
+marketplace, checks bundled files and exclusive skill discovery, and removes the
+temporary installation. It does not change your normal Codex installation.
+
+Launcher tests exercise real local Git repositories, fork/upstream preparation,
+paths with spaces, dirty starting checkouts, simultaneous processes, moving PR
+heads/bases, missing ancestry, and non-forced cleanup after failures. They mock
+GitHub metadata and redirect HTTPS fetches to fixture remotes.
+
+Behavioral validation should exercise small and large PRs, existing human/bot
+threads, failed reviewers, unavailable subagents, incomplete collection, editable
+drafts, changed heads, invalid anchors, and partial posting failures. Use
+simulated GitHub responses for posting tests; live writes still require exact
+preview approval. Static checks and launcher tests cannot establish review
+quality; native review behavior needs evaluation in a Codex session.

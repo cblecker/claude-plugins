@@ -86,3 +86,19 @@ surface as slash commands under `<plugin>:<workflow-name>`, and a workflow
 named `review-pr` would shadow the skill's `/pr-review-toolkit:review-pr`
 entry, dispatching bare workflow invocations without the skill's preflight
 (PR resolution, head verification, base fetch, pinned merge-base).
+
+## Native Codex Port
+
+Codex keeps the same specialist review, thread-aware board, and selected-feedback
+conversation in an instruction-led skill. Native subagents provide isolated
+conversation contexts and execution lifecycle; the parent selects lenses,
+clarifies findings, and synthesizes the board. The separate Claude Workflow
+continues to evolve independently.
+
+Only PR preparation remains scripted: the launcher creates a detached worktree,
+pins head/base/merge-base, and passes a temporary startup context. Concurrent
+launches fetch without writing shared `FETCH_HEAD` or remote-tracking refs.
+Normal Codex session settings govern permissions; review-only instructions are
+not per-stage enforcement. There is no custom profile, worker pool, schema/board
+processor, or subprocess fallback. Exact previews and PR head checks remain
+requirements for posting, with progress tracked in the conversation.

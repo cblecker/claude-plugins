@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Personal Claude Code plugin marketplace
+Personal Claude Code plugin marketplace, with a native Codex PR review port
 
 ## Architecture
 
@@ -12,7 +12,11 @@ Personal Claude Code plugin marketplace
 ├── github/                    # MCP wrapper: GitHub tools, PR triage skill
 ├── gws/                       # Vendored upstream skills: Google Workspace CLI
 ├── plan-review/               # Custom plugin: plan-file pre-flight review
-├── pr-review-toolkit/         # Custom plugin: PR review workflow
+├── pr-review-toolkit/         # Claude and Codex PR review workflows
+│   ├── .claude-plugin/        # Claude manifest
+│   ├── .codex-plugin/         # Codex manifest (same version)
+│   ├── skills/               # Claude skills and coordinator
+│   └── codex/                # Native Codex skill, launcher, and tests
 ├── rh-dataverse/              # MCP wrapper: Red Hat Dataverse, Rover people skill
 ├── sandbox-ssh-fix/           # Custom plugin: macOS sandbox git-over-SSH workaround
 └── CLAUDE.md
@@ -20,7 +24,9 @@ Personal Claude Code plugin marketplace
 
 Each plugin directory contains `.claude-plugin/plugin.json` and its own components
 (skills, hooks, agents, MCP configs). Plugins are at the repository root in a flat
-structure.
+structure. The PR review toolkit also has a `.codex-plugin/plugin.json` with an
+explicit `./codex/skills/` root. Its marketplace entry supports both clients;
+Claude and Codex implementations intentionally evolve independently.
 
 ## Commands
 
@@ -30,6 +36,9 @@ structure.
 | `claude plugin validate ./<plugin-name>` | Validate specific plugin |
 | `npx markdownlint-cli2 --config ${CLAUDE_PROJECT_DIR}/.markdownlint-cli2.jsonc "**/*.md"` | Lint markdown files |
 | `uvx skillsaw --strict` | Lint plugin |
+| `node --test pr-review-toolkit/codex/test/*.test.mjs` | Test Codex launcher |
+| `node pr-review-toolkit/codex/bin/validate.mjs --install` | Validate Codex discovery in a temporary installation |
+| `codex-review-pr <PR_URL>` | Prepare a separate worktree and launch a native Codex review |
 
 ## Adding a Plugin
 
@@ -52,6 +61,8 @@ structure.
   - **patch**: bug fixes, typo corrections, minor wording changes
   - **minor**: new skills, commands, hooks, agents, or backward-compatible behavior changes
   - **major**: breaking changes (renamed/removed skills, changed hook behavior, restructured plugin)
+- For `pr-review-toolkit`, keep `.claude-plugin/plugin.json` and
+  `.codex-plugin/plugin.json` versions equal.
 - Only bump once per PR branch. Before bumping, check `git diff main -- <plugin>/.claude-plugin/plugin.json`
   to see if the version was already bumped. Skip if it was, unless the accumulated
   changes now warrant a higher semver level (e.g., patch already bumped but a new
@@ -67,6 +78,20 @@ structure.
 - When addressing automated review feedback on a PR (Copilot, CodeRabbit): wait until
   every reviewer has finished reviewing the current head, then push fixes for all
   findings as a single commit — one push per review round, not one per reviewer
+
+## Codex Review Maintenance
+
+The launcher fetches over HTTPS, including for clones whose remotes use SSH.
+Private repositories need working Git HTTPS authentication in addition to `gh`.
+Keep simultaneous preparation independent of shared `FETCH_HEAD` and leave the
+starting checkout untouched. Use non-forced cleanup for failed preparation.
+
+Analysis uses native subagents and normal Codex session settings. Review-only
+instructions do not enforce per-stage tool or credential isolation. Keep the
+launcher small; do not reintroduce a worker pool, custom profile, CLI version
+gate, or filesystem denial probes. The conversation holds the review board and
+drafts. Posting requires approval of the exact preview and a PR head check
+immediately before every write.
 
 ## Documentation
 
