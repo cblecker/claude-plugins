@@ -353,7 +353,7 @@ Approved posting also needs the GitHub review and reply write tools. The Claude
 `github` plugin dependency does not configure GitHub MCP for Codex automatically.
 Use your normal Codex MCP configuration.
 
-Source the launcher **after** defining your authenticated `codex` alias, using the
+Source the launcher **after** defining your authenticated `gh` and `codex` aliases, using the
 absolute path to this checkout or the installed plugin:
 
 ```bash
@@ -374,6 +374,11 @@ can override the plugin location. Worktrees remain after the session exits so
 you can continue the discussion. Use `git worktree remove '<checkout-path>'`
 when finished; Git refuses removal if uncommitted changes need attention.
 Preparation failures attempt non-forced cleanup and report anything retained.
+
+Preparation obtains its GitHub token through the shell's `gh auth token` command,
+so authentication aliases such as a 1Password wrapper are honored. The token is
+passed to preparation as `GH_TOKEN`; it is not saved or exported to the parent
+shell. Codex continues to use its own alias and normal authentication settings.
 
 You can also invoke `$review-pr <PR_URL>` in a clean checkout already at the PR
 head. The skill verifies the PR and pins the base before analysis.
@@ -403,7 +408,7 @@ failures against GitHub before retrying.
 Codex uses your normal session sandbox, approvals, credentials, and project
 configuration. Review-only behavior and the collector/specialist division are
 instructions, not enforced per-stage tool restrictions. The launcher does not
-install a permission profile, forward credentials, or disable project settings.
+install a permission profile, configure worker credentials, or disable project settings.
 
 If you tried the earlier Codex port, keep the existing launcher source line. Its
 path and `codex-review-pr <PR_URL>` interface are unchanged. The old generated

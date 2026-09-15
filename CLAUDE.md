@@ -83,6 +83,8 @@ Claude and Codex implementations intentionally evolve independently.
 
 The launcher fetches over HTTPS, including for clones whose remotes use SSH.
 Private repositories need working Git HTTPS authentication in addition to `gh`.
+Source the launcher after the authenticated `gh` and `codex` aliases. Preparation
+gets a token through the shell's `gh auth token` and scopes it to its process.
 Keep simultaneous preparation independent of shared `FETCH_HEAD` and leave the
 starting checkout untouched. Use non-forced cleanup for failed preparation.
 
