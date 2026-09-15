@@ -3,17 +3,25 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { prepare, parsePR, remoteRepository } from '../lib/prepare.mjs';
+import { git } from '../lib/common.mjs';
 
 const execute = promisify(execFile);
-const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+const identity = { GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
   GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' };
-function git(cwd, ...args) {
-  return execFileSync('git', args, { cwd, env: gitEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-}
 function fixture(t, { fork = false, unrelatedHistory = false } = {}) {
+  // The production helper spreads process.env per call, so fixture identity
+  // reaches it without a separate command wrapper.
+  const previous = Object.fromEntries(Object.keys(identity).map(name => [name, process.env[name]]));
+  Object.assign(process.env, identity);
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
   const root = mkdtempSync(join(tmpdir(), 'review preparation '));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = join(root, 'source'), remote = join(root, 'remote.git');
@@ -52,9 +60,25 @@ test('validates PR URLs and recognizes HTTPS and SSH repositories', () => {
   for (const bad of ['https://github.com/a/b/pull/0', 'https://github.com/../b/pull/1',
     'https://example.com/a/b/pull/1', 'https://github.com/a/b/pull/9007199254740992'])
     assert.throws(() => parsePR(bad), /Expected/);
-  for (const remote of ['https://github.com/A/B.git', 'git@github.com:A/B.git', 'ssh://git@github.com/A/B.git'])
+  for (const remote of ['https://github.com/A/B.git', 'git@github.com:A/B.git', 'ssh://git@github.com/A/B.git',
+    'https://user@github.com/A/B.git', 'ssh://git@github.com:22/A/B.git'])
     assert.equal(remoteRepository(remote), 'a/b');
   assert.equal(remoteRepository('https://elsewhere.com/a/b'), undefined);
+});
+test('reports an unusable remote host separately from an unrelated repository', t => {
+  const { options, source } = fixture(t);
+  git(source, 'remote', 'set-url', 'origin', 'git@github-work:upstream/repo.git');
+  assert.throws(() => prepare(url, options), /No remote points at github\.com/);
+});
+test('reports why a fork parent lookup failed', t => {
+  const { options } = fixture(t, { fork: true });
+  options.api = () => { throw Error('HTTP 401: Bad credentials'); };
+  assert.throws(() => prepare(url, options), error => /neither/.test(error.message) && /Bad credentials/.test(error.message));
+});
+test('a missing repository keeps the plain relationship message', t => {
+  const { options } = fixture(t, { fork: true });
+  options.api = () => { throw Error('gh: Not Found (HTTP 404)'); };
+  assert.throws(() => prepare(url, options), error => /neither/.test(error.message) && !/lookup failed/.test(error.message));
 });
 for (const fork of [false, true]) test(`prepares a detached head from ${fork ? 'fork' : 'upstream'} without changing dirty checkout`, t => {
   const { options, source, head, base, calls } = fixture(t, { fork });
@@ -76,12 +100,13 @@ test('concurrent processes leave shared FETCH_HEAD intact and create separate wo
   const fetchHead = join(source, '.git/FETCH_HEAD');
   writeFileSync(fetchHead, 'another operation owns this\n');
   const module = new URL('../lib/prepare.mjs', import.meta.url).href;
+  const helpers = new URL('../lib/common.mjs', import.meta.url).href;
   const script = `import { prepare } from ${JSON.stringify(module)};
-    import { execFileSync } from 'node:child_process';
+    import { git } from ${JSON.stringify(helpers)};
     const input = JSON.parse(process.argv[1]);
     const result = prepare(input.url, { ...input.options, api: () => input.metadata,
-      gitCommand(cwd, ...args) { return execFileSync('git', args.map(a =>
-        a === 'https://github.com/upstream/repo.git' ? input.remote : a), { cwd, encoding: 'utf8' }).trim(); }
+      gitCommand(cwd, ...args) { return git(cwd, ...args.map(a =>
+        a === 'https://github.com/upstream/repo.git' ? input.remote : a)); }
     }); console.log(JSON.stringify(result));`;
   const input = JSON.stringify({ url, options, metadata, remote });
   const runs = await Promise.all([1, 2].map(() => execute(process.execPath, ['--input-type=module', '-e', script, input])));

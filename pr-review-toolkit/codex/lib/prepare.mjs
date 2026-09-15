@@ -10,12 +10,15 @@ export function parsePR(url) {
   return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }
 export function remoteRepository(url) {
-  const match = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(url || '');
+  const match = /^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(url || '');
   return match?.[1]?.toLowerCase();
 }
-export function assertRelationship(target, remotes, repositories) {
-  if (!remotes.some(name => name === target || repositories[name]?.parent?.full_name?.toLowerCase() === target))
-    throw Error('PR repository is neither a current remote nor its upstream parent');
+export function assertRelationship(target, remotes, repositories, lookupError) {
+  if (remotes.some(name => name === target || repositories[name]?.parent?.full_name?.toLowerCase() === target)) return;
+  // A failed lookup, such as expired credentials, is indistinguishable from an
+  // unrelated repository unless the underlying error is reported.
+  const detail = lookupError ? ` (repository lookup failed: ${(lookupError.stderr || lookupError.message || '').trim()})` : '';
+  throw Error(`PR repository is neither a current remote nor its upstream parent${detail}`);
 }
 export function assertPinned(metadata, headSha, baseSha) {
   if (metadata.state !== 'open' || metadata.head.sha !== headSha || metadata.base.sha !== baseSha)
@@ -25,16 +28,26 @@ export function prepare(url, { cwd = process.cwd(), worktreeRoot = join(homedir(
   contextRoot = tmpdir(), api = endpoint => JSON.parse(run('gh', ['api', endpoint])), gitCommand = git } = {}) {
   const identity = parsePR(url), target = `${identity.owner}/${identity.repo}`.toLowerCase();
   const source = realpathSync(gitCommand(cwd, 'rev-parse', '--show-toplevel'));
-  const remotes = gitCommand(source, 'remote').split('\n').filter(Boolean)
-    .map(name => remoteRepository(gitCommand(source, 'remote', 'get-url', name))).filter(Boolean);
+  const remoteUrls = gitCommand(source, 'remote').split('\n').filter(Boolean)
+    .map(name => gitCommand(source, 'remote', 'get-url', name));
+  const remotes = remoteUrls.map(url => remoteRepository(url)).filter(Boolean);
+  // Host aliases such as git@github-work:OWNER/REPO are never guessed.
+  if (remoteUrls.length && !remotes.length)
+    throw Error('No remote points at github.com. Recognized forms: https://github.com/OWNER/REPO, git@github.com:OWNER/REPO, ssh://git@github.com/OWNER/REPO');
   const repositories = {};
+  let lookupError;
   if (!remotes.includes(target)) {
     for (const name of remotes) {
-      try { repositories[name] = api(`repos/${name}`); } catch { continue; }
+      try { repositories[name] = api(`repos/${name}`); }
+      catch (error) {
+        // A missing repository is expected; anything else is worth reporting.
+        if (!/HTTP 404|not found/i.test(`${error.stderr || ''} ${error.message || ''}`)) lookupError = error;
+        continue;
+      }
       if (repositories[name]?.parent?.full_name?.toLowerCase() === target) break;
     }
   }
-  assertRelationship(target, remotes, repositories);
+  assertRelationship(target, remotes, repositories, lookupError);
   const endpoint = `repos/${identity.owner}/${identity.repo}/pulls/${identity.number}`;
   const metadata = api(endpoint);
   if (metadata.state !== 'open' || metadata.base.repo.full_name.toLowerCase() !== target) throw Error('Expected an open PR in the target repository');
@@ -61,11 +74,10 @@ export function prepare(url, { cwd = process.cwd(), worktreeRoot = join(homedir(
     }
     return realpathSync(path);
   };
-  let checkoutPath, contextDir, worktreeAttempted = false;
+  let checkoutPath, contextDir;
   try {
     const root = allocateRoot(worktreeRoot), contexts = allocateRoot(contextRoot);
     checkoutPath = realpathSync(mkdtempSync(join(root, `${identity.repo}-${identity.number}-`)));
-    worktreeAttempted = true;
     gitCommand(source, 'worktree', 'add', '--detach', checkoutPath, headSha);
     contextDir = realpathSync(mkdtempSync(join(contexts, 'codex-review-')));
     const context = { version: 1, pr: { ...identity, title: metadata.title, body: metadata.body || '', author: metadata.user.login,
@@ -82,14 +94,12 @@ export function prepare(url, { cwd = process.cwd(), worktreeRoot = join(homedir(
     }
     if (checkoutPath) {
       let registered = false;
-      if (worktreeAttempted) {
-        try { gitCommand(source, 'worktree', 'remove', checkoutPath); }
-        catch {
-          // Failed adds can leave an empty, unregistered directory. Never
-          // discard a still-registered worktree after non-forced removal fails.
-          try { registered = gitCommand(source, 'worktree', 'list', '--porcelain', '-z').split('\0').includes(`worktree ${checkoutPath}`); }
-          catch { registered = true; }
-        }
+      try { gitCommand(source, 'worktree', 'remove', checkoutPath); }
+      catch {
+        // Failed adds can leave an empty, unregistered directory. Never
+        // discard a still-registered worktree after non-forced removal fails.
+        try { registered = gitCommand(source, 'worktree', 'list', '--porcelain', '-z').split('\0').includes(`worktree ${checkoutPath}`); }
+        catch { registered = true; }
       }
       if (registered) retained.push(checkoutPath);
       else if (existsSync(checkoutPath)) {

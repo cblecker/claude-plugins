@@ -354,7 +354,10 @@ Approved posting also needs the GitHub review and reply write tools. The Claude
 Use your normal Codex MCP configuration.
 
 Source the launcher **after** defining your authenticated `gh` and `codex` aliases, using the
-absolute path to this checkout or the installed plugin:
+absolute path to this checkout or the installed plugin. Source it from **bash**, as the
+`.bash` extension signals: it locates the plugin through `BASH_SOURCE`. From zsh or another
+shell, source it inside a bash session or export `CODEX_REVIEW_PLUGIN_ROOT` with the absolute
+path to the plugin directory first.
 
 ```bash
 source /absolute/path/to/pr-review-toolkit/codex/bin/codex-review-pr.bash
@@ -403,18 +406,12 @@ inline locations and reply targets and presents the exact text and review event
 for approval. It checks the PR head before every write and reconciles partial
 failures against GitHub before retrying.
 
-### Codex permissions and migration
+### Codex permissions
 
 Codex uses your normal session sandbox, approvals, credentials, and project
 configuration. Review-only behavior and the collector/specialist division are
 instructions, not enforced per-stage tool restrictions. The launcher does not
 install a permission profile, configure worker credentials, or disable project settings.
-
-If you tried the earlier Codex port, keep the existing launcher source line. Its
-path and `codex-review-pr <PR_URL>` interface are unchanged. The old generated
-`codex-review` profile is unused; remove its configuration manually if desired.
-There is no CLI version gate, filesystem denial probe, worker log, JSON board,
-or preview script to maintain.
 
 ### Local Codex installation and validation
 
