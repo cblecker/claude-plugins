@@ -62,9 +62,66 @@ test('validates PR URLs and recognizes HTTPS and SSH repositories', () => {
     'https://example.com/a/b/pull/1', 'https://github.com/a/b/pull/9007199254740992'])
     assert.throws(() => parsePR(bad), /Expected/);
   for (const remote of ['https://github.com/A/B.git', 'git@github.com:A/B.git', 'ssh://git@github.com/A/B.git',
-    'https://user@github.com/A/B.git', 'ssh://git@github.com:22/A/B.git'])
+    'https://user@github.com/A/B.git', 'https://user:token@github.com/A/B.git',
+    'https://user%3Fname:token%23secret@github.com/A/B.git', 'ssh://git@github.com:22/A/B.git'])
     assert.equal(remoteRepository(remote), 'a/b');
-  assert.equal(remoteRepository('https://elsewhere.com/a/b'), undefined);
+  for (const remote of ['https://elsewhere.com/a/b', 'https://user:token@elsewhere.com/a/b',
+    'https://example.com?next=@github.com/upstream/repo.git',
+    'https://example.com#@github.com/upstream/repo.git'])
+    assert.equal(remoteRepository(remote), undefined, remote);
+});
+test('default API targets github.com for fork lookup and both PR reads despite GH_HOST', async t => {
+  const { options, root, remote, metadata, head } = fixture(t, { fork: true });
+  const bin = join(root, 'bin'), capture = join(root, 'api-calls');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const args = process.argv.slice(2), hostIndex = args.indexOf('--hostname');
+const host = hostIndex < 0 ? process.env.GH_HOST : args[hostIndex + 1];
+const endpoint = args.at(-1);
+appendFileSync(process.env.API_CAPTURE, JSON.stringify({ host, endpoint }) + '\\n');
+if (args[0] !== 'api' || host !== 'github.com') throw Error('Unexpected API host');
+if (endpoint === 'repos/user/repo') console.log(JSON.stringify({ parent: { full_name: 'upstream/repo' } }));
+else if (endpoint === 'repos/upstream/repo/pulls/1') console.log(JSON.stringify(${JSON.stringify(metadata)}));
+else throw Error('Unexpected API endpoint');
+`, { mode: 0o700 });
+  const module = new URL('../lib/prepare.mjs', import.meta.url).href;
+  const helpers = new URL('../lib/common.mjs', import.meta.url).href;
+  const script = `import { prepare } from ${JSON.stringify(module)};
+    import { git } from ${JSON.stringify(helpers)};
+    const input = JSON.parse(process.argv[1]);
+    const result = prepare(input.url, { ...input.options,
+      gitCommand(cwd, ...args) { return git(cwd, ...args.map(a =>
+        a === 'https://github.com/upstream/repo.git' ? input.remote : a)); }
+    }); console.log(JSON.stringify(result));`;
+  const result = await execute(process.execPath, ['--input-type=module', '-e', script,
+    JSON.stringify({ url, options, remote })], {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_HOST: 'enterprise.example.invalid', API_CAPTURE: capture }
+  });
+  assert.equal(git(JSON.parse(result.stdout).checkoutPath, 'rev-parse', 'HEAD'), head);
+  assert.deepEqual(readFileSync(capture, 'utf8').trim().split('\n').map(line => JSON.parse(line)),
+    ['repos/user/repo', 'repos/upstream/repo/pulls/1', 'repos/upstream/repo/pulls/1']
+      .map(endpoint => ({ host: 'github.com', endpoint })));
+});
+for (const ref of ['feature@review', 'feature+review', 'révision']) test(`prepares a valid base branch: ${ref}`, t => {
+  const { options, source, remote, metadata, base, head, calls } = fixture(t);
+  git(source, 'push', remote, `${base}:refs/heads/${ref}`);
+  metadata.base.ref = ref;
+  const result = prepare(url, options);
+  assert.equal(result.pr.baseRef, ref);
+  assert.equal(result.baseSha, base);
+  assert.equal(git(result.checkoutPath, 'rev-parse', 'HEAD'), head);
+  assert.equal(calls.find(args => args[0] === 'fetch').at(-1), `refs/heads/${ref}`);
+});
+test('rejects invalid refs and non-string base metadata before fetching', t => {
+  const { options, metadata, calls } = fixture(t);
+  for (const ref of ['', 'feature~review', 'bad:ref', 'bad..ref', 'bad ref', 'feature@{1}',
+    null, undefined, 123, ['main'], {}]) {
+    metadata.base.ref = ref;
+    assert.throws(() => prepare(url, options), typeof ref === 'string' ? /check-ref-format/ : /Unsafe base ref/);
+  }
+  assert.ok(!calls.some(args => args[0] === 'fetch' || args[0] === 'worktree'));
+  assert.deepEqual(readdirSync(options.sessionDir), []);
 });
 test('reports an unusable remote host separately from an unrelated repository', t => {
   const { options, source } = fixture(t);

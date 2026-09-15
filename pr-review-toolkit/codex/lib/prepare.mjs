@@ -10,7 +10,7 @@ export function parsePR(url) {
   return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }
 export function remoteRepository(url) {
-  const match = /^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(url || '');
+  const match = /^(?:https:\/\/(?:[^@/?#]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(url || '');
   return match?.[1]?.toLowerCase();
 }
 export function assertRelationship(target, remotes, repositories, lookupError) {
@@ -25,7 +25,7 @@ export function assertPinned(metadata, headSha, baseSha) {
     throw Error('PR head or base moved during preparation. Run codex-review-pr again.');
 }
 export function prepare(url, { cwd = process.cwd(), sessionDir,
-  api = endpoint => JSON.parse(run('gh', ['api', endpoint])), gitCommand = git } = {}) {
+  api = endpoint => JSON.parse(run('gh', ['api', '--hostname', 'github.com', endpoint])), gitCommand = git } = {}) {
   const identity = parsePR(url), target = `${identity.owner}/${identity.repo}`.toLowerCase();
   const source = realpathSync(gitCommand(cwd, 'rev-parse', '--show-toplevel'));
   const remoteUrls = gitCommand(source, 'remote').split('\n').filter(Boolean)
@@ -51,7 +51,7 @@ export function prepare(url, { cwd = process.cwd(), sessionDir,
   const endpoint = `repos/${identity.owner}/${identity.repo}/pulls/${identity.number}`;
   const metadata = api(endpoint);
   if (metadata.state !== 'open' || metadata.base.repo.full_name.toLowerCase() !== target) throw Error('Expected an open PR in the target repository');
-  if (!/^[A-Za-z0-9._/-]+$/.test(metadata.base.ref)) throw Error('Unsafe base ref');
+  if (typeof metadata.base.ref !== 'string') throw Error('Unsafe base ref');
   gitCommand(source, 'check-ref-format', `refs/heads/${metadata.base.ref}`);
   const remote = `https://github.com/${identity.owner}/${identity.repo}.git`;
   const headSha = metadata.head.sha, baseSha = metadata.base.sha;
