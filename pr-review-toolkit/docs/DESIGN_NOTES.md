@@ -98,6 +98,14 @@ continues to evolve independently.
 Only PR preparation remains scripted: the launcher creates a detached worktree,
 pins head/base/merge-base, and passes a temporary startup context. Concurrent
 launches fetch without writing shared `FETCH_HEAD` or remote-tracking refs.
+
+Review checkouts live in private system temporary directories. The launcher owns
+each directory before preparation starts, so incomplete startup handoffs can be
+cleaned up too. A subshell isolates exit and signal traps from the calling shell;
+cleanup runs after the foreground command stops and preserves its exit status.
+Worktree removal is non-forced, and retained paths are reported. These checkouts
+last only for the review session; there is no persistent checkout cache.
+
 Normal Codex session settings govern permissions; review-only instructions are
 not per-stage enforcement. There is no custom profile, worker pool, schema/board
 processor, or subprocess fallback. Exact previews and PR head checks remain

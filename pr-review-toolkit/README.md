@@ -367,16 +367,26 @@ codex-review-pr https://github.com/OWNER/REPO/pull/123
 Run it from a clone of the PR's base repository or a fork with that upstream
 parent. The launcher verifies the relationship, fetches over HTTPS, pins the
 head and base, calculates their merge-base, and creates a unique detached
-worktree under `~/.local/share/codex-review/worktrees/`. It preserves the starting
-checkout, including uncommitted work. Separate invocations can review different
+worktree in a private directory under the system temporary directory (honoring
+`TMPDIR`). It preserves the starting checkout, including uncommitted work.
+Separate invocations can review different
 PRs concurrently; fetches do not use shared `FETCH_HEAD` for identity.
 
 The launcher starts a normal Codex session in the new worktree and invokes
 `$review-pr` with a small temporary startup context. `CODEX_REVIEW_PLUGIN_ROOT`
-can override the plugin location. Worktrees remain after the session exits so
-you can continue the discussion. Use `git worktree remove '<checkout-path>'`
-when finished; Git refuses removal if uncommitted changes need attention.
-Preparation failures attempt non-forced cleanup and report anything retained.
+can override the plugin location. The checkout remains available throughout the
+review and discussion, then the launcher removes it and the startup files when
+Codex exits. Preparation failures and catchable termination signals also trigger
+cleanup. Cleanup preserves Codex's exit status and uses non-forced
+`git worktree remove`; dirty or locked worktrees are retained with their paths
+reported for inspection and manual removal.
+
+An uncatchable termination or machine failure can leave temporary resources
+behind. Use `git worktree remove '<checkout-path>'` from the original repository
+to remove a retained checkout when finished. If the operating system has already
+deleted the checkout, `git worktree prune` removes its stale Git registration.
+Older checkouts under `~/.local/share/codex-review/worktrees/` are not migrated or
+automatically deleted; use `git worktree list` and remove those individually.
 
 Preparation obtains its GitHub token through the shell's `gh auth token` command,
 so authentication aliases such as a 1Password wrapper are honored. The token is
@@ -429,7 +439,8 @@ temporary installation. It does not change your normal Codex installation.
 
 Launcher tests exercise real local Git repositories, fork/upstream preparation,
 paths with spaces, dirty starting checkouts, simultaneous processes, moving PR
-heads/bases, missing ancestry, and non-forced cleanup after failures. They mock
+heads/bases, missing ancestry, session-exit and signal cleanup, preserved shell
+traps and exit status, and retention when non-forced removal fails. They mock
 GitHub metadata and redirect HTTPS fetches to fixture remotes.
 
 Behavioral validation should exercise small and large PRs, existing human/bot

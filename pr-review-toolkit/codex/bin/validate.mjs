@@ -16,7 +16,8 @@ try {
   assert.equal(manifest.version, load(join(plugin, '.claude-plugin/plugin.json')).version);
   assert.equal(manifest.skills, './codex/skills/');
   assert.ok(manifest.interface.defaultPrompt.length);
-  for (const path of ['codex/skills/review-pr/SKILL.md', 'codex/bin/prepare.mjs', 'codex/bin/codex-review-pr.bash'])
+  for (const path of ['codex/skills/review-pr/SKILL.md', 'codex/bin/prepare.mjs',
+    'codex/bin/session.mjs', 'codex/bin/codex-review-pr.bash'])
     assert.ok(existsSync(join(plugin, path)), `Missing ${path}`);
   const skills = join(plugin, 'codex/skills');
   for (const file of files(skills).filter(path => path.endsWith('.md'))) {

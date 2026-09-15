@@ -1,7 +1,7 @@
-import { mkdtempSync, mkdirSync, realpathSync, existsSync, rmdirSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { git, run, save } from './common.mjs';
+import { createSession, cleanupSession } from './session.mjs';
 
 export function parsePR(url) {
   const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)\/?$/.exec(url || '');
@@ -24,8 +24,8 @@ export function assertPinned(metadata, headSha, baseSha) {
   if (metadata.state !== 'open' || metadata.head.sha !== headSha || metadata.base.sha !== baseSha)
     throw Error('PR head or base moved during preparation. Run codex-review-pr again.');
 }
-export function prepare(url, { cwd = process.cwd(), worktreeRoot = join(homedir(), '.local/share/codex-review/worktrees'),
-  contextRoot = tmpdir(), api = endpoint => JSON.parse(run('gh', ['api', endpoint])), gitCommand = git } = {}) {
+export function prepare(url, { cwd = process.cwd(), sessionDir,
+  api = endpoint => JSON.parse(run('gh', ['api', endpoint])), gitCommand = git } = {}) {
   const identity = parsePR(url), target = `${identity.owner}/${identity.repo}`.toLowerCase();
   const source = realpathSync(gitCommand(cwd, 'rev-parse', '--show-toplevel'));
   const remoteUrls = gitCommand(source, 'remote').split('\n').filter(Boolean)
@@ -64,53 +64,20 @@ export function prepare(url, { cwd = process.cwd(), worktreeRoot = join(homedir(
   for (const sha of [headSha, baseSha]) gitCommand(source, 'cat-file', '-e', `${sha}^{commit}`);
   const mergeBase = gitCommand(source, 'merge-base', baseSha, headSha);
   assertPinned(api(endpoint), headSha, baseSha);
-  const createdRoots = [];
-  const allocateRoot = path => {
-    const missing = [];
-    for (let p = resolve(path); !existsSync(p); p = dirname(p)) missing.push(p);
-    for (const directory of missing.reverse()) {
-      try { mkdirSync(directory, { mode: 0o700 }); createdRoots.push(directory); }
-      catch (error) { if (error.code !== 'EEXIST') throw error; }
-    }
-    return realpathSync(path);
-  };
-  let checkoutPath, contextDir;
+  sessionDir = sessionDir ? realpathSync(sessionDir) : createSession();
+  const checkoutPath = join(sessionDir, 'checkout');
   try {
-    const root = allocateRoot(worktreeRoot), contexts = allocateRoot(contextRoot);
-    checkoutPath = realpathSync(mkdtempSync(join(root, `${identity.repo}-${identity.number}-`)));
     gitCommand(source, 'worktree', 'add', '--detach', checkoutPath, headSha);
-    contextDir = realpathSync(mkdtempSync(join(contexts, 'codex-review-')));
     const context = { version: 1, pr: { ...identity, title: metadata.title, body: metadata.body || '', author: metadata.user.login,
       state: metadata.state, baseRef: metadata.base.ref, headSha, url,
       mergeable: metadata.mergeable, mergeableState: metadata.mergeable_state }, checkoutPath, baseSha, mergeBase,
       baseAheadCount: Number(gitCommand(source, 'rev-list', '--count', `${mergeBase}..${baseSha}`)) };
-    const contextFile = join(contextDir, 'context.json');
+    const contextFile = join(sessionDir, 'context.json');
     save(contextFile, context);
     return { ...context, contextFile };
   } catch (error) {
-    const retained = [];
-    if (contextDir) {
-      try { rmSync(contextDir, { recursive: true }); } catch { retained.push(contextDir); }
-    }
-    if (checkoutPath) {
-      let registered = false;
-      try { gitCommand(source, 'worktree', 'remove', checkoutPath); }
-      catch {
-        // Failed adds can leave an empty, unregistered directory. Never
-        // discard a still-registered worktree after non-forced removal fails.
-        try { registered = gitCommand(source, 'worktree', 'list', '--porcelain', '-z').split('\0').includes(`worktree ${checkoutPath}`); }
-        catch { registered = true; }
-      }
-      if (registered) retained.push(checkoutPath);
-      else if (existsSync(checkoutPath)) {
-        try { rmdirSync(checkoutPath); } catch { retained.push(checkoutPath); }
-      }
-    }
-    for (const path of createdRoots.reverse()) {
-      if (!existsSync(path)) continue;
-      try { rmdirSync(path); } catch { retained.push(path); }
-    }
-    if (retained.length) error.message += `\nCould not safely remove preparation resources: ${retained.join(', ')}. Inspect them and use git worktree remove for retained worktrees.`;
+    try { cleanupSession(sessionDir, { cwd: source, gitCommand }); }
+    catch (cleanupError) { error.message += `\n${cleanupError.message}`; }
     throw error;
   }
 }

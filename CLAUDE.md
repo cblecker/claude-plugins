@@ -86,7 +86,9 @@ Private repositories need working Git HTTPS authentication in addition to `gh`.
 Source the launcher after the authenticated `gh` and `codex` aliases. Preparation
 gets a token through the shell's `gh auth token` and scopes it to its process.
 Keep simultaneous preparation independent of shared `FETCH_HEAD` and leave the
-starting checkout untouched. Use non-forced cleanup for failed preparation.
+starting checkout untouched. Keep review worktrees in private system temporary
+directories and clean them up when the session exits or preparation fails. Use
+non-forced removal and report retained paths.
 
 Analysis uses native subagents and normal Codex session settings. Review-only
 instructions do not enforce per-stage tool or credential isolation. Keep the

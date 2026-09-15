@@ -1,5 +1,5 @@
 # Source after the user's gh and codex aliases have been defined.
-codex-review-pr() {
+codex-review-pr() (
   if [[ $# != 1 ]]; then
     printf 'Usage: codex-review-pr https://github.com/OWNER/REPO/pull/NUMBER\n' >&2
     return 2
@@ -12,10 +12,17 @@ codex-review-pr() {
   # command, then scope the token to preparation without changing the shell env.
   local review_token
   review_token=$(gh auth token --hostname github.com) || return 1
-  local review_args_file review_checkout review_context
-  review_args_file=$(mktemp) || return
-  if ! GH_TOKEN="$review_token" node "$review_root/codex/bin/prepare.mjs" "$1" > "$review_args_file"; then
-    rm -f "$review_args_file"
+  local review_source review_session review_args_file review_checkout review_context
+  review_source=$(git rev-parse --show-toplevel) || return
+  review_session=$(node "$review_root/codex/bin/session.mjs" create) || return
+  # These traps belong only to this invocation's subshell. Foreground commands
+  # finish before Bash runs pending traps, so cleanup never races their writes.
+  trap 'review_status=$?; trap "" INT TERM HUP; node "$review_root/codex/bin/session.mjs" cleanup "$review_session" "$review_source" || :; exit "$review_status"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  review_args_file="$review_session/launch-args"
+  if ! GH_TOKEN="$review_token" node "$review_root/codex/bin/prepare.mjs" "$1" "$review_session" > "$review_args_file"; then
     return 1
   fi
   unset review_token
@@ -23,11 +30,9 @@ codex-review-pr() {
     IFS= read -r -d '' review_checkout &&
     IFS= read -r -d '' review_context
   } < "$review_args_file"; then
-    rm -f "$review_args_file"
     printf 'Preparation returned incomplete launch arguments.\n' >&2
     return 1
   fi
-  rm -f "$review_args_file"
   codex --cd "$review_checkout" \
     "Use \$review-pr from $review_root/codex/skills/review-pr/SKILL.md with context file $review_context. Run analysis now, present the board, then discuss it with me."
-}
+)
