@@ -26,6 +26,13 @@ only when the user explicitly chooses an approving review.
 
 ## Preview And Obtain Approval
 
+On entering the final-preview stage, refresh current review-thread context using
+[thread collection guidance](threads.md) and reconsider overlap for the selected
+findings. Keep selections and finding IDs stable, and show any changed
+recommendation, draft text, or proposed target. An incomplete refresh means
+unknown coverage, never an empty discussion; disclose it and qualify overlap.
+This refresh does not change the pinned range or checkout.
+
 Before previewing a review submission, identify the authenticated reviewer and
 read existing reviews. If that reviewer has a pending review, inspect its staged
 comments and ask whether to include it. Reuse requires deliberate selection and
@@ -44,8 +51,9 @@ If resolution state is unavailable, say it is unknown. A proposed change of
 location or conversion from reply to new comment must appear in the preview.
 
 Ask for explicit approval of this preview. A request to review, a selected
-finding, or approval of the board is not approval to post. After requested edits,
-show the revised preview and obtain approval again.
+finding, or approval of the board is not approval to post. Any change to approved
+text or targets, whether requested or prompted by refreshed discussion, requires
+a revised preview and approval before writing.
 
 ## Post The Approved Preview
 

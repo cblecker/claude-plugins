@@ -59,3 +59,10 @@ When analyzing a type, you will:
 - Missing validation at construction boundaries
 - Inconsistent enforcement across mutation methods
 - Types that rely on external code to maintain invariants
+
+**When Suggesting Improvements:**
+
+Consider added complexity, compatibility costs, repository conventions, validation
+overhead, and the balance between guarantees and usability. A simpler type with
+fewer guarantees can be appropriate for its role in the system; recommend stronger
+machinery only when its practical benefit justifies those costs.

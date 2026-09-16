@@ -37,6 +37,6 @@ Start by listing what you're reviewing. For each high-confidence issue provide:
 
 Group issues by severity (critical, important, suggestion). Within each group, list highest confidence first.
 
-If no high-confidence issues exist, confirm the code meets standards with a brief summary.
+If no issues qualify, report no qualifying findings within the reviewed scope and briefly summarize material limitations.
 
 Be thorough but filter aggressively - quality over quantity. Focus on issues that truly matter.
