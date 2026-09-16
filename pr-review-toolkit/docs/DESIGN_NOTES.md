@@ -86,3 +86,81 @@ surface as slash commands under `<plugin>:<workflow-name>`, and a workflow
 named `review-pr` would shadow the skill's `/pr-review-toolkit:review-pr`
 entry, dispatching bare workflow invocations without the skill's preflight
 (PR resolution, head verification, base fetch, pinned merge-base).
+
+## Native Codex Port
+
+Codex keeps the same specialist review, thread-aware board, and selected-feedback
+conversation in an instruction-led skill. Native subagents provide isolated
+conversation contexts and execution lifecycle; the parent selects lenses,
+clarifies findings, and synthesizes the board. The separate Claude Workflow
+continues to evolve independently.
+
+PR preparation fetches over HTTPS and pins head/base/merge-base without creating
+checkouts or updating shared `FETCH_HEAD` or refs. Its compact version-2 JSON
+records canonical source and common Git paths, source HEAD, and PR identity.
+Descriptive PR metadata comes from MCP. The launcher scopes its alias-resolved
+authentication token to preparation and passes the JSON inline in one prompt.
+
+Native Codex worktrees provide creation and ownership tracking; automatic CLI
+cleanup is currently disabled in CLI 0.154.0. The launcher explicitly enables
+worktrees per invocation for compatibility with that release and starts from the
+source path; CLI 0.154.0 or later is
+required, with no version gate or legacy fallback. A guarded helper checks the
+new checkout is clean, detached, linked to the recorded repository, and at the
+source or PR head before selecting the pinned PR head without force. Repository
+guidance is read after that transition. Direct skill invocation uses an existing
+clean PR-head checkout without switching it.
+
+The conversation retains the actual review checkout, pins, board, and drafts.
+Resume validates that same checkout and pinned range without repeating the
+transition. The launcher preserves Codex's exit status and does not delete
+worktrees on exit or failed startup. There are no temporary handoff files,
+session-directory helpers, or cleanup traps. Older toolkit worktrees receive no
+automatic migration or deletion.
+
+Exposing Codex's existing starting-revision parameter through the public CLI is a
+separate upstream opportunity. The current CLI interface requires the guarded
+initial checkout transition; this toolkit does not depend on a future flag.
+
+Normal Codex session settings govern permissions; review-only instructions are
+not per-stage enforcement. There is no custom profile, worker pool, schema/board
+processor, or subprocess fallback. Exact previews and PR head checks remain
+requirements for posting, with progress tracked in the conversation.
+
+### Lens provenance and intentional adaptations
+
+The general, error-handling, test, comment, and type lenses originated in
+Anthropic's Apache-2.0-licensed toolkit, pinned for comparison at
+[`b5439c4`](https://github.com/anthropics/claude-plugins-official/tree/b5439c41ae9864833eb73d5efd088af8e3be13fe/plugins/pr-review-toolkit/agents).
+Security, API compatibility, and concurrency were added locally. The Claude
+implementation remains the comparison baseline and evolves independently.
+
+Codex adapts general review and test scope to pinned commits and repository
+guidance, and error handling to following propagation through callers to the
+owning handler. General review retains its numeric rubric and >=80 reporting
+filter, an inherited policy deliberately kept by user choice. Its empty result
+now reports no qualifying findings within scope and material limitations rather
+than certifying compliance. This filter is not a universal specialist threshold;
+the parent assesses evidence and impact separately from scores before assigning
+severity, board placement, or a review event.
+
+The type lens restores the practical tradeoff guidance from
+`cd404ea^:pr-review-toolkit/skills/review-pr/review-pr.js`: complexity, compatibility,
+repository conventions, validation cost, usability, and the suitability of simpler
+types. The old standalone output format and threshold are not restored; findings
+continue into the unified board. The other six Codex lens bodies are unchanged
+by this refinement.
+
+Shared checklists guide investigation; patterns alone are not defects. Actual
+contracts, callers, project rules, and maintenance consequences support useful
+runtime, documentation, test, and design findings. Specialists remain independent
+of each other and existing GitHub findings; the parent contextualizes them after
+concurrent thread collection and verifies candidates without repeating every
+review. Only the parent may use focused tests or temporary reproductions to
+resolve concrete uncertainty, preserving source and clean-checkout safeguards.
+
+The conversational board keeps stable IDs through reclassification and explains
+merges. A thread refresh at final preview catches discussion added since analysis
+without moving the checkout or pins. Selections survive refreshes, changed advice
+is visible, and incomplete reads remain unknown coverage. Exact text and targets
+still require approval, including revisions after an earlier approval.

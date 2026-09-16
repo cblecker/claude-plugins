@@ -75,6 +75,12 @@ jobs:
       - name: Validate plugin
         run: claude plugin validate "${{ matrix.source }}"
 
+      - name: Validate native Codex PR review plugin
+        if: matrix.source == './pr-review-toolkit'
+        run: |
+          node pr-review-toolkit/codex/bin/validate.mjs
+          node --test pr-review-toolkit/codex/test/*.test.mjs
+
   conclusion:
     name: Validate Plugins Conclusion
     needs:

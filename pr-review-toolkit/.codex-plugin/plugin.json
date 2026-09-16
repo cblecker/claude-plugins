@@ -1,0 +1,30 @@
+{
+  "name": "pr-review-toolkit",
+  "version": "2.2.0",
+  "description": "Comprehensive PR review board from a local PR head checkout",
+  "author": {
+    "name": "cblecker",
+    "email": "admin@toph.ca"
+  },
+  "keywords": [
+    "pr-review",
+    "code-review",
+    "workflow",
+    "pull-request"
+  ],
+  "skills": "./codex/skills/",
+  "interface": {
+    "displayName": "PR Review Toolkit",
+    "shortDescription": "Discuss PR findings from native reviewers",
+    "longDescription": "Select specialist lenses, build an interactive review board, discuss findings, and post only an approved preview.",
+    "developerName": "cblecker",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Review this GitHub PR and discuss the findings."
+    ]
+  }
+}

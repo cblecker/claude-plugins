@@ -2,9 +2,11 @@
 
 Reimplementation of Anthropic's
 [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit)
-as a single Workflow-based skill. The workflow selects review lenses from the
-real diff, runs specialist reviewers against a local checkout of the PR head,
-and returns an interactive review board for the human reviewer.
+with separate Claude and Codex implementations. Both select specialist lenses
+from the real diff, review a local PR head checkout, and build an interactive
+board for discussion and approved feedback. Claude uses a bundled Workflow;
+Codex uses native subagents. See [Codex usage](#codex-usage) for the native port.
+The sections through Prerequisites below describe the Claude implementation.
 
 ## Skills
 
@@ -337,3 +339,223 @@ the drafts remain editable, and posting requires explicit approval.
 - [github](../github) plugin (provides MCP tools for PR operations)
 - a local git checkout of the PR head (`claude --worktree '<pr-url>'` or
   `gh pr checkout N`)
+
+## Codex Usage
+
+Install the plugin from this repository's marketplace using Codex's plugin UI or
+CLI. The existing marketplace entry supports both clients; the Codex manifest
+selects `./codex/skills/`, so Claude's workflow and `address-pr-feedback` skill are
+not loaded by Codex.
+
+Prerequisites: Node.js, Git, authenticated `gh`, Git HTTPS authentication for
+private repositories, and Codex CLI 0.154.0 or later with native worktree support,
+native subagents, and GitHub MCP read tools.
+Approved posting also needs the GitHub review and reply write tools. The Claude
+`github` plugin dependency does not configure GitHub MCP for Codex automatically.
+Use your normal Codex MCP configuration.
+
+Source the launcher **after** defining your authenticated `gh` and `codex` aliases, using the
+absolute path to this checkout or the installed plugin. Source it from **bash**, as the
+`.bash` extension signals: it locates the plugin through `BASH_SOURCE`. From zsh or another
+shell, source it inside a bash session or export `CODEX_REVIEW_PLUGIN_ROOT` with the absolute
+path to the plugin directory first.
+
+```bash
+source /absolute/path/to/pr-review-toolkit/codex/bin/codex-review-pr.bash
+codex-review-pr https://github.com/OWNER/REPO/pull/123
+```
+
+Run it from a clone of the PR's base repository or a fork with that upstream
+parent. Preparation verifies the relationship, fetches over HTTPS, and returns
+compact version-2 JSON containing the canonical source checkout, common Git
+directory, source HEAD, PR identity, and pinned head/base/merge-base. It leaves
+source files, index, HEAD, refs, and worktree registrations intact. Concurrent
+fetches do not write shared `FETCH_HEAD` or refs.
+
+The launcher invokes `codex --enable worktrees --worktree --cd <source>` with
+`$review-pr` and the JSON in one quoted prompt argument. Native worktree support
+is required and enabled per invocation; unsupported CLIs report their own error.
+`CODEX_REVIEW_PLUGIN_ROOT` can override the plugin location. Codex creates and
+owns the worktree. The skill rechecks the PR pins through MCP, then a guarded
+helper selects the PR head only in a clean, detached linked worktree sharing the
+source repository. The source checkout may be dirty and at a different commit.
+Repository guidance is read after checkout, before specialist analysis.
+
+The actual review checkout and pins stay in the conversation alongside the board
+and drafts. Use `codex --enable worktrees resume <SESSION_ID>` to continue a
+retained review; resume revalidates the checkout and range without switching HEAD.
+Native CLI worktrees provide creation and ownership tracking. Automatic CLI
+cleanup is currently disabled in CLI 0.154.0, so retained worktrees need explicit
+cleanup when finished. The toolkit preserves Codex's exit status and promises no
+deletion on exit, including failed starts. Older
+toolkit-created worktrees receive no automatic migration or deletion; inspect
+`git worktree list` and remove those individually when finished.
+
+Preparation obtains its GitHub token through the shell's `gh auth token` command,
+so authentication aliases such as a 1Password wrapper are honored. The token is
+passed to preparation as `GH_TOKEN`; it is not saved or exported to the parent
+shell. Codex continues to use its own alias and normal authentication settings.
+
+You can also invoke `$review-pr <PR_URL>` in a clean checkout already at the PR
+head. The skill verifies the repository and PR and pins the base before analysis;
+this route does not switch the checkout.
+
+### Native review flow
+
+The parent collects the PR shape and selects lenses while a native collector
+reads existing GitHub review threads. Independent specialist subagents examine
+the pinned range in separate contexts, using the session's model and reasoning
+settings. Available agent capacity controls parallelism; additional lenses wait
+for a slot. General correctness always runs, and relevant lenses are included
+liberally with their selection disclosed.
+
+The parent checks candidate evidence, relevant callers, and counterexamples,
+follows up on uncertainty, and assesses evidence and impact separately from lens
+scores. It merges duplicate concerns and compares against human and bot threads.
+The compact board uses readable labels: Recommended to post, Related to existing
+discussion, Discuss first, Already covered, and Discarded. Concerns, locations,
+impact, and thread relationships lead; supporting evidence follows. Finding IDs
+remain stable through discussion and reclassification, with merges explained.
+The board, drafts, and posting progress live in the conversation. Failed reviewers,
+unread material, truncated results, and incomplete thread collection remain visible
+as coverage limitations. There is no subprocess-worker fallback.
+
+Selected feedback is drafted in your voice. At final preview, the skill refreshes
+discussion and reconsiders overlap, preserving selections and IDs while showing
+changed recommendations, text, or targets. Failed refreshes mean unknown coverage.
+It verifies inline locations and reply targets and presents the exact text and
+review event for approval. Selection or board approval never authorizes posting;
+changed text or targets require a revised preview and approval. It checks the PR
+head before every write and reconciles partial failures against GitHub before retrying.
+
+### Codex permissions
+
+Codex uses your normal session sandbox, approvals, credentials, and project
+configuration. Review-only behavior and the collector/specialist division are
+instructions, not enforced per-stage tool restrictions. The launcher does not
+install a permission profile, configure worker credentials, or disable project settings.
+
+Specialists remain inspection-only. The parent may run focused existing tests or
+temporary reproductions to resolve concrete uncertainty, using normal permissions
+and allowing ordinary cache or temporary artifacts. Repository source stays
+unchanged; unexpected checkout changes are reported, artifacts are not removed
+automatically, and clean-checkout and resume safeguards still apply.
+
+### Local Codex installation and validation
+
+From the repository root:
+
+```bash
+node pr-review-toolkit/codex/bin/validate.mjs
+node --test pr-review-toolkit/codex/test/*.test.mjs
+node pr-review-toolkit/codex/bin/validate.mjs --install
+```
+
+The install check uses a temporary Codex home, installs from this local
+marketplace, checks bundled files and exclusive skill discovery, and removes the
+temporary installation. It does not change your normal Codex installation.
+
+Tests exercise real local Git repositories, fork/upstream preparation, unusual
+paths, dirty source checkouts, concurrent fetches, moving PR heads/bases, missing
+ancestry, and preservation of source state. Checkout tests cover guarded PR-head
+selection, repeat invocation, verification on resume, and refusals that preserve
+existing work. Launcher tests verify native flags, exact inline context, shell
+aliases, token scoping, preparation failures, and Codex exit status. GitHub
+metadata is mocked and HTTPS fetches are redirected to fixture remotes.
+
+For a real CLI smoke test, use a disposable repository with a dirty source at a
+different commit from the pinned PR head. Launch with native worktrees, pass the
+context to the checkout helper, record the checkout and pins, then exit and
+resume the session. Verify that the source files, index, HEAD, and refs remain
+intact and that the retained checkout and conversation still have the same pins.
+
+Behavioral validation should exercise small and large PRs, existing human/bot
+threads, failed reviewers, unavailable subagents, incomplete collection, editable
+drafts, changed heads, invalid anchors, and partial posting failures. Use
+simulated GitHub responses for posting tests; live writes still require exact
+preview approval. Static checks and launcher tests cannot establish review
+quality; native review behavior needs evaluation in a Codex session.
+
+#### Recorded refinement validation (2026-09-15)
+
+**Helper and static checks:** all 50 Node helper/launcher tests passed; temporary
+installation and exclusive Codex skill discovery passed. Markdown lint, strict
+skillsaw (CLI 0.20.0, repository rule pin 0.19.0), skill-creator validation,
+Claude plugin manifest validation, and `git diff --check` passed. These checks
+establish packaging and helper behavior, not review quality.
+
+**Behavioral exercise inputs:** a temporary Git repository contained two changed
+files (32 additions, 4 deletions) and explicit project rules for persistence,
+handler-owned logging, optional theme fallback, booking order, timeout units,
+plain transport records, and retry-exhaustion tests. Baseline instructions came
+from `070b03a`; revised instructions came from this working-tree refinement.
+Two fresh native agent contexts inherited the same session model and effort,
+with no overrides. Exact runtime model/effort identifiers were not exposed by
+this evaluation interface. Each agent inspected the same five relevant lenses
+in one context, then received identical simulated GitHub responses separately.
+This exercises staged review decisions, not full independent-lens orchestration.
+
+| Fixture input | Decision being exercised |
+|---|---|
+| `saveOrder` rethrows to a logging HTTP handler; `saveBatch` catches `insertMany` rejection and returns `[]`, while its handler returns 201 | Owning-handler propagation versus a swallowed required write |
+| `optionalTheme` returns an explicitly permitted default on cache failure | Intended fallback versus the required-write contract |
+| Plain `searchTerm` record permits empty text; removed `booking` guard admits request-derived end <= start | Appropriate simplicity versus a reachable invariant regression |
+| Timeout export documented as milliseconds but consumed as seconds; new retry test covers immediate success only | Consequential documentation and test findings |
+| Human thread 101 covers batch failure; bot thread 102 covers booking; duplicate E1 adds the same batch caller trace; T1 only cites a mutable-record pattern | Merge evidence, classify overlap, and reject unsupported design advice |
+| Collection page 2 times out and a selected API reviewer fails before reading | Disclose partial coverage |
+| Final refresh adds human thread 103 covering timeout units; alternate refresh times out | Reconsider overlap and preserve unknown coverage |
+| Unrelated pending review 900; edited approved reply; head moves after reply 501; ambiguous create/reply; rejected target; unexpected pending content | Approval, head checks, ownership, and reconciliation |
+
+**Observed decisions:** both contexts found the swallowed batch failure, removed
+booking guard, misleading timeout unit, and explicit retry-exhaustion test gap.
+Both accepted the optional fallback and plain search record, traced the rethrow
+to handler-owned logging without recommending duplicate logs, merged E1 into F1,
+and discarded T1's unsupported encapsulation advice. Documentation and test
+findings survived without being described as current runtime failures.
+
+Both preserved finding IDs and disclosed incomplete collection and the failed
+reviewer. Both requested current threads before using refreshed responses: the
+baseline did so to fill its incomplete collection; the revised instructions
+required it at final preview. Both detected thread 103's overlap and kept failed
+refresh coverage unknown. Both paused submission for unrelated pending review
+900, required revised approval for edited drafts/targets and unexpected staged
+content, stopped after head movement while retaining successful reply 501, and
+avoided retries when readback confirmed reply 502. Unreconciled creation stopped;
+a thread node ID was not accepted as a numeric reply target. No live writes ran.
+
+For a requested focused check, the baseline context declined execution under its
+blanket inspection restriction. The revised context ran an inline Node
+reproduction in the parent role: rejected `insertMany` yielded status 201 with
+zero handler logs, and reversed/equal request endpoints yielded durations -5/0.
+Assertions passed and status was clean before and after; no source was edited.
+This verifies those fake-database and request-input paths, not a real service.
+
+The initial finding decisions were the same on this small fixture; this single
+paired run does not demonstrate improved review quality or statistically reliable
+behavior. Full independent specialists, large changes, a dedicated empty-result
+case, real MCP pagination, and real posting remain outside this behavioral run.
+
+The disposable inputs, pinned commits, instruction snapshots, agent reports, and
+simulated discussion cases were temporary local evidence and were not committed
+to the repository.
+
+**Real native CLI smoke:** a new disposable repository had staged, unstaged, and
+untracked source changes at a commit different from the pinned head. Actual CLI
+0.154.0 was invoked with `--enable worktrees exec --worktree --json -C <source>`.
+Normal-home startup and its escalated retry failed to create the managed worktree
+root. With a disposable `CODEX_HOME`, normal model settings (`gpt-6-astra`,
+`medium`) and permission rules were preserved; credentials were not copied and
+no sandbox bypass was used. These are smoke-test settings, not plugin defaults.
+
+The real CLI created two detached native worktrees at the source HEAD. Both
+remained after startup failed with `sandbox-exec: sandbox_apply: Operation not
+permitted`, including the escalated retry. The real checkout helper, run
+externally in each worktree, selected the pinned PR head and passed `--verify`.
+Source file bytes, index, HEAD, branch, refs, and status matched the pre-launch
+snapshot. No worktree was deleted. Detailed commands, context, and results were
+recorded in temporary local artifacts and were not committed to the repository.
+
+Session initialization, ownership binding, retention after a successful session,
+and real resume remain **blocked**: no session thread was created. External
+helper verification does not establish native resume. This smoke used the actual
+installed CLI; stubbed launcher tests remain a separate check.
