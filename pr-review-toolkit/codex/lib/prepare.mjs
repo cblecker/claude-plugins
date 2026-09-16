@@ -8,7 +8,10 @@ export function parsePR(url) {
   return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }
 export function remoteRepository(url) {
-  const match = /^(?:https:\/\/(?:[^@/?#]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(url || '');
+  // Normalize the hostname without changing credentials or repository suffixes.
+  const normalized = String(url || '').replace(/^(https:\/\/(?:[^@/?#]+@)?|git@|ssh:\/\/git@)github\.com(?=[:/])/i,
+    (_, prefix) => `${prefix}github.com`);
+  const match = /^(?:https:\/\/(?:[^@/?#]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)?(?:\.git)?\/?$/.exec(normalized);
   return match?.[1]?.toLowerCase();
 }
 export function assertRelationship(target, remotes, repositories, lookupError) {
@@ -41,7 +44,7 @@ export function prepare(url, { cwd = process.cwd(),
       try { repositories[name] = api(`repos/${name}`); }
       catch (error) {
         // A missing repository is expected; anything else is worth reporting.
-        if (!/HTTP 404|not found/i.test(`${error.stderr || ''} ${error.message || ''}`)) lookupError = error;
+        if (!/\bHTTP 404\b/i.test(`${error.stderr || ''} ${error.message || ''}`)) lookupError = error;
         continue;
       }
       if (repositories[name]?.parent?.full_name?.toLowerCase() === target) break;

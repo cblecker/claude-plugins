@@ -19,11 +19,18 @@ test('validates PR URLs and recognizes HTTPS and SSH repositories', () => {
     assert.throws(() => parsePR(bad), /Expected/);
   for (const remote of ['https://github.com/A/B.git', 'git@github.com:A/B.git', 'ssh://git@github.com/A/B.git',
     'https://user@github.com/A/B.git', 'https://user:token@github.com/A/B.git',
-    'https://user%3Fname:token%23secret@github.com/A/B.git', 'ssh://git@github.com:22/A/B.git'])
-    assert.equal(remoteRepository(remote), 'a/b');
+    'https://user%3Fname:token%23secret@github.com/A/B.git', 'ssh://git@github.com:22/A/B.git',
+    'https://GITHUB.COM/A/B.git', 'https://User:Token@GitHub.Com/A/B.git',
+    'https://user%3Fname:token%23secret@GitHub.Com/A/B.git', 'git@GITHUB.COM:A/B.git',
+    'ssh://git@GitHub.Com/A/B.git', 'ssh://git@GITHUB.COM:22/A/B.git'])
+    assert.equal(remoteRepository(remote), 'a/b', remote);
   for (const remote of ['https://elsewhere.com/a/b', 'https://user:token@elsewhere.com/a/b',
     'https://example.com?next=@github.com/upstream/repo.git',
-    'https://example.com#@github.com/upstream/repo.git'])
+    'https://example.com#@github.com/upstream/repo.git',
+    'https://example.com?next=@GITHUB.COM/upstream/repo.git',
+    'https://example.com#@GitHub.Com/upstream/repo.git',
+    'https://GITHUB.COM.example.com/a/b.git', 'https://fakeGITHUB.COM/a/b.git',
+    'git@GITHUB-WORK:a/b.git', 'ssh://git@GITHUB.COM.example.com/a/b.git'])
     assert.equal(remoteRepository(remote), undefined, remote);
 });
 test('default API targets github.com for fork lookup and both PR reads despite GH_HOST', async t => {
@@ -87,10 +94,25 @@ test('reports why a fork parent lookup failed', t => {
   options.api = () => { throw Error('HTTP 401: Bad credentials'); };
   assert.throws(() => prepare(url, options), error => /neither/.test(error.message) && /Bad credentials/.test(error.message));
 });
+test('preserves non-404 lookup errors containing not found', t => {
+  const { options } = fixture(t, { fork: true });
+  for (const field of ['message', 'stderr']) {
+    for (const detail of ['token not found', 'helper: command not found',
+      'HTTP 401: authentication token not found', 'HTTP 502: upstream not found',
+      'HTTP 4040: malformed status not found']) {
+      options.api = () => { throw Object.assign(Error('gh api failed'), { [field]: detail }); };
+      assert.throws(() => prepare(url, options),
+        error => /repository lookup failed/.test(error.message) && error.message.includes(detail), `${field}: ${detail}`);
+    }
+  }
+});
 test('a missing repository keeps the plain relationship message', t => {
   const { options } = fixture(t, { fork: true });
-  options.api = () => { throw Error('gh: Not Found (HTTP 404)'); };
-  assert.throws(() => prepare(url, options), error => /neither/.test(error.message) && !/lookup failed/.test(error.message));
+  for (const field of ['message', 'stderr']) {
+    options.api = () => { throw Object.assign(Error('gh api failed'), { [field]: 'gh: Not Found (HTTP 404)' }); };
+    assert.throws(() => prepare(url, options),
+      error => /neither/.test(error.message) && !/lookup failed/.test(error.message), field);
+  }
 });
 for (const fork of [false, true]) test(`prepares pins from ${fork ? 'fork' : 'upstream'} without changing dirty checkout`, t => {
   const { options, source, head, base, calls } = fixture(t, { fork });

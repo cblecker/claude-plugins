@@ -535,11 +535,9 @@ paired run does not demonstrate improved review quality or statistically reliabl
 behavior. Full independent specialists, large changes, a dedicated empty-result
 case, real MCP pagination, and real posting remain outside this behavioral run.
 
-The disposable inputs, pinned commits, instruction snapshots, and agent reports
-are retained locally under
-`/private/var/folders/77/nbm3y7497x79xlkg66vny9gm0000gn/T/codex-review-behavior-gllyYR`;
-the simulated discussion cases are `/private/tmp/codex-review-discussion-exercise.txt`.
-These temporary paths are local run evidence, not portable test dependencies.
+The disposable inputs, pinned commits, instruction snapshots, agent reports, and
+simulated discussion cases were temporary local evidence and were not committed
+to the repository.
 
 **Real native CLI smoke:** a new disposable repository had staged, unstaged, and
 untracked source changes at a commit different from the pinned head. Actual CLI
@@ -554,8 +552,8 @@ remained after startup failed with `sandbox-exec: sandbox_apply: Operation not
 permitted`, including the escalated retry. The real checkout helper, run
 externally in each worktree, selected the pinned PR head and passed `--verify`.
 Source file bytes, index, HEAD, branch, refs, and status matched the pre-launch
-snapshot. No worktree was deleted. Detailed commands, context, and results remain
-in `/private/tmp/codex-refinement-native-L2Q0tW/report.md` and its sibling files.
+snapshot. No worktree was deleted. Detailed commands, context, and results were
+recorded in temporary local artifacts and were not committed to the repository.
 
 Session initialization, ownership binding, retention after a successful session,
 and real resume remain **blocked**: no session thread was created. External
