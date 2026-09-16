@@ -1,7 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
-import { git, run, save } from './common.mjs';
-import { createSession, cleanupSession } from './session.mjs';
+import { git, run } from './common.mjs';
 
 export function parsePR(url) {
   const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)\/?$/.exec(url || '');
@@ -24,10 +22,12 @@ export function assertPinned(metadata, headSha, baseSha) {
   if (metadata.state !== 'open' || metadata.head.sha !== headSha || metadata.base.sha !== baseSha)
     throw Error('PR head or base moved during preparation. Run codex-review-pr again.');
 }
-export function prepare(url, { cwd = process.cwd(), sessionDir,
+export function prepare(url, { cwd = process.cwd(),
   api = endpoint => JSON.parse(run('gh', ['api', '--hostname', 'github.com', endpoint])), gitCommand = git } = {}) {
   const identity = parsePR(url), target = `${identity.owner}/${identity.repo}`.toLowerCase();
   const source = realpathSync(gitCommand(cwd, 'rev-parse', '--show-toplevel'));
+  const commonGitDir = realpathSync(gitCommand(source, 'rev-parse', '--path-format=absolute', '--git-common-dir'));
+  const sourceHead = gitCommand(source, 'rev-parse', 'HEAD');
   const remoteUrls = gitCommand(source, 'remote').split('\n').filter(Boolean)
     .map(name => gitCommand(source, 'remote', 'get-url', name));
   const remotes = remoteUrls.map(url => remoteRepository(url)).filter(Boolean);
@@ -64,20 +64,6 @@ export function prepare(url, { cwd = process.cwd(), sessionDir,
   for (const sha of [headSha, baseSha]) gitCommand(source, 'cat-file', '-e', `${sha}^{commit}`);
   const mergeBase = gitCommand(source, 'merge-base', baseSha, headSha);
   assertPinned(api(endpoint), headSha, baseSha);
-  sessionDir = sessionDir ? realpathSync(sessionDir) : createSession();
-  const checkoutPath = join(sessionDir, 'checkout');
-  try {
-    gitCommand(source, 'worktree', 'add', '--detach', checkoutPath, headSha);
-    const context = { version: 1, pr: { ...identity, title: metadata.title, body: metadata.body || '', author: metadata.user.login,
-      state: metadata.state, baseRef: metadata.base.ref, headSha, url,
-      mergeable: metadata.mergeable, mergeableState: metadata.mergeable_state }, checkoutPath, baseSha, mergeBase,
-      baseAheadCount: Number(gitCommand(source, 'rev-list', '--count', `${mergeBase}..${baseSha}`)) };
-    const contextFile = join(sessionDir, 'context.json');
-    save(contextFile, context);
-    return { ...context, contextFile };
-  } catch (error) {
-    try { cleanupSession(sessionDir, { cwd: source, gitCommand }); }
-    catch (cleanupError) { error.message += `\n${cleanupError.message}`; }
-    throw error;
-  }
+  return { version: 2, sourceCheckout: source, commonGitDir, sourceHead,
+    pr: { ...identity, url, headSha }, baseSha, mergeBase };
 }

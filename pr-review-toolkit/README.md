@@ -348,7 +348,8 @@ selects `./codex/skills/`, so Claude's workflow and `address-pr-feedback` skill 
 not loaded by Codex.
 
 Prerequisites: Node.js, Git, authenticated `gh`, Git HTTPS authentication for
-private repositories, and Codex with native subagents and GitHub MCP read tools.
+private repositories, and Codex CLI 0.154.0 or later with native worktree support,
+native subagents, and GitHub MCP read tools.
 Approved posting also needs the GitHub review and reply write tools. The Claude
 `github` plugin dependency does not configure GitHub MCP for Codex automatically.
 Use your normal Codex MCP configuration.
@@ -365,28 +366,28 @@ codex-review-pr https://github.com/OWNER/REPO/pull/123
 ```
 
 Run it from a clone of the PR's base repository or a fork with that upstream
-parent. The launcher verifies the relationship, fetches over HTTPS, pins the
-head and base, calculates their merge-base, and creates a unique detached
-worktree in a private directory under the system temporary directory (honoring
-`TMPDIR`). It preserves the starting checkout, including uncommitted work.
-Separate invocations can review different
-PRs concurrently; fetches do not use shared `FETCH_HEAD` for identity.
+parent. Preparation verifies the relationship, fetches over HTTPS, and returns
+compact version-2 JSON containing the canonical source checkout, common Git
+directory, source HEAD, PR identity, and pinned head/base/merge-base. It leaves
+source files, index, HEAD, refs, and worktree registrations intact. Concurrent
+fetches do not write shared `FETCH_HEAD` or refs.
 
-The launcher starts a normal Codex session in the new worktree and invokes
-`$review-pr` with a small temporary startup context. `CODEX_REVIEW_PLUGIN_ROOT`
-can override the plugin location. The checkout remains available throughout the
-review and discussion, then the launcher removes it and the startup files when
-Codex exits. Preparation failures and catchable termination signals also trigger
-cleanup. Cleanup preserves Codex's exit status and uses non-forced
-`git worktree remove`; dirty or locked worktrees are retained with their paths
-reported for inspection and manual removal.
+The launcher invokes `codex --enable worktrees --worktree --cd <source>` with
+`$review-pr` and the JSON in one quoted prompt argument. Native worktree support
+is required and enabled per invocation; unsupported CLIs report their own error.
+`CODEX_REVIEW_PLUGIN_ROOT` can override the plugin location. Codex creates and
+owns the worktree. The skill rechecks the PR pins through MCP, then a guarded
+helper selects the PR head only in a clean, detached linked worktree sharing the
+source repository. The source checkout may be dirty and at a different commit.
+Repository guidance is read after checkout, before specialist analysis.
 
-An uncatchable termination or machine failure can leave temporary resources
-behind. Use `git worktree remove '<checkout-path>'` from the original repository
-to remove a retained checkout when finished. If the operating system has already
-deleted the checkout, `git worktree prune` removes its stale Git registration.
-Older checkouts under `~/.local/share/codex-review/worktrees/` are not migrated or
-automatically deleted; use `git worktree list` and remove those individually.
+The actual review checkout and pins stay in the conversation alongside the board
+and drafts. Use `codex --enable worktrees resume <SESSION_ID>` to continue a
+retained review; resume revalidates the checkout and range without switching HEAD.
+Codex controls worktree retention and cleanup, including failed starts. The
+toolkit preserves Codex's exit status and promises no deletion on exit. Older
+toolkit-created worktrees receive no automatic migration or deletion; inspect
+`git worktree list` and remove those individually when finished.
 
 Preparation obtains its GitHub token through the shell's `gh auth token` command,
 so authentication aliases such as a 1Password wrapper are honored. The token is
@@ -394,7 +395,8 @@ passed to preparation as `GH_TOKEN`; it is not saved or exported to the parent
 shell. Codex continues to use its own alias and normal authentication settings.
 
 You can also invoke `$review-pr <PR_URL>` in a clean checkout already at the PR
-head. The skill verifies the PR and pins the base before analysis.
+head. The skill verifies the repository and PR and pins the base before analysis;
+this route does not switch the checkout.
 
 ### Native review flow
 
@@ -437,11 +439,19 @@ The install check uses a temporary Codex home, installs from this local
 marketplace, checks bundled files and exclusive skill discovery, and removes the
 temporary installation. It does not change your normal Codex installation.
 
-Launcher tests exercise real local Git repositories, fork/upstream preparation,
-paths with spaces, dirty starting checkouts, simultaneous processes, moving PR
-heads/bases, missing ancestry, session-exit and signal cleanup, preserved shell
-traps and exit status, and retention when non-forced removal fails. They mock
-GitHub metadata and redirect HTTPS fetches to fixture remotes.
+Tests exercise real local Git repositories, fork/upstream preparation, unusual
+paths, dirty source checkouts, concurrent fetches, moving PR heads/bases, missing
+ancestry, and preservation of source state. Checkout tests cover guarded PR-head
+selection, repeat invocation, verification on resume, and refusals that preserve
+existing work. Launcher tests verify native flags, exact inline context, shell
+aliases, token scoping, preparation failures, and Codex exit status. GitHub
+metadata is mocked and HTTPS fetches are redirected to fixture remotes.
+
+For a real CLI smoke test, use a disposable repository with a dirty source at a
+different commit from the pinned PR head. Launch with native worktrees, pass the
+context to the checkout helper, record the checkout and pins, then exit and
+resume the session. Verify that the source files, index, HEAD, and refs remain
+intact and that the retained checkout and conversation still have the same pins.
 
 Behavioral validation should exercise small and large PRs, existing human/bot
 threads, failed reviewers, unavailable subagents, incomplete collection, editable

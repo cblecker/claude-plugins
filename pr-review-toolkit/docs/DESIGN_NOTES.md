@@ -95,16 +95,26 @@ conversation contexts and execution lifecycle; the parent selects lenses,
 clarifies findings, and synthesizes the board. The separate Claude Workflow
 continues to evolve independently.
 
-Only PR preparation remains scripted: the launcher creates a detached worktree,
-pins head/base/merge-base, and passes a temporary startup context. Concurrent
-launches fetch without writing shared `FETCH_HEAD` or remote-tracking refs.
+PR preparation fetches over HTTPS and pins head/base/merge-base without creating
+checkouts or updating shared `FETCH_HEAD` or refs. Its compact version-2 JSON
+records canonical source and common Git paths, source HEAD, and PR identity.
+Descriptive PR metadata comes from MCP. The launcher scopes its alias-resolved
+authentication token to preparation and passes the JSON inline in one prompt.
 
-Review checkouts live in private system temporary directories. The launcher owns
-each directory before preparation starts, so incomplete startup handoffs can be
-cleaned up too. A subshell isolates exit and signal traps from the calling shell;
-cleanup runs after the foreground command stops and preserves its exit status.
-Worktree removal is non-forced, and retained paths are reported. These checkouts
-last only for the review session; there is no persistent checkout cache.
+Native Codex worktrees own creation, retention, and cleanup. The launcher enables
+worktrees per invocation and starts from the source path; CLI 0.154.0 or later is
+required, with no version gate or legacy fallback. A guarded helper checks the
+new checkout is clean, detached, linked to the recorded repository, and at the
+source or PR head before selecting the pinned PR head without force. Repository
+guidance is read after that transition. Direct skill invocation uses an existing
+clean PR-head checkout without switching it.
+
+The conversation retains the actual review checkout, pins, board, and drafts.
+Resume validates that same checkout and pinned range without repeating the
+transition. The launcher preserves Codex's exit status and does not delete
+worktrees on exit or failed startup. There are no temporary handoff files,
+session-directory helpers, or cleanup traps. Older toolkit worktrees receive no
+automatic migration or deletion.
 
 Normal Codex session settings govern permissions; review-only instructions are
 not per-stage enforcement. There is no custom profile, worker pool, schema/board

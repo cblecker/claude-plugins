@@ -17,7 +17,8 @@ try {
   assert.equal(manifest.skills, './codex/skills/');
   assert.ok(manifest.interface.defaultPrompt.length);
   for (const path of ['codex/skills/review-pr/SKILL.md', 'codex/bin/prepare.mjs',
-    'codex/bin/session.mjs', 'codex/bin/codex-review-pr.bash'])
+    'codex/bin/checkout.mjs', 'codex/lib/checkout.mjs', 'codex/lib/prepare.mjs',
+    'codex/lib/common.mjs', 'codex/bin/codex-review-pr.bash'])
     assert.ok(existsSync(join(plugin, path)), `Missing ${path}`);
   const skills = join(plugin, 'codex/skills');
   for (const file of files(skills).filter(path => path.endsWith('.md'))) {

@@ -38,7 +38,7 @@ Claude and Codex implementations intentionally evolve independently.
 | `uvx skillsaw --strict` | Lint plugin |
 | `node --test pr-review-toolkit/codex/test/*.test.mjs` | Test Codex launcher |
 | `node pr-review-toolkit/codex/bin/validate.mjs --install` | Validate Codex discovery in a temporary installation |
-| `codex-review-pr <PR_URL>` | Prepare a separate worktree and launch a native Codex review |
+| `codex-review-pr <PR_URL>` | Prepare PR pins and launch a Codex-managed worktree review |
 
 ## Adding a Plugin
 
@@ -86,9 +86,12 @@ Private repositories need working Git HTTPS authentication in addition to `gh`.
 Source the launcher after the authenticated `gh` and `codex` aliases. Preparation
 gets a token through the shell's `gh auth token` and scopes it to its process.
 Keep simultaneous preparation independent of shared `FETCH_HEAD` and leave the
-starting checkout untouched. Keep review worktrees in private system temporary
-directories and clean them up when the session exits or preparation fails. Use
-non-forced removal and report retained paths.
+starting checkout untouched. Delegate review worktree creation, ownership,
+retention, and cleanup to native Codex worktrees. Pass version-2 context inline;
+the guarded checkout helper may
+select the pinned head only in a clean, detached linked worktree distinct from
+the source. Keep actual checkout and pins in the conversation for resume, which
+revalidates without switching HEAD. The toolkit promises no deletion on exit.
 
 Analysis uses native subagents and normal Codex session settings. Review-only
 instructions do not enforce per-stage tool or credential isolation. Keep the
