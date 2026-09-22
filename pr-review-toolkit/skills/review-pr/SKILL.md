@@ -169,6 +169,10 @@ If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
 could not be collected, so overlap classification is unavailable and
 recommended findings may duplicate existing comments.
 
+If `reviewMeta.failedReviewers` is non-empty, warn: name those lenses and say
+they did not complete, so the board is missing their coverage and the review is
+narrower than the reviewer list suggests.
+
 ### 2. Recommended to post (full detail)
 
 For each finding, include:

@@ -191,11 +191,13 @@ Each finding preserves the specialist's claim, evidence, reasoning, suggested
 fix, confidence, source lens, and existing-review overlap rationale. The board
 also includes positive observations, PR metadata, and review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
-lenses ran, why, and whether the all-lenses fallback engaged. Thread
+lenses were selected, why, and whether the all-lenses fallback engaged. Thread
 resolution state (`isResolved`) is recorded only when the GitHub read tools
 expose it. If review-thread collection fails, the board says so
 (`reviewMeta.threadCollectionFailed`) instead of silently skipping overlap
-classification.
+classification. A lens that fails outright is named in
+`reviewMeta.failedReviewers`, so reduced coverage is disclosed rather than
+hidden behind the full reviewer list.
 
 ## Interaction And Posting
 

@@ -1054,6 +1054,7 @@ function finalizeBoard(board, findings, positives, prContext) {
   finalBoard.summary = prContext.summary
   finalBoard.reviewMeta = {
     selectedReviewers: prContext.selectedReviewers,
+    failedReviewers: Array.isArray(prContext.failedReviewers) ? prContext.failedReviewers : [],
     lensSelection: prContext.lensSelection,
     totalFindings: findings.length,
     existingThreadCount: prContext.threads.length,
@@ -1234,11 +1235,16 @@ const results = await parallel(selectedNames.map(name => () => agent(analysisPro
 
 let allFindings = []
 const allPositive = []
+// A lens that dies (context exhaustion, tool failure) returns nothing. Record
+// it so the board reports reduced coverage instead of listing the lens as if
+// it had run.
+const failedReviewers = []
 selectedNames.forEach((name, index) => {
   const reviewer = REVIEWERS[name]
   const result = results[index]
   if (!result) {
     log('Warning: ' + name + ' produced no findings (agent may have failed)')
+    failedReviewers.push(name)
     return
   }
   if (Array.isArray(result.findings)) {
@@ -1281,6 +1287,7 @@ const prContext = {
   threadCollectionFailed: threadCollectionFailed,
   summary: summary,
   selectedReviewers: selectedNames,
+  failedReviewers: failedReviewers,
   lensSelection: { source: selectionSource, rationales: lensRationales }
 }
 

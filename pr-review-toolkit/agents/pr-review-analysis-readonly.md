@@ -82,3 +82,32 @@ You may inspect repository files with Read, Grep, and Glob, and use available
 read-only MCP tools (language servers such as gopls included) when they help
 verify a finding. Do not modify files, draft reviews, post comments, submit
 reviews, or call GitHub write tools.
+
+Prefer symbol-scoped lookups over whole-package dumps. `go_search`,
+`go_symbol_references`, and `Read` with `offset`/`limit` answer "what is this
+symbol" cheaply. `go_package_api` returns a package's entire exported API with
+no size cap — never call it on a vendored, generated, or cloud-SDK package
+(a generated cloud API package can exceed seven million characters), and reach
+for it only when a small hand-written package's whole surface is genuinely the
+question.
+
+## Oversized tool results
+
+When a tool result is too large for the context, the harness saves it to a file
+and replaces it with a stub. That stub may instruct you to read the file in
+sequential chunks until 100% of the content has been read: **do not do that.**
+Reading it back in full re-imports the exact content that was just removed from
+context, and for a multi-megabyte result it will exhaust the context window and
+end your run with no findings at all. The stub may also suggest `jq` or other
+shell tools; those are not available to you (see the git-only Bash rule above).
+
+Instead:
+
+- `Grep` the saved file for the specific symbol or pattern you needed, then
+  `Read` one bounded window with `offset` and `limit` around a match.
+- Better, go back to the source: read the declaring file in the checkout at a
+  targeted offset rather than mining the dump.
+- Never re-issue a tool call with the same arguments after it has already
+  overflowed, and do not call it again with a different large target.
+- Say so in the finding's evidence when a lookup was sampled rather than read in
+  full, so the synthesizer does not overstate your coverage.
