@@ -1,0 +1,18 @@
+{
+  "name": "golang",
+  "version": "1.0.0",
+  "description": "Go development tools: gopls MCP and LSP servers, plus automatic gofmt formatting of edited Go files",
+  "author": {
+    "name": "cblecker",
+    "email": "admin@toph.ca"
+  },
+  "keywords": ["go", "golang", "gopls", "gofmt", "mcp", "lsp"],
+  "lspServers": {
+    "gopls": {
+      "command": "gopls",
+      "extensionToLanguage": {
+        ".go": "go"
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ Personal Claude Code plugin marketplace
 │   └── marketplace.json      # Marketplace manifest (lists all plugins)
 ├── git/                       # Custom plugin: git workflows & safety
 ├── github/                    # MCP wrapper: GitHub tools, PR triage skill
+├── golang/                    # Custom plugin: gopls MCP/LSP, gofmt hook
 ├── gws/                       # Vendored upstream skills: Google Workspace CLI
 ├── plan-review/               # Custom plugin: plan-file pre-flight review
 ├── pr-review-toolkit/         # Custom plugin: PR review workflow
