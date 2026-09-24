@@ -5,7 +5,8 @@
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": {
         "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}",
-        "X-MCP-Toolsets": "default,actions,orgs,labels,notifications,discussions,gists,projects,code_security,secret_protection,dependabot,security_advisories,github_support_docs_search"
+        "X-MCP-Toolsets": "gists,code_security,security_advisories,dependabot,github_support_docs_search",
+        "X-MCP-Tools": "actions_get,actions_list,get_job_logs,get_file_contents,search_code,list_commits,get_commit,list_releases,list_tags,get_latest_release,get_release_by_tag,get_tag,search_repositories,search_commits,list_branches,pull_request_read,search_pull_requests,list_pull_requests,create_pull_request,update_pull_request,pull_request_review_write,add_comment_to_pending_review,add_reply_to_pull_request_comment,issue_read,search_issues,list_issues,issue_write,add_issue_comment,update_issue_comment,sub_issue_write,list_issue_types,list_issue_fields,get_me,get_teams,get_team_members,search_users,list_notifications,get_notification_details,dismiss_notification,manage_notification_subscription,check_dependency_vulnerabilities"
       }
     }
   }
