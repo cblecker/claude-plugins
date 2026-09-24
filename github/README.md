@@ -1,26 +1,41 @@
 # GitHub Plugin
 
-GitHub MCP server with selected toolsets enabled for repository management, code security, discussions, notifications, and more.
+GitHub MCP server with a curated tool allowlist for pull requests, issues, notifications, read-only repository access, and code security.
 
 ## Components
 
 ### MCP Server
 
-HTTP-based MCP server connected to `api.githubcopilot.com`. Tools are deferred and loaded on demand via tool search, keeping them out of the context window until needed. The following toolsets are enabled:
+HTTP-based MCP server connected to `api.githubcopilot.com`. Tools are deferred and loaded on demand via tool search, keeping them out of the context window until needed.
 
-- `default` — repos, issues, pull requests, commits, files, users
-- `actions` — workflow runs, jobs, artifacts, logs
-- `orgs` — organization membership and teams
-- `labels` — repository label management
-- `notifications` — notification listing and management
-- `discussions` — repository discussions and comments
-- `gists` — gist creation and management
-- `projects` — GitHub Projects (v2) management
-- `code_security` — code scanning alerts
-- `secret_protection` — secret scanning alerts
-- `dependabot` — Dependabot alerts
-- `security_advisories` — global and repository security advisories
-- `github_support_docs_search` — GitHub product documentation search
+The server is configured with two headers in `.mcp.json`:
+
+- `X-MCP-Toolsets` enables these toolsets in full, including tools added to them upstream:
+  - `gists` — gist reading, creation, and updates
+  - `code_security` — code scanning alerts
+  - `security_advisories` — global and repository security advisories
+  - `dependabot` — Dependabot alerts
+  - `github_support_docs_search` — GitHub product documentation search (remote-only)
+- `X-MCP-Tools` adds individual tools on top. Because the `default` toolset is not
+  named, nothing else is enabled — new upstream tools in these areas require an
+  explicit opt-in:
+  - **Pull requests** — `pull_request_read`, `search_pull_requests`, `list_pull_requests`,
+    `create_pull_request`, `update_pull_request`, `pull_request_review_write`,
+    `add_comment_to_pending_review`, `add_reply_to_pull_request_comment`
+  - **Issues** — `issue_read`, `search_issues`, `list_issues`, `issue_write`,
+    `add_issue_comment`, `update_issue_comment`, `sub_issue_write`, `list_issue_types`,
+    `list_issue_fields`
+  - **Repositories (read-only)** — `get_file_contents`, `search_code`, `search_repositories`,
+    `list_branches`, `list_commits`, `get_commit`, `search_commits`, `list_tags`, `get_tag`,
+    `list_releases`, `get_latest_release`, `get_release_by_tag`
+  - **Actions (read-only)** — `actions_list`, `actions_get`, `get_job_logs`
+  - **Notifications** — `list_notifications`, `get_notification_details`,
+    `dismiss_notification`, `manage_notification_subscription`
+  - **Users and teams** — `get_me`, `get_teams`, `get_team_members`, `search_users`
+  - **Other** — `check_dependency_vulnerabilities` (remote-only)
+
+To enable another tool, add its exact name to `X-MCP-Tools`; an unknown name
+causes the server to reject the connection.
 
 ### Hooks
 
