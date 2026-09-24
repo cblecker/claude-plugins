@@ -1,0 +1,29 @@
+{
+  "description": "Auto-format Go files with gofmt after write/edit",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Write(**/*.go)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/gofmt.sh\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(**/*.go)",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/gofmt.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
