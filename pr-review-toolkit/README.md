@@ -128,7 +128,7 @@ skill command (in a PR head checkout)
 Workflow(pr-review-toolkit:review-pr-analysis) -> workflow agent() calls
   collector  -> pr-review-github-collector  -> GitHub MCP reads (threads)
   selector   -> pr-review-selector          -> read-only git over the pinned range
-  specialists-> pr-review-analysis-readonly -> read-only repo/git/MCP inspection
+  specialists-> pr-review-analysis-readonly -> read-only repo/git inspection (no MCP)
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
 
