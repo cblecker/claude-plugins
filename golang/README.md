@@ -6,8 +6,9 @@ Go development tools for Claude Code.
 
 ### gopls MCP server
 
-Runs `gopls mcp` as an MCP server, providing Go-aware code intelligence such as
-go-to-definition, find references, hover documentation, and workspace symbols.
+Runs `gopls mcp` as an MCP server, providing Go-aware tools for workspace and
+package summaries, symbol search and references, diagnostics, and
+vulnerability checks.
 
 ### gopls LSP server
 
@@ -22,7 +23,7 @@ edited, keeping code consistently formatted.
 ## Prerequisites
 
 - Go toolchain with `gofmt` in `PATH`
-- `gopls` in `PATH`
+- `gopls` v0.20.0 or later in `PATH` (earlier versions lack the `mcp` subcommand)
 - `jq` in `PATH` (used by the gofmt hook)
 
 Install `gopls` if not already present:
