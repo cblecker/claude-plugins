@@ -62,14 +62,54 @@ posture is kept: when in doubt, include; general correctness always runs.
 
 Skill `allowed-tools` constrains only the orchestrator (learning recorded
 from PR #49) — workflow-spawned agents get their tools from their own agent
-definitions. The specialist agent stays a *denylist* agent so read-only MCP
-(gopls and other language servers) remains usable; the denylist hard-denies
-the github plugin's entire write surface, audited against the
-github-mcp-server toolsets the plugin enables. Re-audit that list whenever
-the github plugin dependency updates. The synthesis agent runs with no
+definitions. The synthesis agent runs with no
 tools at all: it is fed the most untrusted text in the flow (finding
 bodies, thread comments), and the agent holding the most untrusted input
 should hold the fewest capabilities.
+
+## Specialists: allowlist, no MCP
+
+Through 2.2 the specialist agent was a *denylist* agent, so read-only MCP
+(gopls and other language servers) stayed usable while the github plugin's
+write surface was hard-denied. 2.3 makes it an allowlist of `Bash`, `Read`,
+`Grep`, and `Glob`, based on transcripts of real runs:
+
+- Behind a custom `ANTHROPIC_BASE_URL` (e.g. a LiteLLM gateway) Claude Code
+  turns MCP tool search off, so every inherited MCP schema is sent on every
+  specialist turn — and specialists run the most turns in the flow.
+- On two gateway-routed runs (non-Claude models, 29–34 file PRs), gopls
+  `go_search` was 17% of specialist tool-result volume, 39% of the files it
+  returned were vendored or module-cache paths, and one of 22 findings cited
+  a symbol-reference lookup. That is a lower bound on its navigation value (a
+  search that led to a Read does not show up), but nothing indicated Grep
+  could not have found the same code. `go_package_api` on a generated
+  package also caused the context overflows handled under *Oversized tool
+  results* in the agent definition.
+- The same runs made 73 GitHub MCP read calls although the prompt says not
+  to refetch PR data.
+- Claude runs without gopls installed produced full-quality boards from
+  git, Grep, and Read alone.
+
+The allowlist also makes GitHub writes impossible by construction, so there
+is no longer a denylist to re-audit when the github plugin updates. If
+reviews visibly miss caller or API-impact issues, bring back
+`go_symbol_references` alone, not the whole server.
+
+## Investigation scope
+
+The same transcripts showed specialist cost is turns × a context that grows
+every turn: gateway-routed specialists ran 55–130 turns each, one grew to
+about a million tokens and died, while Claude specialists finished in 5–24.
+Most of the extra turns were git history (`log`/`show`, ~320 calls vs 6)
+and whole-file reads of unchanged code. Specialist prompts therefore start
+from the diff, read changed files around the hunks, use history only when a
+specific finding depends on it, and stop once each finding has evidence.
+
+There is deliberately no numeric tool-call budget: the only calibration
+data comes from small PRs, and a flat number would cut coverage on large
+ones. If the stopping rules prove insufficient, the next step is a budget
+scaled from the selector's changed-file count, or a `maxTurns` backstop —
+calibrated on measured runs.
 
 ## Invocation: named plugin workflow, not `scriptPath`
 

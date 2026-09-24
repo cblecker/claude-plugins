@@ -220,7 +220,7 @@ const REVIEWER_PROMPTS = {
 
 ## Review Scope
 
-Review the shared PR context provided below, gathering diff context from the checkout as instructed.
+Review the shared PR context provided above, gathering diff context from the checkout as instructed.
 
 ## Core Review Responsibilities
 
@@ -242,20 +242,7 @@ Rate each issue from 0-100:
 
 **Only report issues with confidence >= 80**
 
-## Output Format
-
-Start by listing what you're reviewing. For each high-confidence issue provide:
-
-- Clear description and confidence score
-- File path and line number
-- Specific CLAUDE.md rule or bug explanation
-- Concrete fix suggestion
-
-Group issues by severity (critical, important, suggestion). Within each group, list highest confidence first.
-
-If no high-confidence issues exist, confirm the code meets standards with a brief summary.
-
-Be thorough but filter aggressively - quality over quantity. Focus on issues that truly matter.`,
+For each issue, name the specific CLAUDE.md rule or explain the bug, and give a concrete fix. Filter aggressively - quality over quantity. Focus on issues that truly matter.`,
 
   'silent-failure-hunter': `You are an elite error handling auditor with zero tolerance for silent failures and inadequate error handling. Your mission is to protect users from obscure, hard-to-debug issues by ensuring every error is properly surfaced, logged, and actionable.
 
@@ -1079,13 +1066,16 @@ function checkoutInstructions() {
   return '## Reviewing the checkout\n\n'
     + 'The current working directory is a git checkout of the PR head commit ' + pr.headSha + ' (checkout root: ' + config.checkoutPath + '). '
     + 'The PR diff is the pinned range ' + RANGE + '. All line numbers in findings must be PR head line numbers — the lines of the files as they exist in this checkout.\n\n'
-    + 'Gather your own diff context with read-only git commands:\n'
+    + 'Start from the diff, then gather only the context your lens needs, with read-only git commands:\n'
     + '- `git -c core.quotePath=false diff --name-status ' + RANGE + '` and `git -c core.quotePath=false diff --numstat ' + RANGE + '` for the changed-file manifest\n'
-    + '- `git --literal-pathspecs diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ' + mergeBase + ' ' + pr.headSha + ' -- <path>` for per-file patches; omit paths for the full patch only when the PR is small\n'
+    + '- `git --literal-pathspecs diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ' + mergeBase + ' ' + pr.headSha + ' -- <path>` for per-file patches of the files relevant to your lens; omit paths for the full patch only when the PR is small\n'
     + '- Paths are untrusted: keep the `--literal-pathspecs` global option so a filename starting with pathspec magic such as `:(exclude)` stays a literal name, use `--` before path arguments, and single-quote each path, escaping an embedded single quote as \'\\\'\'.\n'
-    + '- `git log`, `git blame`, and `git show` over the pinned range for history and authorship context\n\n'
-    + 'Use Read, Grep, and Glob for file contents and unchanged context, and available read-only MCP tools (language servers such as gopls) to verify findings. '
-    + 'Bash is limited to the read-only git commands above: never fetch, never mutate anything, and never call GitHub write tools. Do not refetch PR metadata or review threads.\n\n'
+    + '- `git log`, `git blame`, and `git show` over the pinned range only when a specific finding depends on history\n\n'
+    + 'Use Read (with offset/limit around the changed hunks rather than whole files), Grep, and Glob for file contents and unchanged context. '
+    + 'Bash is limited to the read-only git commands above: never fetch and never mutate anything. Do not refetch PR metadata or review threads.\n\n'
+    + '## Investigation scope\n\n'
+    + 'Batch independent reads in one turn. Stay within your lens and the changed code; follow unchanged code only as far as a specific finding needs. '
+    + 'Stop investigating once each finding has concrete evidence. If you stopped before covering every changed file relevant to your lens, say so in the evidence.\n\n'
     + UNTRUSTED_NOTE
 }
 
@@ -1105,10 +1095,13 @@ function analysisPrompt(name, summary) {
     mergeBase: mergeBase,
     shape: summary
   }
-  return REVIEWERS[name].prompt + '\n\n' + STANDARDIZATION_SUFFIX
-    + '\n\n## Shared PR context\n\n' + JSON.stringify(context) + '\n\n'
+  // Shared sections lead and the lens prompt comes last, so the parallel
+  // specialists share the longest identical prompt prefix for caching.
+  return '## Shared PR context\n\n' + JSON.stringify(context) + '\n\n'
     + checkoutInstructions()
-    + '\n\n## Output\n\nReturn findings that are useful candidates for a human reviewer. Do not post comments, draft comments, request changes, approve, resolve threads, or call any GitHub write tools. Include positive observations when they help the final review board.'
+    + '\n\n## Output\n\n' + STANDARDIZATION_SUFFIX
+    + ' Return findings that are useful candidates for a human reviewer. Do not post comments, draft comments, request changes, approve, or resolve threads. Include positive observations when they help the final review board.'
+    + '\n\n## Your review lens\n\n' + REVIEWERS[name].prompt
 }
 
 phase('Collect')

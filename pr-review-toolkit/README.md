@@ -108,9 +108,10 @@ checkout. The workflow:
 - falls back to running **all** lenses when selector output fails validation
   — selection is disclosed in `reviewMeta.lensSelection`, never silent
 - fans out the selected specialists in parallel; each reads the checkout
-  directly — Read/Grep/Glob for contents, read-only
-  `git log`/`blame`/`show`/`diff` over `<merge_base>..HEAD` for history and
-  patches — so findings carry PR head line numbers by construction
+  directly — read-only `git diff` over `<merge_base>..HEAD` for patches,
+  Read/Grep/Glob for contents, and `git log`/`blame`/`show` only when a
+  finding depends on history — so findings carry PR head line numbers by
+  construction
 - synthesizes findings into a review board grouped by posting
   recommendation, existing-review overlap, and discussion value
 
@@ -127,7 +128,7 @@ skill command (in a PR head checkout)
 Workflow(pr-review-toolkit:review-pr-analysis) -> workflow agent() calls
   collector  -> pr-review-github-collector  -> GitHub MCP reads (threads)
   selector   -> pr-review-selector          -> read-only git over the pinned range
-  specialists-> pr-review-analysis-readonly -> read-only repo/git/MCP inspection
+  specialists-> pr-review-analysis-readonly -> read-only repo/git inspection (no MCP)
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
 
@@ -262,12 +263,11 @@ not the enforcement layer.
 - **pr-review-selector** — `Bash`, `Read`, `Grep`, with an
   instruction-level read-only git contract: `diff`/`log`/`show` over the
   pinned range only, `--literal-pathspecs` and a literal `--` before paths.
-- **pr-review-analysis-readonly** (specialists) — a denylist agent so
-  read-only MCP tools (language servers such as gopls) stay usable. Bash is
-  allowed under the same instruction-level read-only git contract; every
-  GitHub write tool in the github plugin's toolsets is hard-denied
-  (re-audited when the dependency updates), as are file mutation tools,
-  the `Agent` tool (and its `Task` alias), and web tools.
+- **pr-review-analysis-readonly** (specialists) — allowlist: `Bash`,
+  `Read`, `Grep`, `Glob`. Bash is allowed under the same instruction-level
+  read-only git contract. No MCP tools, so no GitHub writes and no MCP
+  schema overhead on every turn (see
+  [DESIGN_NOTES](docs/DESIGN_NOTES.md#specialists-allowlist-no-mcp)).
 - **pr-review-synthesis** — no tools at all. It works from prompt JSON, and
   it is the agent fed the most untrusted text (finding bodies, thread
   comments) — exactly the agent that should hold no capabilities.
