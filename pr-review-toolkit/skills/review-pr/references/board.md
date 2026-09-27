@@ -43,14 +43,15 @@ narrower than the reviewer list suggests.
 
 Include this section only when `followUp` is not null.
 
-Header line, from `followUp`: `Follow-up review — you (@reviewerLogin)
-reviewed <reviewedCommit, 7 chars> on <reviewedAt, date only>
-(<reviewState>); <n> commits since.` If
+Header line, from `followUp` and `reviewMeta.reviewerLogin`: `Follow-up
+review — you (@<login>) reviewed <reviewedCommit, 7 chars> on <reviewedAt,
+date only> (<reviewState>); <n> commits since.` If
 `git merge-base --is-ancestor <reviewedCommit> <reviewMeta.headSha>` succeeds,
-compute `n` with `git rev-list --count <reviewedCommit>..<reviewMeta.headSha>`. Otherwise the branch was
-rewritten since your review: say so in place of the count. When `reviewedCommit` is empty (threads
-but no submitted review), write `you opened <threadCount> threads without a
-submitted review` instead.
+compute `n` with `git rev-list --count <reviewedCommit>..<reviewMeta.headSha>`.
+Otherwise say, in place of the count, that the branch was rewritten since
+your review, so verdicts rest on the current code only. When
+`reviewedCommit` is empty, write `you opened <threadCount> threads; no
+reviewed commit is known` instead.
 
 Then one line per entry of `followUp.items`, in order:
 `<glyph> <id> <path>:<line> — <ask> → <evidence>[; fixed in <fixedIn>]; thread
@@ -60,10 +61,7 @@ flags are absent. For the item whose `threadId` is `review-body`, write
 `review summary` in place of `<path>:<line>` and omit the thread state.
 
 If `followUp.verifierFailed` is true, say the follow-up verifier did not
-complete, so every item is unverifiable. Otherwise, if `followUp.items` is
-non-empty, `reviewedCommit` is set, and `deltaAvailable` is false, say verdicts rest on the current code and
-thread replies only, because the reviewed commit is missing or the branch
-was rewritten.
+complete, so every item is unverifiable.
 
 ### 3. Recommended to post (full detail)
 
@@ -132,7 +130,9 @@ overlaps, then offer options:
 
 ### When nothing is recommended and your earlier findings are all addressed
 
-`followUp.items` is non-empty and every item is `addressed`:
+`followUp.items` is non-empty, every item is `addressed`, and neither
+`reviewMeta.threadCollectionFailed` nor `reviewMeta.reviewsCollectionFailed`
+is true:
 
 1. "Approve: previous findings addressed"
 2. "I spotted something"
@@ -164,5 +164,4 @@ directly on the board state, then re-present the counts and the menu:
 - "too picky", "be less picky", or "I have reviewed this before" demotes into
   Other findings every recommended finding that is not `critical` and whose
   `changedSinceLastReview` is not `true`, each with the note `Demoted at your
-  request.` When no finding carries `changedSinceLastReview`, demote every
-  non-critical recommended finding.
+  request.`

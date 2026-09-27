@@ -239,8 +239,8 @@ lenses were selected, why, and whether the all-lenses fallback engaged;
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
 recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
-instead of silently skipping overlap classification and follow-up detection;
-a failed read of submitted reviews is disclosed separately
+instead of silently skipping overlap classification and verdicts on your
+earlier threads; a failed read of submitted reviews is disclosed separately
 (`reviewMeta.reviewsCollectionFailed`), since it hides a review left without
 inline threads.
 A lens that fails outright is named in `reviewMeta.failedReviewers`, so
@@ -260,9 +260,9 @@ options: asking about a finding id, `promote F<n>` / `demote F<n>`, or
 the delta since your last review.
 
 Drafts are plain conversation text until the user approves a preview. The skill
-previews each line comment, review-body text, and the proposed review event
-(`COMMENT`, `REQUEST_CHANGES`, or `APPROVE`) before any GitHub write tool is
-used.
+previews each line comment, thread reply, review-body text, and the proposed
+review event (`COMMENT`, `REQUEST_CHANGES`, `APPROVE`, or none for a run of
+replies only) before any GitHub write tool is used.
 
 Board layout and menu rules load from the bundled `references/board.md` when
 the workflow returns, and drafting, preview, and posting mechanics from
