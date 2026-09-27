@@ -698,11 +698,13 @@ function synthesisGroups(synthesized, findingCount) {
 
 // Thread identity comes only from the collector's record for the thread id
 // the synthesizer named, so commentId, isResolved, and the descriptors always
-// describe one real thread. An id that matches no thread keeps the status but
-// carries no reply target, which the posting preview flags.
+// describe one real thread. An 'overlaps' id that matches no thread keeps the
+// status but carries no reply target, which the posting preview flags;
+// 'already_covered' hides the finding, so it needs a real thread.
 function reviewOverlap(overlap, threads) {
   if (!overlap || (overlap.status !== 'overlaps' && overlap.status !== 'already_covered')) return undefined
   const thread = overlap.threadId ? threads.find(t => t && t.id === overlap.threadId) : null
+  if (overlap.status === 'already_covered' && !thread) return undefined
   const result = { status: overlap.status }
   if (thread) {
     Object.assign(result, {
@@ -757,8 +759,9 @@ function baseSection(item, preferredSection) {
   if (preferredSection === 'discarded') return 'discarded'
   if (overlap.status === 'already_covered') return 'alreadyCovered'
   // An 'overlaps' status stays on the item as an annotation; the finding is
-  // routed on its own merit and posts as a thread reply when selected.
-  if (BOARD_SECTIONS.indexOf(preferredSection) !== -1) return preferredSection
+  // routed on its own merit and posts as a thread reply when selected. A
+  // preferred alreadyCovered without a verified thread routes on merit too.
+  if (preferredSection !== 'alreadyCovered' && BOARD_SECTIONS.indexOf(preferredSection) !== -1) return preferredSection
   if (asNumber(item.confidence, 0) < 50) return 'discarded'
   if ((item.severity === 'critical' || item.severity === 'important') && asNumber(item.confidence, 0) >= 80) return 'recommendedToPost'
   return 'discussionOnly'
