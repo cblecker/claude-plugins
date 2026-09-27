@@ -1211,7 +1211,7 @@ function followUpPostureBlock() {
     + 'The human reviewer @' + followUp.reviewerLogin + ' already reviewed this PR at commit ' + reviewedCommitPhrase() + '.\n\n'
     + 'Before reviewing, run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` to see what changed since that review. '
     + 'If the command fails, the reviewed commit is not in this checkout: omit changedSinceLastReview from every finding and review normally. '
-    + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not.\n\n'
+    + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not. For a finding without a line, use whether its file changed in that range; for a PR-wide finding, omit the field.\n\n'
     + 'Concentrate on the changed code. Still report findings in unchanged code, tagged false: routing decides whether they are recommended.'
 }
 

@@ -31,8 +31,7 @@ could not be collected, so overlap classification and verdicts on your
 earlier threads are unavailable and recommended findings may duplicate
 existing comments.
 
-If `reviewMeta.reviewsCollectionFailed` is true and
-`reviewMeta.threadCollectionFailed` is false, warn: your submitted reviews
+If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
 could not be read, so a review you left without inline threads is not detected
 and this may be shown as a first review.
 
