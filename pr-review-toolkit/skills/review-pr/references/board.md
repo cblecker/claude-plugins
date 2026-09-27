@@ -151,9 +151,10 @@ is true:
 2. "I spotted something"
 3. "Done"
 
-In either of the last two cases, if any `followUp.items` entry is
-`unverifiable`, name those items before the options: approving would approve
-requests nobody verified.
+In either of the last two cases, when `followUp` is not null, name before the
+options any `unverifiable` items and, if `reviewMeta.threadCollectionFailed`
+or `reviewMeta.reviewsCollectionFailed` is true, what could not be read:
+approving would approve requests nobody verified.
 
 The user may type free-form text via Other (e.g., "Tell me more about F3").
 Respond accordingly and loop back to updated options. Handle these requests
