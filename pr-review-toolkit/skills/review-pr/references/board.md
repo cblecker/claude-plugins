@@ -84,7 +84,8 @@ For each finding, include:
   `↳ follows up <followUpItemId> (your thread, resolved|unresolved)` when
   `followUpItemId` is set, otherwise `↳ overlaps @<threadAuthor> thread on
   <threadPath>:<threadLine> (resolved|unresolved)`, omitting the state word
-  when `isResolved` is absent; append `→ posts as a reply` when
+  when `isResolved` is absent, or `↳ overlaps an existing thread` when the
+  thread descriptors are absent; append `→ posts as a reply` when
   `existingReviewOverlap.commentId` is set, else `→ no reply target`
 - claim
 - evidence

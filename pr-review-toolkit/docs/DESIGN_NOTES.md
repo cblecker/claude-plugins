@@ -226,7 +226,10 @@ mishandled. Reading a sequence of reviews and telling which requests a
 later one withdrew is a judgement call, and the verifier is already making
 judgement calls. JS still picks the baseline commit, skipping the empty
 COMMENTED review GitHub creates for each standalone thread reply so that
-replying never moves it.
+replying does not move it. The exception is a reviewer with threads and no
+substantive review: an inline-only review is indistinguishable from a
+reply, so the latest empty COMMENTED review is the baseline and a later
+reply can move it.
 
 **The verifier is a prompt, not an agent file.** Verifying the user's own
 threads needs exactly the specialist's tool surface (read-only git, Read,

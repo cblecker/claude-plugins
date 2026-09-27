@@ -786,9 +786,11 @@ function changedSinceReview(location, delta) {
 // promote it back from the board.
 function routeSection(item, preferredSection, followUp, memberLocations) {
   if (followUp) {
-    // A merged concern counts as changed when any member's location did.
-    const anyChanged = (memberLocations || []).some(location => changedSinceReview(location, followUpDelta) === true)
-    const changed = anyChanged ? true : changedSinceReview(item.location, followUpDelta)
+    // A merged concern is changed when any member's location is, unchanged
+    // only when every member's is, and otherwise unknown.
+    const states = (memberLocations && memberLocations.length ? memberLocations : [item.location])
+      .map(location => changedSinceReview(location, followUpDelta))
+    const changed = states.includes(true) ? true : states.every(state => state === false) ? false : undefined
     if (changed !== undefined) item.changedSinceLastReview = changed
   }
   const section = baseSection(item, preferredSection)
@@ -1142,7 +1144,7 @@ function followUpPrompt() {
   }
   const deltaSteps = deltaRange
     ? 'First run `git merge-base --is-ancestor ' + followUp.reviewedCommit + ' ' + pr.headSha + '`. If it fails, the reviewed commit is missing or the branch was rewritten since: return delta with available false and judge from the current code and the replies only. '
-      + 'If it succeeds, set delta.available to true, set delta.commitsSince from `git rev-list --count ' + deltaRange + '`, and fill delta.files from `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + '`: one entry per changed file, under its new path, with one hunk per `@@ -a,b +c,d @@` header (d is 1 when omitted), start c and end c+d-1 (for d = 0, a pure deletion, start and end are both c). '
+      + 'If it succeeds, set delta.available to true, set delta.commitsSince from `git rev-list --count ' + deltaRange + '`, and fill delta.files from `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + '`: one entry per changed file, under its new path, with one hunk per `@@ -a,b +c,d @@` header (d is 1 when omitted), start c and end c+d-1 (for d = 0, a pure deletion, start and end are both c). If that diff output is truncated, saved to a file, or otherwise incomplete, set delta.available to false instead: a file missing from delta.files reads as unchanged. '
       + 'Use that diff, and `git --literal-pathspecs log --oneline ' + deltaRange + ' -- \'<path>\'` for fixedIn, to see what changed at each ask since the review.'
     : 'No submitted review commit is known: return delta with available false and judge from the current code and the replies.'
   return '## Shared PR context\n\n' + JSON.stringify(context) + '\n\n'
