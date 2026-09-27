@@ -62,7 +62,8 @@ itself (line comments and review body):
 Thread replies (overlap and follow-up) post independently of the review. A
 run of replies only submits no review, and the preview shows `No review
 event`; the user's earlier `CHANGES_REQUESTED` review, if any, stays in force.
-To make a blocking reply request changes, convert it to a line comment.
+To make a blocking reply request changes, convert it to a line comment, or
+to review-body text when it has no valid line anchor.
 
 ## Preview And Confirm
 
