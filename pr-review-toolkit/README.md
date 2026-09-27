@@ -170,7 +170,8 @@ When the collector finds review threads or a submitted review authored by
 your login (`reviewerLogin`, from `get_me`), the run becomes a follow-up
 review. The board gains a "Follow-up review" section: the commit you last
 reviewed, how far the PR has moved since, and one verdict per thread you
-opened — addressed, partial, not addressed, or unverifiable — with concrete
+opened, plus one for the summary of your latest review when it has one —
+addressed, partial, not addressed, or unverifiable — with concrete
 evidence from the head checkout and the commit that addressed it when the
 reviewed commit is still reachable. The verifier reuses the read-only
 specialist agent type and runs only in this mode.

@@ -56,12 +56,14 @@ Then one line per entry of `followUp.items`, in order:
 `<glyph> <id> <path>:<line> — <ask> → <evidence>[; fixed in <fixedIn>]; thread
 <resolved|unresolved>[, outdated]` with glyphs ✅ `addressed`, ⚠️ `partial`,
 ❌ `not_addressed`, ❓ `unverifiable`. Omit the thread state words whose
-flags are absent.
+flags are absent. For the item whose `threadId` is `review-body`, write
+`review summary` in place of `<path>:<line>` and omit the thread state.
 
 If `followUp.verifierFailed` is true, say the follow-up verifier did not
 complete, so every item is unverifiable. Otherwise, if `followUp.items` is
 non-empty, `reviewedCommit` is set, and `deltaAvailable` is false, say verdicts rest on the current code and
-thread replies only, because the reviewed commit is not in the checkout.
+thread replies only, because the reviewed commit is missing or the branch
+was rewritten.
 
 ### 3. Recommended to post (full detail)
 

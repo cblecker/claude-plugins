@@ -118,7 +118,8 @@ const THREAD_SCHEMA = {
           author: { type: 'string' },
           state: { type: 'string' },
           commitId: { type: 'string' },
-          submittedAt: { type: 'string' }
+          submittedAt: { type: 'string' },
+          body: { type: 'string' }
         },
         required: ['author', 'state']
       }
@@ -1209,8 +1210,9 @@ function followUpPostureBlock() {
   if (!followUp || !deltaRange) return ''
   return '\n\n## Follow-up review posture\n\n'
     + 'The human reviewer @' + followUp.reviewerLogin + ' already reviewed this PR at commit ' + reviewedCommitPhrase() + '.\n\n'
-    + 'Before reviewing, run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` to see what changed since that review. '
-    + 'If the command fails, the reviewed commit is not in this checkout: omit changedSinceLastReview from every finding and review normally. '
+    + 'Before reviewing, run `git merge-base --is-ancestor ' + followUp.reviewedCommit + ' ' + pr.headSha + '`. '
+    + 'If it fails, the reviewed commit is missing or the branch was rewritten since: omit changedSinceLastReview from every finding and review normally. '
+    + 'Otherwise run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` to see what changed since that review. '
     + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not. For a finding without a line, use whether its file changed in that range; for a PR-wide finding, omit the field.\n\n'
     + 'Concentrate on the changed code. Still report findings in unchanged code, tagged false: routing decides whether they are recommended.'
 }
@@ -1247,7 +1249,7 @@ log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.
 
 const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, originalLine (the first comment's original_line, which outdated comments keep when line is absent), author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
 
-Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return them under reviews as compact records: id (number), author (the user login), state, commitId, submittedAt — no bodies. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.
+Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return them under reviews as compact records: id (number), author (the user login), state, commitId, submittedAt${reviewerLogin ? ', and body only for reviews by ' + reviewerLogin + ' (no body for anyone else)' : ' — no bodies'}. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.
 
 Do not call any GitHub write tools.`
 // The rejection handler attaches at creation: the promise is not awaited
@@ -1381,6 +1383,9 @@ const reviews = reviewsCollectionFailed ? [] : threadData.reviews
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review.
 let myThreads = []
+// The reviewer's latest review summary: requests made only in a review body
+// have no thread, so the verifier checks them as one extra item.
+let myReviewBody = ''
 if (reviewerLogin) {
   myThreads = threads.filter(thread => thread && thread.author === reviewerLogin)
   const myReviews = reviews
@@ -1388,6 +1393,7 @@ if (reviewerLogin) {
     // ISO-8601 timestamps order lexically; latest first.
     .sort((a, b) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')))
   const lastReview = myReviews[0] || null
+  myReviewBody = lastReview && typeof lastReview.body === 'string' ? lastReview.body.trim() : ''
   if (myThreads.length > 0 || lastReview) {
     // commitId is remote data interpolated into the git commands agents run;
     // accept only a commit SHA, the same guard as mergeBase.
@@ -1431,10 +1437,11 @@ function followUpPrompt() {
       isOutdated: knownResolved(thread.isOutdated),
       body: thread.body,
       replies: thread.replies || []
-    }))
+    })),
+    reviewBody: myReviewBody || undefined
   }
   const deltaSteps = deltaRange
-    ? 'First run `git show -s --format=%H ' + followUp.reviewedCommit + '`. If it fails, the reviewed commit is not in this checkout: set deltaAvailable to false and judge from the current code and the thread replies only. '
+    ? 'First run `git merge-base --is-ancestor ' + followUp.reviewedCommit + ' ' + pr.headSha + '`. If it fails, the reviewed commit is missing or the branch was rewritten since: set deltaAvailable to false and judge from the current code and the thread replies only. '
       + 'If it succeeds, set deltaAvailable to true and, for each thread, run `git --literal-pathspecs log --oneline ' + deltaRange + ' -- \'<path>\'` and `git --literal-pathspecs diff --no-ext-diff --no-textconv ' + followUp.reviewedCommit + ' ' + pr.headSha + ' -- \'<path>\'` to see what changed there since the review.'
     : 'No submitted review commit is known: set deltaAvailable to false and judge from the current code and the thread replies.'
   return '## Shared PR context\n\n' + JSON.stringify(context) + '\n\n'
@@ -1444,7 +1451,9 @@ function followUpPrompt() {
     + '\n\n## Task\n\n'
     + 'The human reviewer @' + followUp.reviewerLogin + ' reviewed this PR earlier'
     + (followUp.reviewedCommit ? ' at commit ' + reviewedCommitPhrase() : '')
-    + ' and opened the review threads listed in the shared context.\n\n'
+    + ' and opened the review threads listed in the shared context.'
+    + (myReviewBody ? ' reviewBody is that review\'s summary: also check the requests in it and return one more item with threadId "review-body", whose status reflects its least-addressed request.' : '')
+    + '\n\n'
     + deltaSteps + '\n\n'
     + 'For every thread, determine whether the PR head meets what it asked: read the current code at its location (use line, or originalLine for an outdated thread, and search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag, and return one item per thread carrying the same threadId: '
     + 'ask (the thread\'s request in one line), status (addressed: the request is met at the head; partial: some of it is; not_addressed: the request is still unmet at the head, whether the code is unchanged, the edits do not meet it, or a reply declines it (quote the reply in evidence); unverifiable: you could not determine it, and the evidence says why), '
@@ -1484,11 +1493,25 @@ function applyFollowUpVerdict(verdict) {
       fixedIn: item && item.fixedIn ? item.fixedIn : undefined
     }
   })
+  if (myReviewBody) {
+    const item = byThread['review-body']
+    followUp.items.push({
+      id: 'P' + (followUp.items.length + 1),
+      threadId: 'review-body',
+      path: '',
+      ask: item && item.ask ? item.ask : myReviewBody.split('\n')[0].slice(0, 160),
+      status: item && item.status ? item.status : 'unverifiable',
+      evidence: item && item.evidence
+        ? item.evidence
+        : (followUp.verifierFailed ? 'The follow-up verifier did not complete.' : 'The verifier returned no verdict for the review summary.'),
+      fixedIn: item && item.fixedIn ? item.fixedIn : undefined
+    })
+  }
 }
 
 phase('Analyze')
 log('Running ' + selectedNames.length + ' review agent(s): ' + selectedNames.join(', ')
-  + (followUp && myThreads.length > 0 ? ', plus the follow-up verifier' : ''))
+  + (followUp && (myThreads.length > 0 || myReviewBody) ? ', plus the follow-up verifier' : ''))
 
 const analysisJobs = selectedNames.map(name => () => agent(analysisPrompt(name, summary), {
   label: name,
@@ -1500,7 +1523,7 @@ const analysisJobs = selectedNames.map(name => () => agent(analysisPrompt(name, 
 // The verifier runs in the same fan-out as the specialists. parallel()
 // resolves a failed thunk to null, so a verifier failure degrades to
 // unverifiable items instead of aborting the review.
-const verifierIndex = followUp && myThreads.length > 0 ? analysisJobs.length : -1
+const verifierIndex = followUp && (myThreads.length > 0 || myReviewBody) ? analysisJobs.length : -1
 if (verifierIndex !== -1) {
   analysisJobs.push(() => agent(followUpPrompt(), {
     label: 'follow-up-verifier',
