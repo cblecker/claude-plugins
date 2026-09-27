@@ -12,9 +12,9 @@ Below the heading, include a one-line summary with section counts derived
 from section array lengths, plus the reviewer list from
 `reviewMeta.selectedReviewers` (full agent names): `N recommended, M other
 findings, K not posting. Reviewers: code-reviewer, pr-test-analyzer.` where
-K is `alreadyCovered.length + discarded.length`. If `reviewMeta.lensSelection.source` is
-`all-lenses-fallback`, add a line: the lens selector returned invalid
-output, so every lens ran. Add a one-line shape summary from `summary`
+K is `alreadyCovered.length + discarded.length`. If
+`reviewMeta.lensSelection.source` is `all-lenses-fallback`, add a line: the
+lens selector returned invalid output, so every lens ran. Add a one-line shape summary from `summary`
 (file count, additions/deletions, scale, notable areas — or that the shape
 is unavailable); per-lens rationales live in
 `reviewMeta.lensSelection.rationales` when the user asks.
@@ -114,8 +114,8 @@ using `AskUserQuestion` with contextual options. "Open follow-ups" below means
 Write a brief assessment of the recommended findings and any notable
 overlaps, then offer options:
 
-1. "Draft recommended findings" (the description notes that findings tagged as overlapping a thread are drafted
-   as replies on that thread)
+1. "Draft recommended findings" (the description notes that findings tagged
+   as overlapping a thread are drafted as replies on that thread)
 2. "Draft recommended + reply on open follow-ups (P2, P4)" — include only when
    open follow-ups exist, naming their ids
 3. "I want to adjust the selection"

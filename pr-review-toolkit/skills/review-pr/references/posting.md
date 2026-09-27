@@ -1,7 +1,8 @@
 # Drafting And Posting
 
-Draft comments only in the conversation. GitHub write tools may be used only in the final
-posting step, after the exact preview is explicitly approved.
+Draft comments only in the conversation. GitHub write tools may be used
+only in the final posting step, after the exact preview is explicitly
+approved.
 
 ## Draft Selected Comments
 
@@ -17,17 +18,18 @@ Drafts should:
 ### Overlap findings
 
 A selected finding whose `existingReviewOverlap.status` is `overlaps` is
-drafted as a reply on that thread by default:
-acknowledge the original comment, add the new perspective, and avoid
-restating the concern. A finding whose `followUpItemId` is set replies on the user's own
-earlier thread: write it as the user following up on their own request, not
-as a newcomer to the thread.
+drafted as a reply on that thread by default: acknowledge the original
+comment, add the new perspective, and avoid restating the concern. A
+finding whose `followUpItemId` is set replies on the user's own earlier
+thread: write it as the user following up on their own request, not as a
+newcomer to the thread.
 
 ### Follow-up replies
 
 When the user chooses to reply on open follow-ups, draft one reply per chosen
-`followUp.items` entry on that entry's thread, using its `commentId`. State plainly what is still open as of the
-reviewed head, in one or two sentences, drawing on the item's `evidence`;
+`followUp.items` entry on that entry's thread, using its `commentId`. State
+plainly what is still open as of the reviewed head, in one or two
+sentences, drawing on the item's `evidence`;
 for a `partial` item say what was addressed and what remains. Do not restate
 the original request. When a recommended finding with the same
 `followUpItemId` is also selected, merge the two into one reply. The

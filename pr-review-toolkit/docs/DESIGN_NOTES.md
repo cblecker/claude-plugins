@@ -149,8 +149,9 @@ and after a force-push it may be missing or, if the old object survives
 locally, no longer an ancestor of the head. Both the verifier and the
 specialists check `git merge-base --is-ancestor` before trusting the delta:
 the verifier falls back to judging current code (`deltaAvailable: false`),
-and specialists omit `changedSinceLastReview`, so nothing is demoted. The specialist agent definition allows read-only git over
-this range as well as the pinned one.
+and specialists omit `changedSinceLastReview`, so nothing is demoted. The
+specialist agent definition allows read-only git over this range as well as
+the pinned one.
 
 **Demotion with a reason, not a higher bar.** "Be less picky" was first
 modelled as raising the recommended threshold from confidence 80 to 90.
