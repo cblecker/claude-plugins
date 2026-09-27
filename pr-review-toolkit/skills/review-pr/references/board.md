@@ -175,7 +175,9 @@ Respond accordingly and loop back to updated options. Handle these requests
 directly on the board state, then re-present the counts and the menu:
 
 - `promote F<n>` moves the finding into Recommended; `demote F<n>` moves it
-  into Other findings.
+  into Other findings. A promoted Not posting item keeps only its summary
+  fields (title, severity, confidence, location, claim), so show and draft
+  from those.
 - "too picky", "be less picky", or "I have reviewed this before" demotes into
   Other findings every recommended finding that is not `critical` and whose
   `changedSinceLastReview` is not `true`, each with the note `Demoted at your

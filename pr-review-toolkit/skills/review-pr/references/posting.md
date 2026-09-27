@@ -51,11 +51,12 @@ run cleanly, put the finding in the review body.
 
 ### Review event
 
-Choose the proposed review event from the findings posted in the review
-itself (line comments and review body):
+Choose the proposed review event from what is posted in the review itself:
+line comments and review-body text, including follow-up asks from a review
+summary:
 
-- `REQUEST_CHANGES` only when at least one selected finding is a serious
-  correctness or blocking concern.
+- `REQUEST_CHANGES` only when at least one selected finding or follow-up ask
+  is a serious correctness or blocking concern.
 - `COMMENT` for non-blocking feedback, suggestions, or discussion.
 - `APPROVE` when the user selected "Leave an approving review" or "Approve:
   previous findings addressed" and no findings are being posted. For the
