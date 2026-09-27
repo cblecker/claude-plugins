@@ -185,10 +185,10 @@ workflow tags each finding with whether its location falls in them
 (`changedSinceLastReview`). Routing then demotes non-critical findings on
 unchanged code into Other findings with the note "code unchanged since your
 review" (`routingNote`), instead of re-recommending code you already looked
-at. Specialists are unaware of follow-up mode and review the full PR. Nothing is dropped: the board
-shows the demotion reason, and `promote F<n>` brings a finding back. If the
-reviewed commit is not in the head's history (usually a rewritten branch),
-the tag is omitted and no demotion happens.
+at. Specialists are unaware of follow-up mode and review the full PR.
+Nothing is dropped: the board shows the demotion reason, and `promote F<n>`
+brings a finding back. If the reviewed commit is not in the head's history
+(usually a rewritten branch), the tag is omitted and no demotion happens.
 
 ## Review Agents
 

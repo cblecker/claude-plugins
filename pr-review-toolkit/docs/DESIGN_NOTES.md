@@ -206,5 +206,6 @@ returns.
 
 **Threads are awaited before the fan-out.** 2.3 awaited the collector after
 the specialists so its latency hid behind theirs. The verifier runs in the
-fan-out and needs the user's threads, so the await moved ahead of it. The collector is a low-effort Haiku call running alongside the
-Sonnet selector, which is awaited there anyway, so the added wait is small.
+fan-out and needs the user's threads, so the await moved ahead of it. The
+collector is a low-effort Haiku call running alongside the Sonnet selector,
+which is awaited there anyway, so the added wait is small.

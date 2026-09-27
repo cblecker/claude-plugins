@@ -1493,7 +1493,7 @@ function followUpPrompt() {
     + (followUp.reviewedCommit ? ' at commit ' + reviewedCommitPhrase() : '')
     + '. The shared context lists the review threads they opened and the summaries of their submitted reviews, oldest first. Check whether the PR head meets each of their earlier asks.\n\n'
     + deltaSteps + '\n\n'
-    + 'Return one item per thread, carrying its threadId, and one item per distinct request in the review summaries, without a threadId. Skip summary requests that a later review withdrew or replaced, and summaries that ask for nothing. '
+    + 'Return one item per thread, carrying its threadId, and one item per distinct request in the review summaries, without a threadId. Skip summary requests that a later review withdrew or replaced, and summaries that ask for nothing. A later COMMENTED review does not withdraw an earlier CHANGES_REQUESTED review\'s asks; a DISMISSED review\'s asks no longer stand. '
     + 'For a thread, read the current code at its location (use line, or originalLine for an outdated thread, and search for the quoted code when the line has moved) and weigh the replies and the isOutdated flag. '
     + 'Each item has ask (the request in one line), status (addressed: the request is met at the head; partial: some of it is; not_addressed: the request is still unmet at the head, whether the code is unchanged, the edits do not meet it, or a reply declines it (quote the reply in evidence); unverifiable: you could not determine it, and the evidence says why), '
     + 'evidence (concrete: what changed and where, or what did not), and fixedIn (the short SHA of the commit that addressed it, when the delta is available). '
@@ -1517,7 +1517,11 @@ function applyFollowUpVerdict(verdict) {
     followUp.verifierFailed = true
     log('Warning: the follow-up verifier did not complete; your earlier asks are listed as unverifiable.')
   }
-  followUpDelta = verdict && verdict.delta && verdict.delta.available === true ? verdict.delta : null
+  // Only a delta the verifier could actually compute: there must be a range
+  // to diff, and a missing file list would read as "nothing changed".
+  followUpDelta = deltaRange && verdict && verdict.delta && verdict.delta.available === true && Array.isArray(verdict.delta.files)
+    ? verdict.delta
+    : null
   followUp.deltaAvailable = Boolean(followUpDelta)
   followUp.commitsSince = followUpDelta ? followUpDelta.commitsSince : undefined
   const verdictFields = (item, sourceText) => ({
