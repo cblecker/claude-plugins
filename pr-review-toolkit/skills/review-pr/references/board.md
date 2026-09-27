@@ -2,7 +2,7 @@
 
 ## Present Review Board
 
-Use this order:
+Omit `:<line>` wherever a line is absent. Use this order:
 
 ### 1. Heading
 
@@ -30,6 +30,10 @@ If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
 could not be collected, so overlap classification and follow-up detection are
 unavailable and recommended findings may duplicate existing comments.
 
+If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
+could not be read, so a review you left without inline threads is not detected
+and this may be shown as a first review.
+
 If `reviewMeta.failedReviewers` is non-empty, warn: name those lenses and say
 they did not complete, so the board is missing their coverage and the review is
 narrower than the reviewer list suggests.
@@ -54,8 +58,8 @@ Then one line per entry of `followUp.items`, in order:
 flags are absent.
 
 If `followUp.verifierFailed` is true, say the follow-up verifier did not
-complete, so every item is unverifiable. Otherwise, if `reviewedCommit` is
-set and `deltaAvailable` is false, say verdicts rest on the current code and
+complete, so every item is unverifiable. Otherwise, if `followUp.items` is
+non-empty, `reviewedCommit` is set, and `deltaAvailable` is false, say verdicts rest on the current code and
 thread replies only, because the reviewed commit is not in the checkout.
 
 ### 3. Recommended to post (full detail)

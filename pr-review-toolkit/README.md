@@ -238,7 +238,10 @@ lenses were selected, why, and whether the all-lenses fallback engaged;
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
 recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
-instead of silently skipping overlap classification and follow-up detection.
+instead of silently skipping overlap classification and follow-up detection;
+a failed read of submitted reviews is disclosed separately
+(`reviewMeta.reviewsCollectionFailed`), since it hides a review left without
+inline threads.
 A lens that fails outright is named in `reviewMeta.failedReviewers`, so
 reduced coverage is disclosed rather than hidden behind the full reviewer
 list; a failed verifier lists your threads as unverifiable

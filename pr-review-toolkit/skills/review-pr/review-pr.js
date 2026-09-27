@@ -76,6 +76,7 @@ const THREAD_SCHEMA = {
   required: ['collectionFailed', 'threads'],
   properties: {
     collectionFailed: { type: 'boolean' },
+    reviewsCollectionFailed: { type: 'boolean' },
     threads: {
       type: 'array',
       items: {
@@ -1152,6 +1153,7 @@ function finalizeBoard(board, findings, positives, prContext) {
     totalFindings: findings.length,
     existingThreadCount: prContext.threads.length,
     threadCollectionFailed: Boolean(prContext.threadCollectionFailed),
+    reviewsCollectionFailed: Boolean(prContext.reviewsCollectionFailed),
     reviewCount: asNumber(prContext.reviewCount, 0),
     changedFileCount: prContext.summary.changedFileCount,
     mergeBase: mergeBase,
@@ -1244,7 +1246,7 @@ log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.
 
 const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
 
-Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return them under reviews as compact records: id (number), author (the user login), state, commitId, submittedAt — no bodies. A failed reviews read does not set collectionFailed.
+Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return them under reviews as compact records: id (number), author (the user login), state, commitId, submittedAt — no bodies. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.
 
 Do not call any GitHub write tools.`
 // The rejection handler attaches at creation: the promise is not awaited
@@ -1366,7 +1368,13 @@ if (threadCollectionFailed) {
   log('Warning: review-thread collection failed. Existing-review overlap classification is unavailable for this run; recommended findings may duplicate existing comments.')
 }
 const threads = threadCollectionFailed ? [] : threadData.threads
-const reviews = threadCollectionFailed || !Array.isArray(threadData.reviews) ? [] : threadData.reviews
+// A failed reviews read is disclosed separately: it hides a review the user
+// submitted without threads, so the run may wrongly look like a first review.
+const reviewsCollectionFailed = !threadCollectionFailed && (threadData.reviewsCollectionFailed === true || !Array.isArray(threadData.reviews))
+if (reviewsCollectionFailed) {
+  log('Warning: submitted-review collection failed. Follow-up detection relies on review threads only for this run.')
+}
+const reviews = threadCollectionFailed || reviewsCollectionFailed ? [] : threadData.reviews
 
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review.
@@ -1546,6 +1554,7 @@ const prContext = {
   },
   threads: threads,
   threadCollectionFailed: threadCollectionFailed,
+  reviewsCollectionFailed: reviewsCollectionFailed,
   reviewCount: reviews.length,
   followUp: followUp,
   summary: summary,

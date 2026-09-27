@@ -72,7 +72,8 @@ For each finding being posted as a new line comment, show:
 For each overlap finding or follow-up item being posted as a thread reply,
 show:
 
-- finding or follow-up id, "Reply to thread on path:line", and body
+- finding or follow-up id, "Reply to thread on path:line" (omit `:line`
+  when absent), and body
 - if `isResolved` is true: `⚠ Target thread is resolved — reply will stay
   collapsed and the PR author may not see it.`
 - if `isResolved` is absent (resolution state not exposed by the read tools):
