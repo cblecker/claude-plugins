@@ -135,11 +135,12 @@ change the posting location: convert the finding to a proposed new line
 comment and return to Preview And Confirm — same as invalid line locations
 below.
 
-### Review body only
+### Review body or event only
 
-If the approved preview has only review-body text, submit it with
-`pull_request_review_write` using the approved event and the reviewed head
-SHA as `commitID`.
+If the approved preview has a review event but no line comments, submit it
+with `pull_request_review_write` using the approved event, the review body if
+any, and the reviewed head SHA as `commitID`. This covers an approval with no
+body.
 
 ### Invalid locations
 
