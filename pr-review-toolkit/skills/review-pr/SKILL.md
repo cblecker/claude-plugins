@@ -19,6 +19,7 @@ allowed-tools:
   - Bash(git rev-list *)
   - Bash(git diff *)
   - Bash(git --literal-pathspecs diff *)
+  - mcp__plugin_github_github__get_me
   - mcp__plugin_github_github__pull_request_read
   - mcp__plugin_github_github__search_pull_requests
   - mcp__plugin_github_github__list_pull_requests
@@ -96,6 +97,14 @@ resolve an already-merged PR whose head still matches; stop honestly if not.
 If Dirty files is non-empty, warn but do not block (file reads see
 uncommitted edits; the diff itself is tree-to-tree).
 
+## Identify The Reviewer
+
+Call `get_me` once and record its `login` as `reviewerLogin`. The workflow
+uses it to recognise your own earlier review threads and submitted reviews
+on this PR, which turns the run into a follow-up review (see Present Review
+Board). If the call fails, warn that follow-up detection is unavailable this
+run and continue with `reviewerLogin` empty; every other step is unaffected.
+
 ## Pin The Review Range
 
 Verify Origin points at the PR's base repository from the metadata (a fork
@@ -128,6 +137,7 @@ Invoke the Workflow tool with:
     headSha }` from the metadata
   - `checkoutPath`: the Environment Checkout root
   - `mergeBase`: the pinned `merge_base`
+  - `reviewerLogin`: the login from Identify The Reviewer (omit when empty)
 
 If the tool reports that workflow name is not found (older Claude Code
 versions do not register plugin workflows), invoke it again with
@@ -139,103 +149,13 @@ No bulk data rides `args` — workflow agents gather their own diff context
 from the checkout, and the workflow returns grouped findings with review
 metadata.
 
-## Present Review Board
+## Present Review Board And Ask What To Do Next
 
-Present the review board before drafting or posting anything. Use this order:
-
-### 1. Heading
-
-Format: `owner/repo#number — PR title`
-
-Below the heading, include a one-line summary with section counts derived
-from section array lengths, plus the reviewer list from
-`reviewMeta.selectedReviewers` (full agent names): `N findings recommended,
-M overlap existing threads, P discussion-worthy. Reviewers: code-reviewer,
-pr-test-analyzer.` If `reviewMeta.lensSelection.source` is
-`all-lenses-fallback`, add a line: the lens selector returned invalid
-output, so every lens ran. Add a one-line shape summary from `summary`
-(file count, additions/deletions, scale, notable areas — or that the shape
-is unavailable); per-lens rationales live in
-`reviewMeta.lensSelection.rationales` when the user asks.
-
-Then show merge signals from the metadata and the pinned range:
-
-- `mergeable` is false → `⚠ This PR has merge conflicts with <base.ref>.`
-- `mergeable` is null → `Mergeability is still computing on GitHub.`
-- `base_ahead_count` > 0 → `<base.ref> has moved <base_ahead_count> commits
-  since this PR forked.`
-
-If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
-could not be collected, so overlap classification is unavailable and
-recommended findings may duplicate existing comments.
-
-If `reviewMeta.failedReviewers` is non-empty, warn: name those lenses and say
-they did not complete, so the board is missing their coverage and the review is
-narrower than the reviewer list suggests.
-
-### 2. Recommended to post (full detail)
-
-For each finding, include:
-
-- stable id, location, lens, title, confidence
-- claim
-- evidence
-- why it matters
-- suggested fix or next step
-- recommendation rationale: one sentence explaining why this finding is
-  recommended for posting, synthesized from severity, confidence, and overlap
-  status
-
-### 3. Related to existing threads (full detail)
-
-Same fields as recommended, plus existing review overlap rationale.
-
-### 4. Discussion-worthy (full detail)
-
-Same fields as recommended; rationale explains why not recommended to post.
-
-### 5. Already covered (one-liner per finding)
-
-One line per finding: `id — title (covered by thread on path:line)`.
-
-### 6. Discarded (one-liner per finding)
-
-One line per finding: `id — title (reason)`.
-
-### 7. Positive observations
-
-List positive observations when present.
-
-## Ask What To Do Next
-
-After presenting the board, propose a recommended action based on board state
-using `AskUserQuestion` with contextual options.
-
-### When recommended findings exist
-
-Write a brief assessment of the recommended findings and any notable
-overlaps, then offer options:
-
-1. "Draft recommended findings" (first option — the recommended action)
-2. "Draft all including overlap endorsements"
-3. "I want to adjust the selection"
-4. "Cancel"
-
-### When only overlap or discussion findings exist
-
-1. "Endorse overlap findings"
-2. "Skip posting"
-3. "I want to discuss specific findings"
-4. "Cancel"
-
-### When nothing is postable
-
-1. "Leave an approving review"
-2. "I spotted something"
-3. "Done"
-
-The user may type free-form text via Other (e.g., "Tell me more about F3").
-Respond accordingly and loop back to updated options.
+Read `${CLAUDE_SKILL_DIR}/references/board.md` and follow it exactly. It
+governs the board layout (heading and signals, follow-up review, recommended,
+other findings, not posting, positive observations), the contextual
+`AskUserQuestion` menus, and the free-form board adjustments (`promote`,
+`demote`, "too picky"). Present the board before drafting or posting anything.
 
 ## Drafting And Posting
 

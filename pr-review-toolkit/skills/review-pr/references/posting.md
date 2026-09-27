@@ -17,8 +17,23 @@ Drafts should:
 
 ### Overlap findings
 
-Draft `relatedToExisting` findings as thread replies: acknowledge the
-original comment, add the new perspective, and avoid restating the concern.
+A selected finding whose `existingReviewOverlap.status` is `overlaps` and
+that has a `commentId` is drafted as a reply on that thread by default:
+acknowledge the original comment, add the new perspective, and avoid
+restating the concern. The user may ask for it as a new line comment
+instead. A finding whose `followUpItemId` is set replies on the user's own
+earlier thread: write it as the user following up on their own request, not
+as a newcomer to the thread.
+
+### Follow-up replies
+
+When the user chooses to reply on open follow-ups, draft one reply per chosen
+`followUp.items` entry (status `partial` or `not_addressed`) on that entry's
+thread, using its `commentId`. State plainly what is still open as of the
+reviewed head, in one or two sentences, drawing on the item's `evidence`;
+for a `partial` item say what was addressed and what remains. Do not restate
+the original request. An entry without a `commentId` follows the missing
+reply-target rule in Preview And Confirm.
 
 ### Line comments vs review body
 
@@ -38,11 +53,19 @@ run cleanly, put the finding in the review body.
 Choose the proposed review event from the selected findings:
 
 - `REQUEST_CHANGES` only when at least one selected finding is a serious
-  correctness or blocking concern.
+  correctness or blocking concern, or when a `not_addressed` follow-up being
+  replied to was blocking in the user's earlier review (their `reviewState`
+  was `CHANGES_REQUESTED`) and remains so.
 - `COMMENT` for non-blocking feedback, suggestions, endorsements, or
   discussion.
-- `APPROVE` when the user selected "Leave an approving review" from the
-  nothing-postable menu and no findings are being posted.
+- `APPROVE` when the user selected "Leave an approving review" or "Approve:
+  previous findings addressed" and no findings are being posted. For the
+  latter, the review body may say in one line that the earlier findings were
+  addressed.
+
+Thread replies (overlap and follow-up) post independently of the review, so
+a run may consist only of replies with no review event; say so in the
+preview.
 
 ## Preview And Confirm
 
@@ -52,9 +75,10 @@ For each finding being posted as a new line comment, show:
 
 - finding id, path, line, and body
 
-For each overlap finding being posted as a thread reply, show:
+For each overlap finding or follow-up item being posted as a thread reply,
+show:
 
-- finding id, "Reply to thread on path:line", and body
+- finding or follow-up id, "Reply to thread on path:line", and body
 - if `isResolved` is true: `⚠ Target thread is resolved — reply will stay
   collapsed and the PR author may not see it.`
 - if `isResolved` is absent (resolution state not exposed by the read tools):
@@ -102,9 +126,9 @@ If the approved preview has new line comments:
 3. Submit the pending review with `pull_request_review_write` using the
    approved event and review body.
 
-### Posting thread replies for overlap findings
+### Posting thread replies for overlap findings and follow-ups
 
-Post overlapping findings as replies using
+Post overlapping findings and follow-up replies using
 `add_reply_to_pull_request_comment` with the numeric `commentId` and
 `pullNumber`. If the reply API rejects the target as invalid, do not silently
 change the posting location: convert the finding to a proposed new line

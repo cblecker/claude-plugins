@@ -126,3 +126,60 @@ surface as slash commands under `<plugin>:<workflow-name>`, and a workflow
 named `review-pr` would shadow the skill's `/pr-review-toolkit:review-pr`
 entry, dispatching bare workflow invocations without the skill's preflight
 (PR resolution, head verification, base fetch, pinned merge-base).
+
+## Follow-up mode
+
+2.4 recognises a PR the user has reviewed before and changes three things.
+Each choice was the lighter of the alternatives considered.
+
+**Detection by login, not by argument.** The skill calls `get_me` once and
+the workflow matches that login against thread authors and submitted
+reviews (`get_reviews` exposes `commit_id`, `state`, `user.login`,
+`submitted_at` per review; `get_review_comments` exposes `author`,
+`is_resolved`, `is_outdated` per thread). A `--follow-up` flag would have
+been cheaper to build and something else to remember; the board says what
+it detected, so a wrong detection is visible rather than silent.
+
+**Delta anchored on the last reviewed commit.** The user's latest submitted
+review carries the commit it was made against. `reviewedCommit..headSha` is
+exactly what changed since they looked, and the head checkout can diff it
+with the same read-only git the specialists already use. The reviewed
+commit is remote data validated to a SHA before it reaches a git command,
+and it may be unreachable after a force-push: agents probe with `git show`
+first and fall back to judging current code, disclosed as
+`deltaAvailable: false`.
+
+**Demotion with a reason, not a higher bar.** "Be less picky" was first
+modelled as raising the recommended threshold from confidence 80 to 90.
+Rejected: specialist confidence is loosely calibrated, so a higher cut
+mostly reshuffles findings at random. The signal that actually tracks
+re-litigation is whether the finding's code changed since the user
+reviewed it, so specialists tag findings with `changedSinceLastReview` and
+routing demotes non-critical findings on unchanged code to Other findings
+with a `routingNote`. Only a known-false tag demotes; unknown never does.
+Nothing is filtered out at the source: the board shows the demoted finding
+and its reason, and the user can promote it.
+
+**Overlap is an annotation, not a section.** 2.0–2.3 routed any finding
+with `existingReviewOverlap.status === 'overlaps'` into a separate
+"Related to existing threads" section regardless of severity, so a finding
+that deserved posting was easy to miss beside the recommended list. Overlap
+now stays on the item, decides only that a selected finding posts as a
+thread reply, and is shown as a tag; `already_covered` still leaves
+Recommended because posting it would be noise.
+
+**The verifier is a prompt, not an agent file.** Verifying the user's own
+threads needs exactly the specialist's tool surface (read-only git, Read,
+Grep, Glob) and nothing else, so it runs on
+`pr-review-analysis-readonly` with its own prompt and schema in the same
+fan-out. `parallel()` resolves a failed thunk to `null`, so a verifier
+failure degrades to unverifiable verdicts instead of aborting the review.
+Thread identity and state on each `P` item come from the collector record;
+only the verdict comes from the verifier, so ids are stable whatever it
+returns.
+
+**Threads are awaited before the fan-out.** 2.3 awaited the collector after
+the specialists so its latency hid behind theirs. Follow-up detection needs
+threads to shape specialist prompts, so the await moved ahead of the
+fan-out. The collector is a low-effort Haiku call running alongside the
+Sonnet selector, which is awaited there anyway, so the added wait is small.
