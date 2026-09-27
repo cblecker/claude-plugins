@@ -54,12 +54,12 @@ Include this section only when `followUp` is not null.
 Header line, from `followUp` and `reviewMeta.reviewerLogin`: `Follow-up
 review — you (@<login>) reviewed <reviewedCommit, 7 chars> on <reviewedAt,
 date only> (<reviewState>); <commitsSince> commits since.`, omitting the
-count clause when `commitsSince` is absent. When `followUp.deltaAvailable`
-is false and `followUp.verifierFailed` is false, say in place of the count
-that the reviewed commit is not in the head's history (usually because the
-branch was rewritten), so verdicts rest on the current code only. When
-`reviewedCommit` is empty, write `you opened <threadCount> threads; no
-reviewed commit is known` instead.
+count clause when `commitsSince` is absent. When `reviewedCommit` is empty,
+write `you opened <threadCount> threads; no reviewed commit is known`
+instead. Otherwise, when `followUp.deltaAvailable` is false and
+`followUp.verifierFailed` is false, say in place of the count that what
+changed since your review could not be determined (usually because the
+branch was rewritten), so verdicts rest on the current code only.
 
 Then one line per entry of `followUp.items`, in order:
 `<glyph> <id> <path>:<line> — <ask> → <evidence>[; fixed in <fixedIn>]; thread
