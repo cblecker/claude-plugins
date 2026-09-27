@@ -1396,8 +1396,9 @@ if (reviewerLogin) {
   const hasBody = review => typeof review.body === 'string' && review.body.trim() !== ''
   const substantive = myReviews.filter(review => review.state !== 'COMMENTED' || hasBody(review))
   const lastReview = substantive[0] || (myThreads.length > 0 ? myReviews[0] || null : null)
-  const lastBodyReview = myReviews.find(hasBody)
-  myReviewBody = lastBodyReview ? lastBodyReview.body.trim() : ''
+  // Only the baseline review's own summary: a later review without one
+  // supersedes an older summary rather than reviving it.
+  myReviewBody = lastReview && hasBody(lastReview) ? lastReview.body.trim() : ''
   if (myThreads.length > 0 || lastReview) {
     // commitId is remote data interpolated into the git commands agents run;
     // accept only a commit SHA, the same guard as mergeBase.
