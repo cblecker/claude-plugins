@@ -1267,7 +1267,7 @@ log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.
 
 const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, originalLine (the first comment's original_line, which outdated comments keep when line is absent), author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
 
-${followUpLogin ? 'Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return under reviews only those by ' + followUpLogin + ', as compact records: author, state, commitId, submittedAt, body. Copy state and submittedAt exactly as GitHub returns them (uppercase state, ISO-8601 timestamp). If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.' : ''}
+${followUpLogin ? 'Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return under reviews only those by ' + followUpLogin + ', as compact records: author, state, commitId, submittedAt, body. Copy state and submittedAt exactly as GitHub returns them (uppercase state, ISO-8601 timestamp), and always include body, as an empty string when the review has no text. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.' : ''}
 
 Do not call any GitHub write tools.`
 // The rejection handler attaches at creation: the promise is not awaited
@@ -1392,12 +1392,13 @@ const threads = threadCollectionFailed ? [] : threadData.threads
 // Reviews are read independently of threads and disclosed separately: a
 // failed reviews read hides a review the user submitted without threads, and
 // a failed threads read must not discard reviews that were read successfully.
-// The baseline is ordered by submittedAt, so a submitted review without one
-// counts as an incomplete read. A missing body reads as an empty one.
+// A submitted review missing submittedAt (the baseline order) or body (the
+// collector returns '' for an empty one) is an incomplete read: a dropped
+// summary must not pass for an addressed one.
 const reviewsCollectionFailed = Boolean(followUpLogin) && (
   !(threadData && Array.isArray(threadData.reviews))
   || threadData.reviewsCollectionFailed === true
-  || threadData.reviews.some(review => !review || (review.state !== 'PENDING' && !review.submittedAt)))
+  || threadData.reviews.some(review => !review || (review.state !== 'PENDING' && (!review.submittedAt || typeof review.body !== 'string'))))
 if (reviewsCollectionFailed && !threadCollectionFailed) {
   log('Warning: submitted-review collection failed. Follow-up detection relies on review threads only for this run.')
 }
