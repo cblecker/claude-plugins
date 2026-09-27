@@ -35,6 +35,13 @@ If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
 could not be read, so a review you left without inline threads is not detected
 and this may be shown as a first review.
 
+If `reviewMeta.reviewerLoginRejected` is true, warn: your GitHub login did
+not match the expected login shape, so follow-up detection was off this run.
+
+If `reviewMeta.reviewerIsAuthor` is true, say in one line: you opened this
+PR, so your own threads and comments are author notes and follow-up mode is
+off.
+
 If `reviewMeta.failedReviewers` is non-empty, warn: name those lenses and say
 they did not complete, so the board is missing their coverage and the review is
 narrower than the reviewer list suggests.

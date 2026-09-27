@@ -116,7 +116,19 @@ Before the first write, re-fetch metadata once with `pull_request_read`
 `get`: if the head SHA changed since analysis, abort honestly — the review
 no longer describes the PR — and offer to re-run on the new head.
 
-Use GitHub write tools only in this final approved step.
+Use GitHub write tools only in this final approved step. Post thread
+replies first, then the review, so a rejected reply is handled before any
+review exists.
+
+### Posting thread replies for overlap findings and follow-ups
+
+Post overlapping findings and follow-up replies using
+`add_reply_to_pull_request_comment` with the numeric `commentId` and
+`pullNumber`. If the reply API rejects the target as invalid, do not silently
+change the posting location: stop before creating the review, convert the
+finding to a proposed new line comment, and return to Preview And Confirm —
+same as invalid line locations below. On re-approval, post only what has not
+been posted yet; replies that already succeeded are not sent again.
 
 ### Posting new line comments
 
@@ -128,15 +140,6 @@ If the approved preview has new line comments:
 2. Add approved line comments with `add_comment_to_pending_review`.
 3. Submit the pending review with `pull_request_review_write` using the
    approved event and review body.
-
-### Posting thread replies for overlap findings and follow-ups
-
-Post overlapping findings and follow-up replies using
-`add_reply_to_pull_request_comment` with the numeric `commentId` and
-`pullNumber`. If the reply API rejects the target as invalid, do not silently
-change the posting location: convert the finding to a proposed new line
-comment and return to Preview And Confirm — same as invalid line locations
-below.
 
 ### Review body or event only
 

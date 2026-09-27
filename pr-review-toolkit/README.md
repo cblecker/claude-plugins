@@ -112,7 +112,7 @@ context from the checkout. The workflow:
 - falls back to running **all** lenses when selector output fails validation
   — selection is disclosed in `reviewMeta.lensSelection`, never silent
 - detects a **follow-up review** when threads or reviews by your login exist
-  on the PR, and records the commit you last reviewed
+  on a PR you did not open, and records the commit you last reviewed
 - fans out the selected specialists in parallel; each reads the checkout
   directly — read-only `git diff` over `<merge_base>..HEAD` for patches,
   Read/Grep/Glob for contents, and `git log`/`blame`/`show` only when a
@@ -168,14 +168,16 @@ still reviews fine — integration breakage is CI's job. See
 
 When the collector finds review threads or a submitted review authored by
 your login (`reviewerLogin`, from `get_me`), the run becomes a follow-up
-review. The board gains a "Follow-up review" section: the commit you last
-reviewed, how far the PR has moved since, and one verdict per thread you
-opened, plus one for the summaries of your reviews still in force (back to
-your latest approve or request-changes) when they have text —
-addressed, partial, not addressed, or unverifiable — with concrete
-evidence from the head checkout and the commit that addressed it when the
-reviewed commit is still reachable. The verifier reuses the read-only
-specialist agent type and runs only in this mode.
+review, unless you opened the PR: on your own PR your threads and comments
+are author notes, so follow-up mode stays off. The board gains a
+"Follow-up review" section: the commit you last reviewed, how far the PR
+has moved since, and one verdict per thread you opened, plus one for the
+summaries of your reviews still in force (back to your latest approve or
+request-changes) when they have text — addressed, partial, not addressed,
+or unverifiable — with concrete evidence from the head checkout and the
+commit that addressed it when the reviewed commit is still reachable. The
+verifier reuses the read-only specialist agent type and runs only in this
+mode.
 
 Follow-up mode also changes what gets recommended. Specialists tag each
 finding with whether its location changed since the commit you reviewed
@@ -236,7 +238,10 @@ review; otherwise the reviewed commit, its state and date, per-thread verdicts
 with ids `P1..Pn`, and whether the delta was available), and review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
 lenses were selected, why, and whether the all-lenses fallback engaged;
-`reviewMeta.reviewerLogin` records the login used for follow-up detection.
+`reviewMeta.reviewerLogin` records the login used for follow-up detection,
+`reviewMeta.reviewerLoginRejected` that a supplied login failed validation,
+and `reviewMeta.reviewerIsAuthor` that follow-up mode was skipped because
+you opened the PR.
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
 recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
@@ -257,8 +262,9 @@ replies), also reply on your still-open follow-ups, adjust the selection,
 approve because your previous findings were addressed, leave an approving
 review, or cancel. Free-form replies are accepted and loop back to updated
 options: asking about a finding id, `promote F<n>` / `demote F<n>`, or
-"too picky", which demotes non-critical recommended findings that are not in
-the delta since your last review.
+"too picky", which demotes every non-critical recommended finding not tagged
+as changed since your last review (on a first review, every non-critical
+one).
 
 Drafts are plain conversation text until the user approves a preview. The skill
 previews each line comment, thread reply, review-body text, and the proposed

@@ -138,7 +138,10 @@ reviews (`get_reviews` exposes `commit_id`, `state`, `user.login`,
 `submitted_at` per review; `get_review_comments` exposes `author`,
 `is_resolved`, `is_outdated` per thread). A `--follow-up` flag would have
 been cheaper to build and something else to remember; the board says what
-it detected, so a wrong detection is visible rather than silent.
+it detected, so a wrong detection is visible rather than silent. Detection
+is skipped when the login is the PR author's: an author's own threads and
+commented reviews are notes on their change, and treating them as a review
+would demote findings on code nobody else has reviewed.
 
 **Delta anchored on the last reviewed commit.** The user's latest submitted
 review carries the commit it was made against. `reviewedCommit..headSha` is
@@ -163,9 +166,10 @@ routing demotes non-critical findings on unchanged code to Other findings
 with a `routingNote`. Only a known-false tag demotes; unknown never does.
 Nothing is filtered out at the source: specialists still report findings on
 unchanged code, the board shows the demoted finding and its reason, and the
-user can promote it. The board's "too picky" fallback, when no finding
-carries the tag, demotes every non-critical recommended finding rather than
-applying a confidence cut, for the same calibration reason.
+user can promote it. Asking the board for "too picky" demotes every
+non-critical recommended finding whose tag is not `true`, which includes
+untagged ones, rather than applying a confidence cut, for the same
+calibration reason.
 
 **Overlap is an annotation, not a section.** 2.0–2.3 routed any finding
 with `existingReviewOverlap.status === 'overlaps'` into a separate

@@ -115,7 +115,10 @@ const THREAD_SCHEMA = {
         type: 'object',
         properties: {
           author: { type: 'string' },
-          state: { type: 'string' },
+          // Compared against exact GitHub values below; an enum makes a
+          // collector that rewrites them fail the schema instead of quietly
+          // changing the baseline.
+          state: { type: 'string', enum: ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED', 'PENDING'] },
           commitId: { type: 'string' },
           submittedAt: { type: 'string' },
           body: { type: 'string' }
@@ -126,9 +129,11 @@ const THREAD_SCHEMA = {
   }
 }
 
-// Verdicts on the human reviewer's own earlier threads, checked against the
-// PR head. deltaAvailable is required so "reviewed commit not in checkout"
-// can never look like a verified verdict.
+// Verdicts on the human reviewer's own earlier requests, checked against the
+// PR head: one item per thread, plus one with threadId 'review-body' when
+// review summaries are checked. deltaAvailable records whether the verifier
+// could diff from the reviewed commit; the board runs its own ancestry check
+// for the header, so this field is a record, not a gate.
 const FOLLOW_UP_SCHEMA = {
   type: 'object',
   required: ['deltaAvailable', 'items'],
@@ -251,9 +256,22 @@ if (!/^[0-9a-f]{7,40}$/.test(String(pr.headSha))) {
 const mergeBase = String(config.mergeBase)
 // The authenticated reviewer's GitHub login, used to recognise their own
 // earlier threads and reviews. Optional: without it every run is a first
-// review. Validated to the GitHub login shape because it is interpolated into
+// review. Validated to the GitHub login shape (Enterprise Managed Users carry
+// an _shortcode suffix, apps a [bot] suffix) because it is interpolated into
 // agent prompts; it never reaches a shell.
-const reviewerLogin = /^[A-Za-z0-9-]{1,39}$/.test(String(config.reviewerLogin || '')) ? String(config.reviewerLogin) : ''
+const requestedLogin = String(config.reviewerLogin || '')
+const reviewerLogin = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}(?:\[bot\])?$/.test(requestedLogin) ? requestedLogin : ''
+const reviewerLoginRejected = requestedLogin !== '' && reviewerLogin === ''
+if (reviewerLoginRejected) {
+  log('Warning: args.reviewerLogin is not a GitHub login. Follow-up detection is off for this run.')
+}
+// On the reviewer's own PR their threads and comments are author notes, not
+// a review of the code, so follow-up detection is skipped.
+const reviewerIsAuthor = reviewerLogin !== '' && reviewerLogin.toLowerCase() === String(pr.author || '').toLowerCase()
+if (reviewerIsAuthor) {
+  log('@' + reviewerLogin + ' opened this PR. Follow-up detection is off for this run.')
+}
+const followUpLogin = reviewerIsAuthor ? '' : reviewerLogin
 
 const SEVERITY_ORDER = { critical: 0, important: 1, suggestion: 2 }
 function sortFindings(arr) {
@@ -1147,6 +1165,8 @@ function finalizeBoard(board, findings, positives, prContext) {
   finalBoard.followUp = prContext.followUp || null
   finalBoard.reviewMeta = {
     reviewerLogin: reviewerLogin,
+    reviewerLoginRejected: reviewerLoginRejected,
+    reviewerIsAuthor: reviewerIsAuthor,
     selectedReviewers: prContext.selectedReviewers,
     failedReviewers: Array.isArray(prContext.failedReviewers) ? prContext.failedReviewers : [],
     lensSelection: prContext.lensSelection,
@@ -1162,8 +1182,10 @@ function finalizeBoard(board, findings, positives, prContext) {
 }
 
 // The pinned range is the toolkit's whole diff contract: every git command
-// agents run is anchored to it, and findings inherit head line numbers by
-// construction because the checkout is the head. Built from the validated
+// agents run is anchored to it, except in follow-up mode, where they also run
+// git over reviewedCommit..head (reviewedCommit comes from GitHub review data
+// and is checked to be a SHA at detection). Findings inherit head line numbers
+// by construction because the checkout is the head. Built from the validated
 // head SHA, not symbolic HEAD, so a checkout moved mid-run cannot silently
 // change what the git commands describe.
 const RANGE = mergeBase + '..' + pr.headSha
@@ -1245,13 +1267,13 @@ log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.
 
 const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, originalLine (the first comment's original_line, which outdated comments keep when line is absent), author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
 
-${reviewerLogin ? 'Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return under reviews only those by ' + reviewerLogin + ', as compact records: author, state, commitId, submittedAt, body. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.' : ''}
+${followUpLogin ? 'Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return under reviews only those by ' + followUpLogin + ', as compact records: author, state, commitId, submittedAt, body. Copy state and submittedAt exactly as GitHub returns them (uppercase state, ISO-8601 timestamp). If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.' : ''}
 
 Do not call any GitHub write tools.`
 // The rejection handler attaches at creation: the promise is not awaited
-// until after the specialist fan-out, and an unhandled rejection in that
-// window would abort the whole review instead of taking the documented
-// threadCollectionFailed degradation path.
+// until the lens selector returns, and an unhandled rejection in that window
+// would abort the whole review instead of taking the documented
+// threadCollectionFailed degradation path. Keep it here, not at the await.
 const threadCollectionPromise = agent(threadCollectionPrompt, {
   label: 'collect-review-threads',
   schema: THREAD_SCHEMA,
@@ -1370,7 +1392,7 @@ const threads = threadCollectionFailed ? [] : threadData.threads
 // Reviews are read independently of threads and disclosed separately: a
 // failed reviews read hides a review the user submitted without threads, and
 // a failed threads read must not discard reviews that were read successfully.
-const reviewsCollectionFailed = Boolean(reviewerLogin) && (!(threadData && Array.isArray(threadData.reviews)) || threadData.reviewsCollectionFailed === true)
+const reviewsCollectionFailed = Boolean(followUpLogin) && (!(threadData && Array.isArray(threadData.reviews)) || threadData.reviewsCollectionFailed === true)
 if (reviewsCollectionFailed && !threadCollectionFailed) {
   log('Warning: submitted-review collection failed. Follow-up detection relies on review threads only for this run.')
 }
@@ -1382,10 +1404,10 @@ let myThreads = []
 // The reviewer's latest review summary: requests made only in a review body
 // have no thread, so the verifier checks them as one extra item.
 let myReviewBody = ''
-if (reviewerLogin) {
-  myThreads = threads.filter(thread => thread && thread.author === reviewerLogin)
+if (followUpLogin) {
+  myThreads = threads.filter(thread => thread && thread.author === followUpLogin)
   const myReviews = reviews
-    .filter(review => review && review.author === reviewerLogin && review.state !== 'PENDING')
+    .filter(review => review && review.author === followUpLogin && review.state !== 'PENDING')
     // ISO-8601 timestamps order lexically; latest first.
     .sort((a, b) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')))
   // A standalone thread reply creates its own COMMENTED review with an empty
