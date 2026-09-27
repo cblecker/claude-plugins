@@ -32,8 +32,9 @@ plainly what is still open as of the reviewed head, in one or two
 sentences, drawing on the item's `evidence`;
 for a `partial` item say what was addressed and what remains. Do not restate
 the original request. When a recommended finding with the same
-`followUpItemId` is also selected, merge the two into one reply. The
-`review-body` item has no thread: put its text in the review body.
+`followUpItemId` is also selected, merge the two into one reply. An item
+without a `threadId` (an ask from a review summary) has no thread: put its
+text in the review body.
 
 ### Line comments vs review body
 

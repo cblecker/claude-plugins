@@ -149,23 +149,26 @@ exactly what changed since they looked, and the head checkout can diff it
 with the same read-only git the specialists already use. The reviewed
 commit is remote data validated to a SHA before it reaches a git command,
 and after a force-push it may be missing or, if the old object survives
-locally, no longer an ancestor of the head. Both the verifier and the
-specialists check `git merge-base --is-ancestor` before trusting the delta:
-the verifier falls back to judging current code (`deltaAvailable: false`),
-and specialists omit `changedSinceLastReview`, so nothing is demoted. The
-specialist agent definition allows read-only git over this range as well as
-the pinned one.
+locally, no longer an ancestor of the head. Only the verifier touches this
+range: it checks `git merge-base --is-ancestor` once and, when that fails,
+judges from current code with `delta.available` false, so nothing is
+demoted. Specialists never see the delta and review the full PR as on a
+first review.
 
 **Demotion with a reason, not a higher bar.** "Be less picky" was first
 modelled as raising the recommended threshold from confidence 80 to 90.
 Rejected: specialist confidence is loosely calibrated, so a higher cut
 mostly reshuffles findings at random. The signal that actually tracks
 re-litigation is whether the finding's code changed since the user
-reviewed it, so specialists tag findings with `changedSinceLastReview` and
-routing demotes non-critical findings on unchanged code to Other findings
-with a `routingNote`. Only a known-false tag demotes; unknown never does.
-Nothing is filtered out at the source: specialists still report findings on
-unchanged code, the board shows the demoted finding and its reason, and the
+reviewed it. The verifier returns the delta's changed hunks once, and after
+synthesis the workflow tags each merged finding (`changedSinceLastReview`)
+from its location in JS; routing then demotes non-critical findings on
+unchanged code to Other findings with a `routingNote`. Only a known-false
+tag demotes; an unknown delta never does. An earlier cut had every
+specialist run the delta git itself and tag its own findings, which meant
+three separate ancestry checks and tri-state merge rules for duplicate
+findings; tagging after the merge needs neither. Nothing is filtered out at
+the source: the board shows the demoted finding and its reason, and the
 user can promote it. Asking the board for "too picky" demotes every
 non-critical recommended finding whose tag is not `true`, which includes
 untagged ones, rather than applying a confidence cut, for the same
@@ -179,6 +182,18 @@ now stays on the item, decides only that a selected finding posts as a
 thread reply, and is shown as a tag; `already_covered` still leaves
 Recommended because posting it would be noise.
 
+**The verifier judges which asks still apply.** It receives the user's
+threads and the text of every review summary they submitted, oldest first,
+and returns one verdict per thread and per summary ask that still stands.
+An earlier cut decided in JS which summaries were still in force (latest
+approve or request-changes and everything after, dismissed reviews
+skipped); each review round found another GitHub state combination it
+mishandled. Reading a sequence of reviews and telling which requests a
+later one withdrew is a judgement call, and the verifier is already making
+judgement calls. JS still picks the baseline commit, skipping the empty
+COMMENTED review GitHub creates for each standalone thread reply so that
+replying never moves it.
+
 **The verifier is a prompt, not an agent file.** Verifying the user's own
 threads needs exactly the specialist's tool surface (read-only git, Read,
 Grep, Glob) and nothing else, so it runs on
@@ -190,7 +205,6 @@ only the verdict comes from the verifier, so ids are stable whatever it
 returns.
 
 **Threads are awaited before the fan-out.** 2.3 awaited the collector after
-the specialists so its latency hid behind theirs. Follow-up detection needs
-threads to shape specialist prompts, so the await moved ahead of the
-fan-out. The collector is a low-effort Haiku call running alongside the
+the specialists so its latency hid behind theirs. The verifier runs in the
+fan-out and needs the user's threads, so the await moved ahead of it. The collector is a low-effort Haiku call running alongside the
 Sonnet selector, which is awaited there anyway, so the added wait is small.

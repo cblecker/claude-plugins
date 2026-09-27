@@ -32,11 +32,7 @@ earlier threads are unavailable and recommended findings may duplicate
 existing comments.
 
 If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
-could not be read, so a review you left without inline threads is not detected
-and this may be shown as a first review.
-
-If `reviewMeta.reviewerLoginRejected` is true, warn: your GitHub login did
-not match the expected login shape, so follow-up detection was off this run.
+could not be read, so asks made only in a review summary are not checked.
 
 If `reviewMeta.reviewerIsAuthor` is true, say in one line: you opened this
 PR, so your own threads and comments are author notes and follow-up mode is
@@ -52,12 +48,11 @@ Include this section only when `followUp` is not null.
 
 Header line, from `followUp` and `reviewMeta.reviewerLogin`: `Follow-up
 review — you (@<login>) reviewed <reviewedCommit, 7 chars> on <reviewedAt,
-date only> (<reviewState>); <n> commits since.` If
-`git merge-base --is-ancestor <reviewedCommit> <reviewMeta.headSha>` succeeds,
-compute `n` with `git rev-list --count <reviewedCommit>..<reviewMeta.headSha>`.
-Otherwise say, in place of the count, that the reviewed commit is not in
-the head's history (usually because the branch was rewritten), so verdicts
-rest on the current code only. When
+date only> (<reviewState>); <commitsSince> commits since.`, omitting the
+count clause when `commitsSince` is absent. When
+`followUp.deltaAvailable` is false, say in place of the count that the
+reviewed commit is not in the head's history (usually because the branch was
+rewritten), so verdicts rest on the current code only. When
 `reviewedCommit` is empty, write `you opened <threadCount> threads; no
 reviewed commit is known` instead.
 
@@ -65,11 +60,13 @@ Then one line per entry of `followUp.items`, in order:
 `<glyph> <id> <path>:<line> — <ask> → <evidence>[; fixed in <fixedIn>]; thread
 <resolved|unresolved>[, outdated]` with glyphs ✅ `addressed`, ⚠️ `partial`,
 ❌ `not_addressed`, ❓ `unverifiable`. Omit the thread state words whose
-flags are absent. For the item whose `threadId` is `review-body`, write
-`review summary` in place of `<path>:<line>` and omit the thread state.
+flags are absent. For an item without a `threadId` (an ask from a review
+summary), write `review summary` in place of `<path>:<line>` and omit the
+thread state.
 
 If `followUp.verifierFailed` is true, say the follow-up verifier did not
-complete, so every item is unverifiable.
+complete, so every thread is unverifiable and review-summary asks were not
+checked.
 
 ### 3. Recommended to post (full detail)
 

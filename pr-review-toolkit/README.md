@@ -117,8 +117,9 @@ context from the checkout. The workflow:
   directly — read-only `git diff` over `<merge_base>..HEAD` for patches,
   Read/Grep/Glob for contents, and `git log`/`blame`/`show` only when a
   finding depends on history — so findings carry PR head line numbers by
-  construction. In a follow-up review a **verifier** agent joins the fan-out
-  and checks each of your earlier threads against the head
+  construction. In a follow-up review a **verifier** agent joins the fan-out,
+  checks each of your earlier asks against the head, and reports what
+  changed since your review
 - synthesizes findings into a review board grouped by posting
   recommendation and discussion value, with existing-review overlap recorded
   on each finding
@@ -137,7 +138,7 @@ Workflow(pr-review-toolkit:review-pr-analysis) -> workflow agent() calls
   collector  -> pr-review-github-collector  -> GitHub MCP reads (threads, reviews)
   selector   -> pr-review-selector          -> read-only git over the pinned range
   specialists-> pr-review-analysis-readonly -> read-only repo/git inspection (no MCP)
-  verifier   -> pr-review-analysis-readonly -> your earlier threads vs the head (follow-up only)
+  verifier   -> pr-review-analysis-readonly -> your earlier asks vs the head (follow-up only)
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
 
@@ -171,20 +172,20 @@ your login (`reviewerLogin`, from `get_me`), the run becomes a follow-up
 review, unless you opened the PR: on your own PR your threads and comments
 are author notes, so follow-up mode stays off. The board gains a
 "Follow-up review" section: the commit you last reviewed, how far the PR
-has moved since, and one verdict per thread you opened, plus one for the
-summaries of your reviews still in force (back to your latest approve or
-request-changes) when they have text — addressed, partial, not addressed,
-or unverifiable — with concrete evidence from the head checkout and the
-commit that addressed it when the reviewed commit is still reachable. The
-verifier reuses the read-only specialist agent type and runs only in this
-mode.
+has moved since, and one verdict per thread you opened and per ask from
+your review summaries that still stands — addressed, partial, not
+addressed, or unverifiable — with concrete evidence from the head checkout
+and the commit that addressed it when the reviewed commit is still
+reachable. The verifier reuses the read-only specialist agent type and runs
+only in this mode.
 
-Follow-up mode also changes what gets recommended. Specialists tag each
-finding with whether its location changed since the commit you reviewed
-(`changedSinceLastReview`) and concentrate on the changed code. Routing then
-demotes non-critical findings on unchanged code into Other findings with the
-note "code unchanged since your review" (`routingNote`), instead of
-re-recommending code you already looked at. Nothing is dropped: the board
+Follow-up mode also changes what gets recommended. The verifier returns the
+hunks changed since the commit you reviewed, and after synthesis the
+workflow tags each finding with whether its location falls in them
+(`changedSinceLastReview`). Routing then demotes non-critical findings on
+unchanged code into Other findings with the note "code unchanged since your
+review" (`routingNote`), instead of re-recommending code you already looked
+at. Specialists are unaware of follow-up mode and review the full PR. Nothing is dropped: the board
 shows the demotion reason, and `promote F<n>` brings a finding back. If the
 reviewed commit is not in the head's history (usually a rewritten branch),
 the tag is omitted and no demotion happens.
@@ -234,12 +235,12 @@ recommended. A finding that overlaps one of your own earlier threads carries
 Each finding preserves the specialist's claim, evidence, reasoning, suggested
 fix, confidence, source lens, and existing-review overlap rationale. The board
 also includes positive observations, PR metadata, `followUp` (null on a first
-review; otherwise the reviewed commit, its state and date, per-thread verdicts
-with ids `P1..Pn`, and whether the delta was available), and review metadata:
+review; otherwise the reviewed commit, its state and date, the commit count
+since, verdicts with ids `P1..Pn`, and whether the delta was available), and
+review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
 lenses were selected, why, and whether the all-lenses fallback engaged;
-`reviewMeta.reviewerLogin` records the login used for follow-up detection,
-`reviewMeta.reviewerLoginRejected` that a supplied login failed validation,
+`reviewMeta.reviewerLogin` records the login used for follow-up detection
 and `reviewMeta.reviewerIsAuthor` that follow-up mode was skipped because
 you opened the PR.
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
@@ -247,12 +248,12 @@ recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
 instead of silently skipping overlap classification and verdicts on your
 earlier threads; a failed read of submitted reviews is disclosed separately
-(`reviewMeta.reviewsCollectionFailed`), since it hides a review left without
-inline threads.
+(`reviewMeta.reviewsCollectionFailed`), since asks made only in a review
+summary then go unchecked.
 A lens that fails outright is named in `reviewMeta.failedReviewers`, so
 reduced coverage is disclosed rather than hidden behind the full reviewer
-list; a failed verifier lists your threads as unverifiable
-(`followUp.verifierFailed`).
+list; a failed verifier lists your threads as unverifiable and says your
+review-summary asks were not checked (`followUp.verifierFailed`).
 
 ## Interaction And Posting
 
