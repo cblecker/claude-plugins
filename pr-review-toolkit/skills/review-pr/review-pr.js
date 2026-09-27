@@ -86,6 +86,7 @@ const THREAD_SCHEMA = {
           commentId: { type: 'number' },
           path: { type: 'string' },
           line: { type: 'number' },
+          originalLine: { type: 'number' },
           author: { type: 'string' },
           body: { type: 'string' },
           isResolved: { type: 'boolean' },
@@ -1210,7 +1211,7 @@ function followUpPostureBlock() {
     + 'The human reviewer @' + followUp.reviewerLogin + ' already reviewed this PR at commit ' + reviewedCommitPhrase() + '.\n\n'
     + 'Before reviewing, run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` to see what changed since that review. '
     + 'If the command fails, the reviewed commit is not in this checkout: omit changedSinceLastReview from every finding and review normally. '
-    + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not.\n\n'
+    + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff --no-ext-diff --no-textconv -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not.\n\n'
     + 'Concentrate on the changed code. Still report findings in unchanged code, tagged false: routing decides whether they are recommended.'
 }
 
@@ -1244,7 +1245,7 @@ function analysisPrompt(name, summary) {
 phase('Collect')
 log('Collecting review threads and selecting lenses for ' + pr.owner + '/' + pr.repo + '#' + pr.number)
 
-const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
+const threadCollectionPrompt = `Use GitHub read tools only. Fetch all review comment threads via pull_request_read method get_review_comments for ${pr.owner}/${pr.repo} PR #${pr.number}. Paginate if needed. Return compact thread records only: id (thread node id when available), commentId (the numeric comment ID from discussion_r anchors, as a number), path, line, originalLine (the first comment's original_line, which outdated comments keep when line is absent), author login of the first comment, body of the first comment, and replies with author/body. Include isResolved and isOutdated only when the tool response actually exposes thread resolution and outdated state; omit them when the response does not say — never guess or default them. Set collectionFailed to true when you could not retrieve the thread data (tool failure, unavailable or truncated result, result saved to a local file); set it to false when the read succeeded — including when the PR simply has no review threads.
 
 Also fetch the submitted reviews via pull_request_read method get_reviews for the same PR, paginating if needed, and return them under reviews as compact records: id (number), author (the user login), state, commitId, submittedAt — no bodies. If the reviews read fails, set reviewsCollectionFailed to true and leave collectionFailed as the threads read decides.
 
@@ -1368,13 +1369,14 @@ if (threadCollectionFailed) {
   log('Warning: review-thread collection failed. Existing-review overlap classification is unavailable for this run; recommended findings may duplicate existing comments.')
 }
 const threads = threadCollectionFailed ? [] : threadData.threads
-// A failed reviews read is disclosed separately: it hides a review the user
-// submitted without threads, so the run may wrongly look like a first review.
-const reviewsCollectionFailed = !threadCollectionFailed && (threadData.reviewsCollectionFailed === true || !Array.isArray(threadData.reviews))
-if (reviewsCollectionFailed) {
+// Reviews are read independently of threads and disclosed separately: a
+// failed reviews read hides a review the user submitted without threads, and
+// a failed threads read must not discard reviews that were read successfully.
+const reviewsCollectionFailed = !(threadData && Array.isArray(threadData.reviews)) || threadData.reviewsCollectionFailed === true
+if (reviewsCollectionFailed && !threadCollectionFailed) {
   log('Warning: submitted-review collection failed. Follow-up detection relies on review threads only for this run.')
 }
-const reviews = threadCollectionFailed || reviewsCollectionFailed ? [] : threadData.reviews
+const reviews = reviewsCollectionFailed ? [] : threadData.reviews
 
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review.
@@ -1424,6 +1426,7 @@ function followUpPrompt() {
       id: thread.id,
       path: thread.path,
       line: thread.line,
+      originalLine: thread.originalLine,
       isResolved: knownResolved(thread.isResolved),
       isOutdated: knownResolved(thread.isOutdated),
       body: thread.body,
@@ -1443,7 +1446,7 @@ function followUpPrompt() {
     + (followUp.reviewedCommit ? ' at commit ' + reviewedCommitPhrase() : '')
     + ' and opened the review threads listed in the shared context.\n\n'
     + deltaSteps + '\n\n'
-    + 'For every thread, determine whether the PR head meets what it asked: read the current code at its location (use the line, or search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag, and return one item per thread carrying the same threadId: '
+    + 'For every thread, determine whether the PR head meets what it asked: read the current code at its location (use line, or originalLine for an outdated thread, and search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag, and return one item per thread carrying the same threadId: '
     + 'ask (the thread\'s request in one line), status (addressed: the request is met at the head; partial: some of it is; not_addressed: the request is still unmet at the head, whether the code is unchanged, the edits do not meet it, or a reply declines it (quote the reply in evidence); unverifiable: you could not determine it, and the evidence says why), '
     + 'evidence (concrete: what changed and where, or what did not), and fixedIn (the short SHA of the commit that addressed it, when the delta is available). '
     + 'Judge only whether the request was met, not whether it was a good request.'
@@ -1470,7 +1473,7 @@ function applyFollowUpVerdict(verdict) {
       threadId: thread.id,
       commentId: thread.commentId || undefined,
       path: thread.path,
-      line: thread.line,
+      line: thread.line != null ? thread.line : thread.originalLine,
       isResolved: knownResolved(thread.isResolved),
       isOutdated: knownResolved(thread.isOutdated),
       ask: item && item.ask ? item.ask : String(thread.body || '').split('\n')[0].slice(0, 160),

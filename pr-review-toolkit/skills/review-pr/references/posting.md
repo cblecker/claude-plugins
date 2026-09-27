@@ -47,7 +47,9 @@ run cleanly, put the finding in the review body.
 
 ### Review event
 
-Choose the proposed review event from the selected findings:
+Choose the proposed review event from the findings posted in the review
+itself (line comments and review body); a finding posted only as a thread
+reply does not set it:
 
 - `REQUEST_CHANGES` only when at least one selected finding is a serious
   correctness or blocking concern.
@@ -58,8 +60,9 @@ Choose the proposed review event from the selected findings:
   addressed.
 
 Thread replies (overlap and follow-up) post independently of the review. A
-run of replies only submits no review and shows no review event; the user's
-earlier `CHANGES_REQUESTED` review, if any, stays in force.
+run of replies only submits no review, and the preview shows `No review
+event`; the user's earlier `CHANGES_REQUESTED` review, if any, stays in force.
+To make a blocking reply request changes, convert it to a line comment.
 
 ## Preview And Confirm
 
@@ -86,7 +89,8 @@ show:
 
 For review body text (non-line findings), show the review body.
 
-Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
+Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, `APPROVE`, or
+`No review event` for a run of replies only.
 
 Only after the line-anchor checks have returned and the full preview text is
 in the conversation, ask for explicit approval with `AskUserQuestion`, called
