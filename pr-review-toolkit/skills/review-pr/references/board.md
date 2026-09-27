@@ -47,8 +47,8 @@ Include this section only when `followUp` is not null.
 Header line, from `followUp`: `Follow-up review — you (@reviewerLogin)
 reviewed <reviewedCommit, 7 chars> on <reviewedAt, date only>
 (<reviewState>); <n> commits since.` If
-`git merge-base --is-ancestor <reviewedCommit> HEAD` succeeds, compute `n`
-with `git rev-list --count <reviewedCommit>..HEAD`. Otherwise the branch was
+`git merge-base --is-ancestor <reviewedCommit> <reviewMeta.headSha>` succeeds,
+compute `n` with `git rev-list --count <reviewedCommit>..<reviewMeta.headSha>`. Otherwise the branch was
 rewritten since your review: say so in place of the count. When `reviewedCommit` is empty (threads
 but no submitted review), write `you opened <threadCount> threads without a
 submitted review` instead.
