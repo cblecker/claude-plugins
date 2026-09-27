@@ -1461,7 +1461,8 @@ function followUpPrompt() {
     + 'The human reviewer @' + reviewerLogin + ' reviewed this PR earlier'
     + (followUp.reviewedCommit ? ' at commit ' + reviewedCommitPhrase() : '')
     + ' and opened the review threads listed in the shared context.'
-    + (myReviewBody ? ' reviewBody holds the summaries of that reviewer\'s reviews still in force (separated by ---): also check the requests in them and return one more item with threadId "review-body", whose status reflects its least-addressed request.' : '')
+    + (myReviewBody ? ' reviewBody holds the summaries of that reviewer\'s reviews still in force (separated by ---): also check the requests in them and return one more item with threadId "review-body", whose status reflects its least-addressed request.'
+      + (deltaRange ? ' When the delta is available, run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` and inspect the changed files relevant to those requests the same way.' : '') : '')
     + '\n\n'
     + deltaSteps + '\n\n'
     + 'For every thread, determine whether the PR head meets what it asked: read the current code at its location (use line, or originalLine for an outdated thread, and search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag, and return one item per thread carrying the same threadId: '
