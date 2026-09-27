@@ -784,9 +784,11 @@ function changedSinceReview(location, delta) {
 // already reviewed once, so a non-critical finding there is not re-recommended.
 // It is demoted, not dropped, with the reason on the item — the user can
 // promote it back from the board.
-function routeSection(item, preferredSection, followUp) {
+function routeSection(item, preferredSection, followUp, memberLocations) {
   if (followUp) {
-    const changed = changedSinceReview(item.location, followUpDelta)
+    // A merged concern counts as changed when any member's location did.
+    const anyChanged = (memberLocations || []).some(location => changedSinceReview(location, followUpDelta) === true)
+    const changed = anyChanged ? true : changedSinceReview(item.location, followUpDelta)
     if (changed !== undefined) item.changedSinceLastReview = changed
   }
   const section = baseSection(item, preferredSection)
@@ -825,7 +827,8 @@ function finalizeBoard(synthesized, findings, positives, context) {
   })
   synthesisGroups(synthesized, findings.length).forEach(group => {
     const item = boardItem(group, findings, context.threads)
-    board[routeSection(item, group.section, context.followUp)].push(item)
+    const memberLocations = group.members.map(index => findings[index] && findings[index].location)
+    board[routeSection(item, group.section, context.followUp, memberLocations)].push(item)
   })
 
   let nextId = 1
@@ -1085,10 +1088,13 @@ if (followUpLogin) {
   const hasBody = review => typeof review.body === 'string' && review.body.trim() !== ''
   const substantive = myReviews.filter(review => review.state !== 'COMMENTED' || hasBody(review))
   const lastReview = substantive[0] || (myThreads.length > 0 ? myReviews[0] || null : null)
-  myReviewSummaries = myReviews.filter(hasBody).reverse().map(review => ({
+  // Bodyless decisions stay in as state markers, so an approval between two
+  // commented summaries still withdraws the earlier asks; only the empty
+  // COMMENTED reviews that thread replies create are left out.
+  myReviewSummaries = myReviews.filter(review => hasBody(review) || review.state !== 'COMMENTED').reverse().map(review => ({
     state: review.state,
     submittedAt: review.submittedAt || '',
-    body: review.body.trim()
+    body: hasBody(review) ? review.body.trim() : ''
   }))
   if (myThreads.length > 0 || lastReview) {
     // commitId is remote data interpolated into the git commands agents run;
