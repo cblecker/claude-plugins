@@ -14,10 +14,10 @@ from section array lengths, plus the reviewer list from
 findings, K not posting. Reviewers: code-reviewer, pr-test-analyzer.` where
 K is `alreadyCovered.length + discarded.length`. If
 `reviewMeta.lensSelection.source` is `all-lenses-fallback`, add a line: the
-lens selector returned invalid output, so every lens ran. Add a one-line shape summary from `summary`
-(file count, additions/deletions, scale, notable areas — or that the shape
-is unavailable); per-lens rationales live in
-`reviewMeta.lensSelection.rationales` when the user asks.
+lens selector returned invalid output, so every lens ran. Add a one-line
+shape summary from `summary` (file count, additions/deletions, scale,
+notable areas — or that the shape is unavailable); per-lens rationales live
+in `reviewMeta.lensSelection.rationales` when the user asks.
 
 Then show merge signals from the metadata and the pinned range:
 
@@ -30,6 +30,11 @@ If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
 could not be collected, so overlap classification and verdicts on your
 earlier threads are unavailable and recommended findings may duplicate
 existing comments.
+
+If `reviewMeta.synthesisFailed` is true, warn: the synthesis step did not
+complete, so duplicate findings from different lenses are listed separately,
+overlap with existing threads was not checked, and sections come from
+severity and confidence alone.
 
 If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
 could not be read, so asks made only in a review summary are not checked.
@@ -89,12 +94,15 @@ For each finding, include:
   recommended for posting, synthesized from severity, confidence, and overlap
   status
 
-### 4. Other findings (full detail)
+### 4. Other findings (one line per finding)
 
-Findings from `discussionOnly`: same fields as recommended, ending with
-`Not recommended: <reason>` — the item's `routingNote` when set, otherwise one
-sentence from severity, confidence, and the overlap rationale. Introduce the
-section with: say `promote F<n>` to move a finding into Recommended.
+Introduce the section with: say `promote F<n>` to move a finding into
+Recommended, or ask about one for full detail. Then, for each finding in
+`discussionOnly`: `id location — title (severity, confidence[, changed |
+unchanged since your review]) — <reason>`, followed by the overlap tag from
+Recommended when one applies. The reason is the item's `routingNote` when
+set, otherwise a few words from severity, confidence, and overlap. When the
+user asks about a finding, show the full Recommended fields from the item.
 
 ### 5. Not posting (one-liner per finding)
 
@@ -102,7 +110,8 @@ First `alreadyCovered`: `id — title (covered by @<threadAuthor> thread on
 <threadPath>:<threadLine>, resolved|unresolved)`, or `(covered by your thread
 ...)` when `followUpItemId` is set; fall back to the finding's own location
 when the thread descriptors are absent. Then `discarded`: `id — title
-(discarded: reason)`.
+(discarded: <routingNote, or low confidence when absent>)`. These items carry
+only their claim, not evidence or a fix.
 
 ### 6. Positive observations
 

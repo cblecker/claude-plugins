@@ -111,6 +111,40 @@ ones. If the stopping rules prove insufficient, the next step is a budget
 scaled from the selector's changed-file count, or a `maxTurns` backstop —
 calibrated on measured runs.
 
+## Synthesis returns decisions, not findings
+
+Through 2.3 the synthesizer re-emitted every finding in full, at high
+effort, so each finding's text existed five times: specialist output,
+synthesis input, synthesis output, workflow return, and the rendered board.
+Its prompt told it to *preserve* specialist evidence, so for a lone finding
+the rewrite was a copy; the orchestrator reformats every item when it
+renders the board anyway. Because the model also copied thread ids and
+`commentId`s back, the workflow carried about 400 lines of defensive JS:
+re-merging by token keys, choosing between conflicting overlap records, and
+guarding against mismatched thread and comment id pairs.
+
+The synthesizer now returns groups of finding indexes, a section, and an
+overlap status with a `threadId`, at medium effort. JS builds each item from
+the specialists' own fields, and `commentId`, resolution state, and the
+thread descriptors come only from the collector's record for that id, so a
+reply target always describes one real thread. The one place a rewrite adds
+value is a merge of several lenses' findings, so only multi-finding groups may
+carry a new title and claim. Indexes the synthesizer drops still land on the
+board as their own items.
+
+The token-overlap heuristic that used to classify overlap when synthesis
+failed was removed with the merge machinery. It served only that rare path,
+and a wrong word-overlap match could point a reply at the wrong thread.
+Synthesis failure is instead disclosed (`reviewMeta.synthesisFailed`) and
+findings are routed on severity and confidence alone. Synthesis is skipped
+when there are no findings.
+
+The workflow returns only what `board.md` and `posting.md` read: no PR
+metadata (the orchestrator already has it), and already-covered and discarded
+items without their long text fields. Specialists return `evidence` as one
+string and fold their reasoning into `whyItMatters`, which shrinks every
+later copy.
+
 ## Invocation: named plugin workflow, not `scriptPath`
 
 The workflow script is registered in `plugin.json` under `workflows`, so the

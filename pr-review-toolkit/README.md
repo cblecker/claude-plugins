@@ -106,9 +106,10 @@ context from the checkout. The workflow:
 
 - collects existing review threads and submitted reviews through GitHub MCP
   read tools (collector agent) in parallel with a **selector** agent that
-  runs the diff itself (`git diff --name-status` / `--numstat` and the
-  hardened diff over the pinned range) and returns which lenses should run,
-  a one-line rationale each, and the PR's shape
+  reads the changed-file list over the pinned range (`git diff --shortstat`,
+  `--name-status`, `--numstat`, and per-file patches only where needed) and
+  returns which lenses should run, a one-line rationale each, and the PR's
+  shape
 - falls back to running **all** lenses when selector output fails validation
   — selection is disclosed in `reviewMeta.lensSelection`, never silent
 - detects a **follow-up review** when threads or reviews by your login exist
@@ -120,9 +121,10 @@ context from the checkout. The workflow:
   construction. In a follow-up review a **verifier** agent joins the fan-out,
   checks each of your earlier asks against the head, and reports what
   changed since your review
-- synthesizes findings into a review board grouped by posting
-  recommendation and discussion value, with existing-review overlap recorded
-  on each finding
+- synthesizes a review board: the synthesis agent returns only decisions —
+  which findings share a concern, each group's section, and which existing
+  thread it overlaps — and the workflow builds the board items from the
+  specialists' own text and the collector's thread records
 
 The workflow does not draft or post comments. Drafting happens in the skill
 conversation after the user selects findings. Posting requires an exact
@@ -223,7 +225,8 @@ The workflow returns a review board grouped by outcome:
   including findings the workflow demoted with a `routingNote`
 - `alreadyCovered` — findings fully covered by existing human or bot review
   threads
-- `discarded` — weak, duplicate, low-confidence, or non-actionable findings
+- `discarded` — weak, low-confidence, or non-actionable findings (duplicates
+  across lenses are merged into one finding instead)
 
 Overlap with an existing thread is an annotation on the finding
 (`existingReviewOverlap`: status, thread and comment ids, resolution state,
@@ -232,9 +235,12 @@ a selected finding is posted — as a reply on that thread — not whether it is
 recommended. A finding that overlaps one of your own earlier threads carries
 `followUpItemId` pointing at the matching follow-up verdict.
 
-Each finding preserves the specialist's claim, evidence, reasoning, suggested
-fix, confidence, source lens, and existing-review overlap rationale. The board
-also includes positive observations, PR metadata, `followUp` (null on a first
+Recommended and Other findings carry the specialist's own title, claim,
+evidence, why it matters, suggested fix, severity, confidence, and lens;
+findings merged from several lenses carry a merged title and claim and the
+distinct evidence of each. Already-covered and discarded findings carry only
+their title, claim, and routing reason. The board also includes positive
+observations, the PR shape (`summary`), `followUp` (null on a first
 review; otherwise the reviewed commit, its state and date, the commit count
 since, verdicts with ids `P1..Pn`, and whether the delta was available), and
 review metadata:
@@ -250,6 +256,9 @@ instead of silently skipping overlap classification and verdicts on your
 earlier threads; a failed read of submitted reviews is disclosed separately
 (`reviewMeta.reviewsCollectionFailed`), since asks made only in a review
 summary then go unchecked.
+If synthesis fails, every finding is listed on its own, routed by severity
+and confidence, and the board says duplicates were not merged and overlap
+was not checked (`reviewMeta.synthesisFailed`).
 A lens that fails outright is named in `reviewMeta.failedReviewers`, so
 reduced coverage is disclosed rather than hidden behind the full reviewer
 list; a failed verifier lists your threads as unverifiable and says your
@@ -372,6 +381,8 @@ Representative PR validation should cover:
 - small PRs with and without existing review comments
 - PRs where existing human or bot comments fully cover a candidate finding
 - partial-overlap and plus-one cases
+- the same concern flagged by two lenses (one merged finding, both lenses
+  named)
 - discussion-only findings
 - large PRs with hundreds of files (complete review with no API pagination;
   selector reports true scale)
