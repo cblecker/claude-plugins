@@ -1396,9 +1396,16 @@ if (reviewerLogin) {
   const hasBody = review => typeof review.body === 'string' && review.body.trim() !== ''
   const substantive = myReviews.filter(review => review.state !== 'COMMENTED' || hasBody(review))
   const lastReview = substantive[0] || (myThreads.length > 0 ? myReviews[0] || null : null)
-  // Only the baseline review's own summary: a later review without one
-  // supersedes an older summary rather than reviving it.
-  myReviewBody = lastReview && hasBody(lastReview) ? lastReview.body.trim() : ''
+  // Requests still in force: summaries from the latest APPROVED or
+  // CHANGES_REQUESTED review and every later review. A later COMMENTED review
+  // does not supersede that decision on GitHub, but a later decision
+  // supersedes everything before it. Dismissed reviews are not in force.
+  const decision = myReviews.findIndex(review => review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')
+  myReviewBody = (decision === -1 ? myReviews : myReviews.slice(0, decision + 1))
+    .filter(review => review.state !== 'DISMISSED' && hasBody(review))
+    .map(review => review.body.trim())
+    .reverse()
+    .join('\n\n---\n\n')
   if (myThreads.length > 0 || lastReview) {
     // commitId is remote data interpolated into the git commands agents run;
     // accept only a commit SHA, the same guard as mergeBase.
@@ -1454,7 +1461,7 @@ function followUpPrompt() {
     + 'The human reviewer @' + reviewerLogin + ' reviewed this PR earlier'
     + (followUp.reviewedCommit ? ' at commit ' + reviewedCommitPhrase() : '')
     + ' and opened the review threads listed in the shared context.'
-    + (myReviewBody ? ' reviewBody is that review\'s summary: also check the requests in it and return one more item with threadId "review-body", whose status reflects its least-addressed request.' : '')
+    + (myReviewBody ? ' reviewBody holds the summaries of that reviewer\'s reviews still in force (separated by ---): also check the requests in them and return one more item with threadId "review-body", whose status reflects its least-addressed request.' : '')
     + '\n\n'
     + deltaSteps + '\n\n'
     + 'For every thread, determine whether the PR head meets what it asked: read the current code at its location (use line, or originalLine for an outdated thread, and search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag, and return one item per thread carrying the same threadId: '
