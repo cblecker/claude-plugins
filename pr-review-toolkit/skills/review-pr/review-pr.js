@@ -1399,8 +1399,9 @@ if (reviewerLogin) {
   // Requests still in force: summaries from the latest APPROVED or
   // CHANGES_REQUESTED review and every later review. A later COMMENTED review
   // does not supersede that decision on GitHub, but a later decision
-  // supersedes everything before it. Dismissed reviews are not in force.
-  const decision = myReviews.findIndex(review => review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED')
+  // supersedes everything before it. A dismissed decision still ends the
+  // window (it superseded what came before) but is itself not in force.
+  const decision = myReviews.findIndex(review => ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].indexOf(review.state) !== -1)
   myReviewBody = (decision === -1 ? myReviews : myReviews.slice(0, decision + 1))
     .filter(review => review.state !== 'DISMISSED' && hasBody(review))
     .map(review => review.body.trim())
