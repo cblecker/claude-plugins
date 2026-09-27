@@ -94,8 +94,8 @@ alone, never in parallel with other tools. Use these options:
 1. "Post this review"
 2. "Edit findings" — covers editing drafts, adding, or removing findings
 3. "Convert resolved-thread replies to new line comments" — include this
-   option only when at least one overlap finding targets a resolved thread;
-   follow-up replies stay replies
+   option only when at least one overlap finding or follow-up reply targets a
+   resolved thread
 4. "Cancel"
 
 Accept approval only when the user selects "Post this review" or clearly
