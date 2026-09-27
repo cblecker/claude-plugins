@@ -58,10 +58,10 @@ Then one line per entry of `followUp.items`, in order:
 ❌ `not_addressed`, ❓ `unverifiable`. Omit the thread state words whose
 flags are absent.
 
-If `followUp.items` is non-empty and `followUp.deltaAvailable` is false, add:
-verdicts rest on the current code and thread replies only, because the
-reviewed commit is not in the checkout. If `followUp.verifierFailed` is true,
-say the follow-up verifier did not complete, so every item is unverifiable.
+If `followUp.verifierFailed` is true, say the follow-up verifier did not
+complete, so every item is unverifiable. Otherwise, if `reviewedCommit` is
+set and `deltaAvailable` is false, say verdicts rest on the current code and
+thread replies only, because the reviewed commit is not in the checkout.
 
 ### 3. Recommended to post (full detail)
 
@@ -140,6 +140,9 @@ overlaps, then offer options:
 3. "Done"
 
 ### When nothing is postable otherwise
+
+If any `followUp.items` entry is `unverifiable`, name those items before the
+options: approving would approve requests nobody verified.
 
 1. "Leave an approving review"
 2. "I spotted something"

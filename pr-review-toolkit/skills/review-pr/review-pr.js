@@ -1210,7 +1210,7 @@ function followUpPostureBlock() {
     + 'Before reviewing, run `git -c core.quotePath=false diff --name-only ' + deltaRange + '` to see what changed since that review. '
     + 'If the command fails, the reviewed commit is not in this checkout (the branch was rewritten): omit changedSinceLastReview from every finding and review normally. '
     + 'Otherwise set changedSinceLastReview on every finding: true when the finding\'s line falls in a hunk of `git --literal-pathspecs diff -U0 ' + deltaRange + ' -- \'<path>\'` or the file was added, deleted, or renamed in that range; false when it does not.\n\n'
-    + 'Concentrate on the changed code. Report a finding in unchanged code only at critical severity: anything less there was the reviewer\'s call the first time.'
+    + 'Concentrate on the changed code. Still report findings in unchanged code, tagged false: routing decides whether they are recommended.'
 }
 
 function analysisPrompt(name, summary) {
@@ -1435,7 +1435,7 @@ function followUpPrompt() {
     + ' and opened the review threads listed in the shared context. For each thread, determine whether the PR head now addresses what the thread asked.\n\n'
     + deltaSteps + '\n\n'
     + 'For every thread, read the current code at its location (use the line, or search for the quoted code when the line has moved), weigh the author replies and the isOutdated flag (GitHub marks a thread outdated when the commented lines changed), and return one item per thread carrying the same threadId: '
-    + 'ask (the thread\'s request in one line), status (addressed: the request is met at the head; partial: some of it is; not_addressed: the code the thread describes is unchanged and no reply explains why; unverifiable: you could not determine it, and the evidence says why), '
+    + 'ask (the thread\'s request in one line), status (addressed: the request is met at the head; partial: some of it is; not_addressed: the request is still unmet at the head, whether the code is unchanged, the edits do not meet it, or a reply declines it (quote the reply in evidence); unverifiable: you could not determine it, and the evidence says why), '
     + 'evidence (concrete: what changed and where, or what did not), and fixedIn (the short SHA of the commit that addressed it, when the delta is available). '
     + 'Judge only whether the request was met, not whether it was a good request. Do not post, draft, or resolve anything.\n\n'
     + UNTRUSTED_NOTE
