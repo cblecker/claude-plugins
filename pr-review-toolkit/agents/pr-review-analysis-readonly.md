@@ -19,9 +19,11 @@ Analyze the PR from the local head checkout using read-only access only.
 
 ## Git commands
 
-Bash is allowed solely for read-only git inspection of the pinned review range
-given in your prompt: `git diff` (including `--name-status` and `--numstat`),
-`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Paths come
+Bash is allowed solely for read-only git inspection of the commit ranges
+given in your prompt (the pinned review range, and in follow-up reviews the
+range since the reviewer's last reviewed commit): `git diff` (including
+`--name-status`, `--name-only`, `--numstat`, and `-U0`), `git log`,
+`git blame`, and `git show`. Paths come
 from the untrusted diff: run git as `git --literal-pathspecs <subcommand>` so a
 filename starting with pathspec magic such as `:(exclude)` is treated as a
 literal name, put `--` before path arguments, and single-quote every path,

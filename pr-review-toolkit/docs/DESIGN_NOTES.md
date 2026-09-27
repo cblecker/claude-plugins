@@ -129,8 +129,8 @@ entry, dispatching bare workflow invocations without the skill's preflight
 
 ## Follow-up mode
 
-2.4 recognises a PR the user has reviewed before and changes three things.
-Each choice was the lighter of the alternatives considered.
+2.4 recognises a PR the user has reviewed before. Each choice below was the
+lighter of the alternatives considered.
 
 **Detection by login, not by argument.** The skill calls `get_me` once and
 the workflow matches that login against thread authors and submitted
@@ -145,9 +145,11 @@ review carries the commit it was made against. `reviewedCommit..headSha` is
 exactly what changed since they looked, and the head checkout can diff it
 with the same read-only git the specialists already use. The reviewed
 commit is remote data validated to a SHA before it reaches a git command,
-and it may be unreachable after a force-push: agents probe with `git show`
-first and fall back to judging current code, disclosed as
-`deltaAvailable: false`.
+and it may be unreachable after a force-push: the verifier probes with
+`git show` and falls back to judging current code (`deltaAvailable: false`),
+and specialists whose delta diff fails omit `changedSinceLastReview`, so
+nothing is demoted. The specialist agent definition allows read-only git over
+this range as well as the pinned one.
 
 **Demotion with a reason, not a higher bar.** "Be less picky" was first
 modelled as raising the recommended threshold from confidence 80 to 90.
@@ -157,8 +159,11 @@ re-litigation is whether the finding's code changed since the user
 reviewed it, so specialists tag findings with `changedSinceLastReview` and
 routing demotes non-critical findings on unchanged code to Other findings
 with a `routingNote`. Only a known-false tag demotes; unknown never does.
-Nothing is filtered out at the source: the board shows the demoted finding
-and its reason, and the user can promote it.
+Nothing is filtered out at the source: specialists still report findings on
+unchanged code, the board shows the demoted finding and its reason, and the
+user can promote it. The board's "too picky" fallback, when no finding
+carries the tag, demotes every non-critical recommended finding rather than
+applying a confidence cut, for the same calibration reason.
 
 **Overlap is an annotation, not a section.** 2.0–2.3 routed any finding
 with `existingReviewOverlap.status === 'overlaps'` into a separate

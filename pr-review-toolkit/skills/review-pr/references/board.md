@@ -1,9 +1,5 @@
 # Review Board
 
-Read when the workflow has returned its board. This file governs how the
-board is presented and which options follow it. Present the board before
-drafting or posting anything.
-
 ## Present Review Board
 
 Use this order:
@@ -40,8 +36,7 @@ narrower than the reviewer list suggests.
 
 ### 2. Follow-up review
 
-Include this section only when `followUp` is not null: the workflow found
-review threads or a submitted review by `reviewerLogin` on this PR.
+Include this section only when `followUp` is not null.
 
 Header line, from `followUp`: `Follow-up review — you (@reviewerLogin)
 reviewed <reviewedCommit, 7 chars> on <reviewedAt, date only>
@@ -73,9 +68,9 @@ For each finding, include:
 - overlap tag when `existingReviewOverlap.status` is `overlaps`:
   `↳ follows up <followUpItemId> (your thread, resolved|unresolved)` when
   `followUpItemId` is set, otherwise `↳ overlaps @<threadAuthor> thread on
-  <threadPath>:<threadLine> (resolved|unresolved)`; append `→ posts as a
-  reply` when `existingReviewOverlap.commentId` is set, else `→ no reply
-  target; would post as a new comment`
+  <threadPath>:<threadLine> (resolved|unresolved)`, omitting the state word
+  when `isResolved` is absent; append `→ posts as a reply` when
+  `existingReviewOverlap.commentId` is set, else `→ no reply target`
 - claim
 - evidence
 - why it matters
@@ -87,8 +82,7 @@ For each finding, include:
 ### 4. Other findings (full detail)
 
 Findings from `discussionOnly`: same fields as recommended, ending with
-`Not recommended: <reason>` — the item's `routingNote` when set (the workflow
-demoted it and says why, e.g. code unchanged since your review), otherwise one
+`Not recommended: <reason>` — the item's `routingNote` when set, otherwise one
 sentence from severity, confidence, and the overlap rationale. Introduce the
 section with: say `promote F<n>` to move a finding into Recommended.
 
@@ -115,8 +109,7 @@ using `AskUserQuestion` with contextual options. "Open follow-ups" below means
 Write a brief assessment of the recommended findings and any notable
 overlaps, then offer options:
 
-1. "Draft recommended findings" (first option — the recommended action; the
-   description notes that findings tagged as overlapping a thread are drafted
+1. "Draft recommended findings" (the description notes that findings tagged as overlapping a thread are drafted
    as replies on that thread)
 2. "Draft recommended + reply on open follow-ups (P2, P4)" — include only when
    open follow-ups exist, naming their ids
@@ -132,21 +125,28 @@ overlaps, then offer options:
 
 ### When nothing is recommended and your earlier findings are all addressed
 
-`followUp` is not null, `followUp.items` is non-empty, and every item is
-`addressed`:
+`followUp.items` is non-empty and every item is `addressed`:
 
 1. "Approve: previous findings addressed"
 2. "I spotted something"
 3. "Done"
 
-### When nothing is postable otherwise
+### When nothing is recommended but other findings exist
 
-If any `followUp.items` entry is `unverifiable`, name those items before the
-options: approving would approve requests nobody verified.
+1. "Skip posting"
+2. "I want to discuss specific findings"
+3. "Leave an approving review"
+4. "Cancel"
+
+### When nothing is postable otherwise
 
 1. "Leave an approving review"
 2. "I spotted something"
 3. "Done"
+
+In either of the last two cases, if any `followUp.items` entry is
+`unverifiable`, name those items before the options: approving would approve
+requests nobody verified.
 
 The user may type free-form text via Other (e.g., "Tell me more about F3").
 Respond accordingly and loop back to updated options. Handle these requests
@@ -158,4 +158,4 @@ directly on the board state, then re-present the counts and the menu:
   Other findings every recommended finding that is not `critical` and whose
   `changedSinceLastReview` is not `true`, each with the note `Demoted at your
   request.` When no finding carries `changedSinceLastReview`, demote every
-  non-critical recommended finding with confidence below 90 instead.
+  non-critical recommended finding.

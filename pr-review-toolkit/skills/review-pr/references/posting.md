@@ -1,7 +1,6 @@
 # Drafting And Posting
 
-Read when the user chooses to draft, endorse, or post. Draft comments only
-in the conversation. GitHub write tools may be used only in the final
+Draft comments only in the conversation. GitHub write tools may be used only in the final
 posting step, after the exact preview is explicitly approved.
 
 ## Draft Selected Comments
@@ -20,20 +19,18 @@ Drafts should:
 A selected finding whose `existingReviewOverlap.status` is `overlaps` and
 that has a `commentId` is drafted as a reply on that thread by default:
 acknowledge the original comment, add the new perspective, and avoid
-restating the concern. The user may ask for it as a new line comment
-instead. A finding whose `followUpItemId` is set replies on the user's own
+restating the concern. A finding whose `followUpItemId` is set replies on the user's own
 earlier thread: write it as the user following up on their own request, not
 as a newcomer to the thread.
 
 ### Follow-up replies
 
 When the user chooses to reply on open follow-ups, draft one reply per chosen
-`followUp.items` entry (status `partial` or `not_addressed`) on that entry's
-thread, using its `commentId`. State plainly what is still open as of the
+`followUp.items` entry on that entry's thread, using its `commentId`. State plainly what is still open as of the
 reviewed head, in one or two sentences, drawing on the item's `evidence`;
 for a `partial` item say what was addressed and what remains. Do not restate
-the original request. An entry without a `commentId` follows the missing
-reply-target rule in Preview And Confirm.
+the original request. When a recommended finding with the same
+`followUpItemId` is also selected, merge the two into one reply.
 
 ### Line comments vs review body
 
@@ -53,19 +50,16 @@ run cleanly, put the finding in the review body.
 Choose the proposed review event from the selected findings:
 
 - `REQUEST_CHANGES` only when at least one selected finding is a serious
-  correctness or blocking concern, or when a `not_addressed` follow-up being
-  replied to was blocking in the user's earlier review (their `reviewState`
-  was `CHANGES_REQUESTED`) and remains so.
-- `COMMENT` for non-blocking feedback, suggestions, endorsements, or
-  discussion.
+  correctness or blocking concern.
+- `COMMENT` for non-blocking feedback, suggestions, or discussion.
 - `APPROVE` when the user selected "Leave an approving review" or "Approve:
   previous findings addressed" and no findings are being posted. For the
   latter, the review body may say in one line that the earlier findings were
   addressed.
 
-Thread replies (overlap and follow-up) post independently of the review, so
-a run may consist only of replies with no review event; say so in the
-preview.
+Thread replies (overlap and follow-up) post independently of the review. A
+run of replies only submits no review and shows no review event; the user's
+earlier `CHANGES_REQUESTED` review, if any, stays in force.
 
 ## Preview And Confirm
 
@@ -100,7 +94,8 @@ alone, never in parallel with other tools. Use these options:
 1. "Post this review"
 2. "Edit findings" — covers editing drafts, adding, or removing findings
 3. "Convert resolved-thread replies to new line comments" — include this
-   option only when at least one overlap finding targets a resolved thread
+   option only when at least one overlap finding targets a resolved thread;
+   follow-up replies stay replies
 4. "Cancel"
 
 Accept approval only when the user selects "Post this review" or clearly
@@ -133,8 +128,7 @@ Post overlapping findings and follow-up replies using
 `pullNumber`. If the reply API rejects the target as invalid, do not silently
 change the posting location: convert the finding to a proposed new line
 comment and return to Preview And Confirm — same as invalid line locations
-below. Thread replies are independent of the pending
-review submission.
+below.
 
 ### Review body only
 

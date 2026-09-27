@@ -99,11 +99,9 @@ uncommitted edits; the diff itself is tree-to-tree).
 
 ## Identify The Reviewer
 
-Call `get_me` once and record its `login` as `reviewerLogin`. The workflow
-uses it to recognise your own earlier review threads and submitted reviews
-on this PR, which turns the run into a follow-up review (see Present Review
-Board). If the call fails, warn that follow-up detection is unavailable this
-run and continue with `reviewerLogin` empty; every other step is unaffected.
+Call `get_me` once and record its `login` as `reviewerLogin`. If it fails,
+warn that follow-up detection is unavailable this run and continue with
+`reviewerLogin` empty.
 
 ## Pin The Review Range
 
@@ -151,15 +149,12 @@ metadata.
 
 ## Present Review Board And Ask What To Do Next
 
-Read `${CLAUDE_SKILL_DIR}/references/board.md` and follow it exactly. It
-governs the board layout (heading and signals, follow-up review, recommended,
-other findings, not posting, positive observations), the contextual
-`AskUserQuestion` menus, and the free-form board adjustments (`promote`,
-`demote`, "too picky"). Present the board before drafting or posting anything.
+Read `${CLAUDE_SKILL_DIR}/references/board.md` and follow it exactly.
+Present the board before drafting or posting anything.
 
 ## Drafting And Posting
 
-When the user chooses to draft, endorse, approve, or post, read
+When the user chooses to draft, reply, approve, or post, read
 `${CLAUDE_SKILL_DIR}/references/posting.md` and follow it exactly. It
 governs drafting style, line-anchor validity, the exact preview, explicit
 approval, and the approved GitHub writes.
