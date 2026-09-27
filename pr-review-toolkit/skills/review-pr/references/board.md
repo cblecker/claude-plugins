@@ -55,8 +55,9 @@ review — you (@<login>) reviewed <reviewedCommit, 7 chars> on <reviewedAt,
 date only> (<reviewState>); <n> commits since.` If
 `git merge-base --is-ancestor <reviewedCommit> <reviewMeta.headSha>` succeeds,
 compute `n` with `git rev-list --count <reviewedCommit>..<reviewMeta.headSha>`.
-Otherwise say, in place of the count, that the branch was rewritten since
-your review, so verdicts rest on the current code only. When
+Otherwise say, in place of the count, that the reviewed commit is not in
+the head's history (usually because the branch was rewritten), so verdicts
+rest on the current code only. When
 `reviewedCommit` is empty, write `you opened <threadCount> threads; no
 reviewed commit is known` instead.
 

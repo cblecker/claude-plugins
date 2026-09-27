@@ -1392,7 +1392,12 @@ const threads = threadCollectionFailed ? [] : threadData.threads
 // Reviews are read independently of threads and disclosed separately: a
 // failed reviews read hides a review the user submitted without threads, and
 // a failed threads read must not discard reviews that were read successfully.
-const reviewsCollectionFailed = Boolean(followUpLogin) && (!(threadData && Array.isArray(threadData.reviews)) || threadData.reviewsCollectionFailed === true)
+// The baseline is ordered by submittedAt, so a submitted review without one
+// counts as an incomplete read. A missing body reads as an empty one.
+const reviewsCollectionFailed = Boolean(followUpLogin) && (
+  !(threadData && Array.isArray(threadData.reviews))
+  || threadData.reviewsCollectionFailed === true
+  || threadData.reviews.some(review => !review || (review.state !== 'PENDING' && !review.submittedAt)))
 if (reviewsCollectionFailed && !threadCollectionFailed) {
   log('Warning: submitted-review collection failed. Follow-up detection relies on review threads only for this run.')
 }

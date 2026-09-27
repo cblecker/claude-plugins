@@ -118,7 +118,9 @@ no longer describes the PR — and offer to re-run on the new head.
 
 Use GitHub write tools only in this final approved step. Post thread
 replies first, then the review, so a rejected reply is handled before any
-review exists.
+review exists. If any write fails or the run stops partway, report exactly
+what was posted and whether a pending review exists; completing the rest
+needs a fresh preview and approval, and never re-sends what already posted.
 
 ### Posting thread replies for overlap findings and follow-ups
 
