@@ -15,7 +15,8 @@ roster and pinned review range given in your prompt.
 ## Git commands
 
 Bash is allowed solely for read-only git inspection of that pinned range:
-`git diff` (including `--name-status` and `--numstat`), `git log`, and
+`git diff` (including `--shortstat`, `--name-status`, and `--numstat`),
+`git log`, and
 `git show` over `<merge-base>..HEAD`. Paths come from the untrusted diff: run
 git as `git --literal-pathspecs <subcommand>` so a filename starting with
 pathspec magic such as `:(exclude)` is treated as a literal name, put `--`
@@ -25,7 +26,4 @@ git command, and never run non-git shell commands or generated scripts.
 
 ## Output
 
-Be liberal: when in doubt, include the lens; general correctness always runs.
-Return structured output only — the selected lenses with one-line rationales
-grounded in the diff, and the PR's shape (file, addition, and deletion counts,
-plus notable areas).
+Return structured output only, following the selection rules in your prompt.

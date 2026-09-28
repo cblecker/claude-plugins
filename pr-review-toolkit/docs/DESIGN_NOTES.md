@@ -111,6 +111,40 @@ ones. If the stopping rules prove insufficient, the next step is a budget
 scaled from the selector's changed-file count, or a `maxTurns` backstop —
 calibrated on measured runs.
 
+## Synthesis returns decisions, not findings
+
+Through 2.3 the synthesizer re-emitted every finding in full, at high
+effort, so each finding's text existed five times: specialist output,
+synthesis input, synthesis output, workflow return, and the rendered board.
+Its prompt told it to *preserve* specialist evidence, so for a lone finding
+the rewrite was a copy; the orchestrator reformats every item when it
+renders the board anyway. Because the model also copied thread ids and
+`commentId`s back, the workflow carried about 400 lines of defensive JS:
+re-merging by token keys, choosing between conflicting overlap records, and
+guarding against mismatched thread and comment id pairs.
+
+The synthesizer now returns groups of finding indexes, a section, and an
+overlap status with a `threadId`, at medium effort. JS builds each item from
+the specialists' own fields, and `commentId`, resolution state, and the
+thread descriptors come only from the collector's record for that id, so a
+reply target always describes one real thread. The one place a rewrite adds
+value is a merge of several lenses' findings, so only multi-finding groups may
+carry a new title and claim. Indexes the synthesizer drops still land on the
+board as their own items.
+
+The token-overlap heuristic that used to classify overlap when synthesis
+failed was removed with the merge machinery. It served only that rare path,
+and a wrong word-overlap match could point a reply at the wrong thread.
+Synthesis failure is instead disclosed (`reviewMeta.synthesisFailed`) and
+findings are routed on severity and confidence alone. Synthesis is skipped
+when there are no findings.
+
+The workflow returns only what `board.md` and `posting.md` read: no PR
+metadata (the orchestrator already has it), and already-covered and discarded
+items without their long text fields. Specialists return `evidence` as one
+string and fold their reasoning into `whyItMatters`, which shrinks every
+later copy.
+
 ## Invocation: named plugin workflow, not `scriptPath`
 
 The workflow script is registered in `plugin.json` under `workflows`, so the
@@ -126,3 +160,89 @@ surface as slash commands under `<plugin>:<workflow-name>`, and a workflow
 named `review-pr` would shadow the skill's `/pr-review-toolkit:review-pr`
 entry, dispatching bare workflow invocations without the skill's preflight
 (PR resolution, head verification, base fetch, pinned merge-base).
+
+## Follow-up mode
+
+2.4 recognises a PR the user has reviewed before. Each choice below was the
+lighter of the alternatives considered.
+
+**Detection by login, not by argument.** The skill calls `get_me` once and
+the workflow matches that login against thread authors and submitted
+reviews (`get_reviews` exposes `commit_id`, `state`, `user.login`,
+`submitted_at` per review; `get_review_comments` exposes `author`,
+`is_resolved`, `is_outdated` per thread). A `--follow-up` flag would have
+been cheaper to build and something else to remember; the board says what
+it detected, so a wrong detection is visible rather than silent. Detection
+is skipped when the login is the PR author's: an author's own threads and
+commented reviews are notes on their change, and treating them as a review
+would demote findings on code nobody else has reviewed.
+
+**Delta anchored on the last reviewed commit.** The user's latest submitted
+review carries the commit it was made against. `reviewedCommit..headSha` is
+exactly what changed since they looked, and the head checkout can diff it
+with the same read-only git the specialists already use. The reviewed
+commit is remote data validated to a SHA before it reaches a git command,
+and after a force-push it may be missing or, if the old object survives
+locally, no longer an ancestor of the head. Only the verifier touches this
+range: it checks `git merge-base --is-ancestor` once and, when that fails,
+judges from current code with `delta.available` false, so nothing is
+demoted. Specialists never see the delta and review the full PR as on a
+first review.
+
+**Demotion with a reason, not a higher bar.** "Be less picky" was first
+modelled as raising the recommended threshold from confidence 80 to 90.
+Rejected: specialist confidence is loosely calibrated, so a higher cut
+mostly reshuffles findings at random. The signal that actually tracks
+re-litigation is whether the finding's code changed since the user
+reviewed it. The verifier returns the delta's changed hunks once, and after
+synthesis the workflow tags each merged finding (`changedSinceLastReview`)
+from its location in JS; routing then demotes non-critical findings on
+unchanged code to Other findings with a `routingNote`. Only a known-false
+tag demotes; an unknown delta never does. An earlier cut had every
+specialist run the delta git itself and tag its own findings, which meant
+three separate ancestry checks and tri-state merge rules for duplicate
+findings; tagging after the merge needs neither. Nothing is filtered out at
+the source: the board shows the demoted finding and its reason, and the
+user can promote it. Asking the board for "too picky" demotes every
+non-critical recommended finding whose tag is not `true`, which includes
+untagged ones, rather than applying a confidence cut, for the same
+calibration reason.
+
+**Overlap is an annotation, not a section.** 2.0–2.3 routed any finding
+with `existingReviewOverlap.status === 'overlaps'` into a separate
+"Related to existing threads" section regardless of severity, so a finding
+that deserved posting was easy to miss beside the recommended list. Overlap
+now stays on the item, decides only that a selected finding posts as a
+thread reply, and is shown as a tag; `already_covered` still leaves
+Recommended because posting it would be noise.
+
+**The verifier judges which asks still apply.** It receives the user's
+threads and the text of every review summary they submitted, oldest first,
+and returns one verdict per thread and per summary ask that still stands.
+An earlier cut decided in JS which summaries were still in force (latest
+approve or request-changes and everything after, dismissed reviews
+skipped); each review round found another GitHub state combination it
+mishandled. Reading a sequence of reviews and telling which requests a
+later one withdrew is a judgement call, and the verifier is already making
+judgement calls. JS still picks the baseline commit, skipping the empty
+COMMENTED review GitHub creates for each standalone thread reply so that
+replying does not move it. The exception is a reviewer with threads and no
+substantive review: an inline-only review is indistinguishable from a
+reply, so the latest empty COMMENTED review is the baseline and a later
+reply can move it.
+
+**The verifier is a prompt, not an agent file.** Verifying the user's own
+threads needs exactly the specialist's tool surface (read-only git, Read,
+Grep, Glob) and nothing else, so it runs on
+`pr-review-analysis-readonly` with its own prompt and schema in the same
+fan-out. `parallel()` resolves a failed thunk to `null`, so a verifier
+failure degrades to unverifiable verdicts instead of aborting the review.
+Thread identity and state on each `P` item come from the collector record;
+only the verdict comes from the verifier, so ids are stable whatever it
+returns.
+
+**Threads are awaited before the fan-out.** 2.3 awaited the collector after
+the specialists so its latency hid behind theirs. The verifier runs in the
+fan-out and needs the user's threads, so the await moved ahead of it. The
+collector is a low-effort Haiku call running alongside the Sonnet selector,
+which is awaited there anyway, so the added wait is small.

@@ -19,9 +19,12 @@ Analyze the PR from the local head checkout using read-only access only.
 
 ## Git commands
 
-Bash is allowed solely for read-only git inspection of the pinned review range
-given in your prompt: `git diff` (including `--name-status` and `--numstat`),
-`git log`, `git blame`, and `git show` over `<merge-base>..HEAD`. Paths come
+Bash is allowed solely for read-only git inspection of the commit ranges
+given in your prompt (the pinned review range, and for the follow-up verifier
+the range since the reviewer's last reviewed commit): `git diff` (including
+`--name-status`, `--name-only`, `--numstat`, and `-U0`), `git log`,
+`git blame`, `git show`, `git rev-list --count`, and
+`git merge-base --is-ancestor`. Paths come
 from the untrusted diff: run git as `git --literal-pathspecs <subcommand>` so a
 filename starting with pathspec magic such as `:(exclude)` is treated as a
 literal name, put `--` before path arguments, and single-quote every path,
@@ -38,21 +41,16 @@ comments.
 
 ## Oversized tool results
 
-When a tool result is too large for the context, the harness saves it to a file
-and replaces it with a stub. That stub may instruct you to read the file in
-sequential chunks until 100% of the content has been read: **do not do that.**
-Reading it back in full re-imports the exact content that was just removed from
-context, and for a multi-megabyte result it will exhaust the context window and
-end your run with no findings at all. The stub may also suggest `jq` or other
-shell tools; those are not available to you (see the git-only Bash rule above).
-
+An oversized tool result is saved to a file and replaced with a stub that may
+tell you to read the file in sequential chunks, or to use `jq`. **Do neither:**
+reading it back re-imports what was just removed and can exhaust your context
+before you return any findings, and `jq` is outside the git-only Bash rule.
 Instead:
 
-- `Grep` the saved file for the specific symbol or pattern you needed, then
-  `Read` one bounded window with `offset` and `limit` around a match.
-- Better, go back to the source: read the declaring file in the checkout at a
-  targeted offset rather than mining the dump.
-- Never re-issue a tool call with the same arguments after it has already
-  overflowed, and do not call it again with a different large target.
-- Say so in the finding's evidence when a lookup was sampled rather than read in
-  full, so the synthesizer does not overstate your coverage.
+- `Grep` the saved file for the symbol you needed, then `Read` one bounded
+  window around a match — or, better, read the declaring file in the checkout
+  at a targeted offset.
+- Never repeat an overflowed call, and do not retry it with another large
+  target.
+- Say in the finding's evidence when a lookup was sampled rather than read in
+  full.

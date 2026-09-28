@@ -1,8 +1,8 @@
 # Drafting And Posting
 
-Read when the user chooses to draft, endorse, or post. Draft comments only
-in the conversation. GitHub write tools may be used only in the final
-posting step, after the exact preview is explicitly approved.
+Draft comments only in the conversation. GitHub write tools may be used
+only in the final posting step, after the exact preview is explicitly
+approved.
 
 ## Draft Selected Comments
 
@@ -17,8 +17,24 @@ Drafts should:
 
 ### Overlap findings
 
-Draft `relatedToExisting` findings as thread replies: acknowledge the
-original comment, add the new perspective, and avoid restating the concern.
+A selected finding whose `existingReviewOverlap.status` is `overlaps` is
+drafted as a reply on that thread by default: acknowledge the original
+comment, add the new perspective, and avoid restating the concern. A
+finding whose `followUpItemId` is set replies on the user's own earlier
+thread: write it as the user following up on their own request, not as a
+newcomer to the thread.
+
+### Follow-up replies
+
+When the user chooses to reply on open follow-ups, draft one reply per chosen
+`followUp.items` entry on that entry's thread, using its `commentId`. State
+plainly what is still open as of the reviewed head, in one or two
+sentences, drawing on the item's `evidence`;
+for a `partial` item say what was addressed and what remains. Do not restate
+the original request. When a recommended finding with the same
+`followUpItemId` is also selected, merge the two into one reply. An item
+without a `threadId` (an ask from a review summary) has no thread: put its
+text in the review body.
 
 ### Line comments vs review body
 
@@ -35,14 +51,23 @@ run cleanly, put the finding in the review body.
 
 ### Review event
 
-Choose the proposed review event from the selected findings:
+Choose the proposed review event from what is posted in the review itself:
+line comments and review-body text, including follow-up asks from a review
+summary:
 
-- `REQUEST_CHANGES` only when at least one selected finding is a serious
-  correctness or blocking concern.
-- `COMMENT` for non-blocking feedback, suggestions, endorsements, or
-  discussion.
-- `APPROVE` when the user selected "Leave an approving review" from the
-  nothing-postable menu and no findings are being posted.
+- `REQUEST_CHANGES` only when at least one selected finding or follow-up ask
+  is a serious correctness or blocking concern.
+- `COMMENT` for non-blocking feedback, suggestions, or discussion.
+- `APPROVE` when the user selected "Leave an approving review" or "Approve:
+  previous findings addressed" and no findings are being posted. For the
+  latter, the review body may say in one line that the earlier findings were
+  addressed.
+
+Thread replies (overlap and follow-up) post independently of the review. A
+run of replies only submits no review, and the preview shows `No review
+event`; the user's earlier `CHANGES_REQUESTED` review, if any, stays in force.
+To make a blocking reply request changes, convert it to a line comment, or
+to review-body text when it has no valid line anchor.
 
 ## Preview And Confirm
 
@@ -52,9 +77,11 @@ For each finding being posted as a new line comment, show:
 
 - finding id, path, line, and body
 
-For each overlap finding being posted as a thread reply, show:
+For each overlap finding or follow-up item being posted as a thread reply,
+show:
 
-- finding id, "Reply to thread on path:line", and body
+- finding or follow-up id, "Reply to thread on path:line" (omit `:line`
+  when absent), and body
 - if `isResolved` is true: `⚠ Target thread is resolved — reply will stay
   collapsed and the PR author may not see it.`
 - if `isResolved` is absent (resolution state not exposed by the read tools):
@@ -67,7 +94,8 @@ For each overlap finding being posted as a thread reply, show:
 
 For review body text (non-line findings), show the review body.
 
-Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, or `APPROVE`.
+Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, `APPROVE`, or
+`No review event` for a run of replies only.
 
 Only after the line-anchor checks have returned and the full preview text is
 in the conversation, ask for explicit approval with `AskUserQuestion`, called
@@ -76,7 +104,8 @@ alone, never in parallel with other tools. Use these options:
 1. "Post this review"
 2. "Edit findings" — covers editing drafts, adding, or removing findings
 3. "Convert resolved-thread replies to new line comments" — include this
-   option only when at least one overlap finding targets a resolved thread
+   option only when at least one overlap finding or follow-up reply targets a
+   resolved thread
 4. "Cancel"
 
 Accept approval only when the user selects "Post this review" or clearly
@@ -89,7 +118,21 @@ Before the first write, re-fetch metadata once with `pull_request_read`
 `get`: if the head SHA changed since analysis, abort honestly — the review
 no longer describes the PR — and offer to re-run on the new head.
 
-Use GitHub write tools only in this final approved step.
+Use GitHub write tools only in this final approved step. Post thread
+replies first, then the review, so a rejected reply is handled before any
+review exists. If any write fails or the run stops partway, report exactly
+what was posted and whether a pending review exists; completing the rest
+needs a fresh preview and approval, and never re-sends what already posted.
+
+### Posting thread replies for overlap findings and follow-ups
+
+Post overlapping findings and follow-up replies using
+`add_reply_to_pull_request_comment` with the numeric `commentId` and
+`pullNumber`. If the reply API rejects the target as invalid, do not silently
+change the posting location: stop before creating the review, convert the
+finding to a proposed new line comment, and return to Preview And Confirm —
+same as invalid line locations below. On re-approval, post only what has not
+been posted yet; replies that already succeeded are not sent again.
 
 ### Posting new line comments
 
@@ -102,21 +145,12 @@ If the approved preview has new line comments:
 3. Submit the pending review with `pull_request_review_write` using the
    approved event and review body.
 
-### Posting thread replies for overlap findings
+### Review body or event only
 
-Post overlapping findings as replies using
-`add_reply_to_pull_request_comment` with the numeric `commentId` and
-`pullNumber`. If the reply API rejects the target as invalid, do not silently
-change the posting location: convert the finding to a proposed new line
-comment and return to Preview And Confirm — same as invalid line locations
-below. Thread replies are independent of the pending
-review submission.
-
-### Review body only
-
-If the approved preview has only review-body text, submit it with
-`pull_request_review_write` using the approved event and the reviewed head
-SHA as `commitID`.
+If the approved preview has a review event but no line comments, submit it
+with `pull_request_review_write` using the approved event, the review body if
+any, and the reviewed head SHA as `commitID`. This covers an approval with no
+body.
 
 ### Invalid locations
 

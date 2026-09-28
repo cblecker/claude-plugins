@@ -81,7 +81,11 @@ the author's own up-to-date branch.
    commits or a stale checkout after a push produce an honest error naming
    the fix. A dirty working tree warns but does not block (file reads would
    see uncommitted edits; the diff itself is tree-to-tree).
-3. **Pin the review range.** After verifying `origin` points at the PR's
+3. **Identify the reviewer.** One `get_me` call records your login so the
+   workflow can recognise your own earlier threads and reviews on the PR
+   (see [Follow-up reviews](#follow-up-reviews)). If it fails, the run
+   proceeds as a first review and says so.
+4. **Pin the review range.** After verifying `origin` points at the PR's
    base repository (a fork clone would silently produce a wrong merge-base),
    the skill runs `git fetch origin refs/heads/<base.ref>` — unconditionally,
    so the base is current at review time; this is the toolkit's only network
@@ -96,24 +100,31 @@ The bundled script is registered as a plugin workflow (the `workflows` entry
 in `plugin.json`), so the skill launches it by name —
 `pr-review-toolkit:review-pr-analysis` — and Claude Code loads the script
 itself from the installed plugin. The launch carries a small `args` payload: the PR
-metadata subset, the checkout path, and the pinned `merge_base`. No bulk data
-rides `args` — workflow agents gather their own diff context from the
-checkout. The workflow:
+metadata subset, the checkout path, the pinned `merge_base`, and your GitHub
+login. No bulk data rides `args` — workflow agents gather their own diff
+context from the checkout. The workflow:
 
-- collects existing review threads through GitHub MCP read tools (collector
-  agent) in parallel with a **selector** agent that runs the diff itself
-  (`git diff --name-status` / `--numstat` and the hardened diff over the
-  pinned range) and returns which lenses should run, a one-line rationale
-  each, and the PR's shape
+- collects existing review threads and submitted reviews through GitHub MCP
+  read tools (collector agent) in parallel with a **selector** agent that
+  reads the changed-file list over the pinned range (`git diff --shortstat`,
+  `--name-status`, `--numstat`, and per-file patches only where needed) and
+  returns which lenses should run, a one-line rationale each, and the PR's
+  shape
 - falls back to running **all** lenses when selector output fails validation
   — selection is disclosed in `reviewMeta.lensSelection`, never silent
+- detects a **follow-up review** when threads or reviews by your login exist
+  on a PR you did not open, and records the commit you last reviewed
 - fans out the selected specialists in parallel; each reads the checkout
   directly — read-only `git diff` over `<merge_base>..HEAD` for patches,
   Read/Grep/Glob for contents, and `git log`/`blame`/`show` only when a
   finding depends on history — so findings carry PR head line numbers by
-  construction
-- synthesizes findings into a review board grouped by posting
-  recommendation, existing-review overlap, and discussion value
+  construction. In a follow-up review a **verifier** agent joins the fan-out,
+  checks each of your earlier asks against the head, and reports what
+  changed since your review
+- synthesizes a review board: the synthesis agent returns only decisions —
+  which findings share a concern, each group's section, and which existing
+  thread it overlaps — and the workflow builds the board items from the
+  specialists' own text and the collector's thread records
 
 The workflow does not draft or post comments. Drafting happens in the skill
 conversation after the user selects findings. Posting requires an exact
@@ -126,9 +137,10 @@ skill command (in a PR head checkout)
   |-- resolve PR, verify HEAD == PR head, fetch base, pin merge_base
   v
 Workflow(pr-review-toolkit:review-pr-analysis) -> workflow agent() calls
-  collector  -> pr-review-github-collector  -> GitHub MCP reads (threads)
+  collector  -> pr-review-github-collector  -> GitHub MCP reads (threads, reviews)
   selector   -> pr-review-selector          -> read-only git over the pinned range
   specialists-> pr-review-analysis-readonly -> read-only repo/git inspection (no MCP)
+  verifier   -> pr-review-analysis-readonly -> your earlier asks vs the head (follow-up only)
   synthesis  -> pr-review-synthesis         -> no tools; prompt JSON only
 ```
 
@@ -155,6 +167,31 @@ commits since this PR forked" when the base advanced. A merge-conflicted PR
 still reviews fine — integration breakage is CI's job. See
 `docs/DESIGN_NOTES.md` for the head-anchoring rationale.
 
+### Follow-up reviews
+
+When the collector finds review threads or a submitted review authored by
+your login (`reviewerLogin`, from `get_me`), the run becomes a follow-up
+review, unless you opened the PR: on your own PR your threads and comments
+are author notes, so follow-up mode stays off. The board gains a
+"Follow-up review" section: the commit you last reviewed, how far the PR
+has moved since, and one verdict per thread you opened and per ask from
+your review summaries that still stands — addressed, partial, not
+addressed, or unverifiable — with concrete evidence from the head checkout
+and the commit that addressed it when the reviewed commit is still
+reachable. The verifier reuses the read-only specialist agent type and runs
+only in this mode.
+
+Follow-up mode also changes what gets recommended. The verifier returns the
+hunks changed since the commit you reviewed, and after synthesis the
+workflow tags each finding with whether its location falls in them
+(`changedSinceLastReview`). Routing then demotes non-critical findings on
+unchanged code into Other findings with the note "code unchanged since your
+review" (`routingNote`), instead of re-recommending code you already looked
+at. Specialists are unaware of follow-up mode and review the full PR.
+Nothing is dropped: the board shows the demotion reason, and `promote F<n>`
+brings a finding back. If the reviewed commit is not in the head's history
+(usually a rewritten branch), the tag is omitted and no demotion happens.
+
 ## Review Agents
 
 | Agent | When it runs | What it does |
@@ -174,49 +211,81 @@ runs. Specialists inherit the session model — no hardcoded model pins for
 review lenses (they become silent downgrades as models advance); effort is
 the only dial. The two mechanical stages are pinned on purpose: the thread
 collector runs on Haiku and the lens selector on Sonnet. All specialists
-execute in parallel within a single workflow.
+execute in parallel within a single workflow. The follow-up verifier is not
+a lens: it runs on the specialist agent type, in the same fan-out, only when
+a follow-up review was detected.
 
 ## Review Board
 
 The workflow returns a review board grouped by outcome:
 
 - `recommendedToPost` — high-signal findings that look postable by a human
-  reviewer and are not already covered
-- `relatedToExisting` — findings that overlap or endorse existing review threads
-- `discussionOnly` — useful reviewer notes that should not be posted yet
+  reviewer, judged on merit whether or not they overlap an existing thread
+- `discussionOnly` — useful reviewer notes that should not be posted yet,
+  including findings the workflow demoted with a `routingNote`
 - `alreadyCovered` — findings fully covered by existing human or bot review
   threads
-- `discarded` — weak, duplicate, low-confidence, or non-actionable findings
+- `discarded` — weak, low-confidence, or non-actionable findings (duplicates
+  across lenses are merged into one finding instead)
 
-Each finding preserves the specialist's claim, evidence, reasoning, suggested
-fix, confidence, source lens, and existing-review overlap rationale. The board
-also includes positive observations, PR metadata, and review metadata:
+Overlap with an existing thread is an annotation on the finding
+(`existingReviewOverlap`: status, thread and comment ids, resolution state,
+the thread's author and location, rationale), not a section. It decides how
+a selected finding is posted — as a reply on that thread — not whether it is
+recommended. A finding that overlaps one of your own earlier threads carries
+`followUpItemId` pointing at the matching follow-up verdict.
+
+Recommended and Other findings carry the specialist's own title, claim,
+evidence, why it matters, suggested fix, severity, confidence, and lens;
+findings merged from several lenses carry a merged title and claim and the
+distinct evidence of each. Already-covered and discarded findings carry only
+their title, claim, and routing reason. The board also includes positive
+observations, the PR shape (`summary`), `followUp` (null on a first
+review; otherwise the reviewed commit, its state and date, the commit count
+since, verdicts with ids `P1..Pn`, and whether the delta was available), and
+review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
-lenses were selected, why, and whether the all-lenses fallback engaged. Thread
-resolution state (`isResolved`) is recorded only when the GitHub read tools
-expose it. If review-thread collection fails, the board says so
-(`reviewMeta.threadCollectionFailed`) instead of silently skipping overlap
-classification. A lens that fails outright is named in
-`reviewMeta.failedReviewers`, so reduced coverage is disclosed rather than
-hidden behind the full reviewer list.
+lenses were selected, why, and whether the all-lenses fallback engaged;
+`reviewMeta.reviewerLogin` records the login used for follow-up detection
+and `reviewMeta.reviewerIsAuthor` that follow-up mode was skipped because
+you opened the PR.
+Thread resolution and outdated state (`isResolved`, `isOutdated`) are
+recorded only when the GitHub read tools expose them. If review-thread
+collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
+instead of silently skipping overlap classification and verdicts on your
+earlier threads; a failed read of submitted reviews is disclosed separately
+(`reviewMeta.reviewsCollectionFailed`), since asks made only in a review
+summary then go unchecked.
+If synthesis fails, every finding is listed on its own, routed by severity
+and confidence, and the board says duplicates were not merged and overlap
+was not checked (`reviewMeta.synthesisFailed`).
+A lens that fails outright is named in `reviewMeta.failedReviewers`, so
+reduced coverage is disclosed rather than hidden behind the full reviewer
+list; a failed verifier lists your threads as unverifiable and says your
+review-summary asks were not checked (`followUp.verifierFailed`).
 
 ## Interaction And Posting
 
 After the board is presented, the skill offers options that depend on the
-board state: draft the recommended findings, draft everything including
-overlap endorsements, adjust the selection, endorse overlap findings, leave
-an approving review, or cancel. Free-form replies (asking about a specific
-finding id, adding a plus-one to an existing thread, challenging a finding)
-are accepted and loop back to updated options.
+board state: draft the recommended findings (overlapping ones as thread
+replies), also reply on your still-open follow-ups, adjust the selection,
+approve because your previous findings were addressed, leave an approving
+review, or cancel. Free-form replies are accepted and loop back to updated
+options: asking about a finding id, `promote F<n>` / `demote F<n>`, or
+"too picky", which demotes every non-critical recommended finding not tagged
+as changed since your last review (on a first review, every non-critical
+one).
 
 Drafts are plain conversation text until the user approves a preview. The skill
-previews each line comment, review-body text, and the proposed review event
-(`COMMENT`, `REQUEST_CHANGES`, or `APPROVE`) before any GitHub write tool is
-used.
+previews each line comment, thread reply, review-body text, and the proposed
+review event (`COMMENT`, `REQUEST_CHANGES`, `APPROVE`, or none for a run of
+replies only) before any GitHub write tool is used.
 
-Drafting, preview, and posting mechanics load just-in-time from the
-bundled `references/posting.md` when the flow reaches them, keeping the
-instructions fresh in context at the moment they apply.
+Board layout and menu rules load from the bundled `references/board.md` when
+the workflow returns, and drafting, preview, and posting mechanics from
+`references/posting.md` when the flow reaches them, keeping each set of
+instructions fresh in context at the moment it applies and the skill file
+itself within its context budget.
 
 Findings anchor to PR head line numbers from birth — no line translation
 step exists. A finding whose line is not part of the PR diff (validated
@@ -279,10 +348,10 @@ The plugin depends on the [github](../github) plugin.
 Analysis requires these read capabilities:
 
 - `search_pull_requests` / `list_pull_requests` to resolve the checkout's PR
+- `get_me` to learn your login for follow-up detection (review-pr only)
 - `pull_request_read` with `get`
-- `pull_request_read` with `get_review_comments`
-- `pull_request_read` with `get_reviews` and `get_comments`
-  (address-pr-feedback only)
+- `pull_request_read` with `get_review_comments` and `get_reviews`
+- `pull_request_read` with `get_comments` (address-pr-feedback only)
 
 Approved posting, if the user chooses to post, requires these write
 capabilities:
@@ -312,6 +381,8 @@ Representative PR validation should cover:
 - small PRs with and without existing review comments
 - PRs where existing human or bot comments fully cover a candidate finding
 - partial-overlap and plus-one cases
+- the same concern flagged by two lenses (one merged finding, both lenses
+  named)
 - discussion-only findings
 - large PRs with hundreds of files (complete review with no API pagination;
   selector reports true scale)
@@ -327,6 +398,14 @@ Representative PR validation should cover:
   in `reviewMeta.lensSelection`)
 - PRs with renames, copies, deletes, binary files, and paths with special
   characters
+- a PR you reviewed before, with threads that were addressed, partially
+  addressed, and ignored (follow-up section with one verdict each; findings
+  on unchanged code demoted with a routing note; an overlapping finding
+  tagged and previewed as a reply on your thread)
+- a PR you reviewed before whose branch was force-pushed since (delta
+  unavailable: verdicts from current code only, no demotion)
+- a PR you never reviewed (no follow-up section, no demotion notes)
+- `get_me` unavailable (warning, first-review board)
 
 For each run, verify that PR metadata and review-thread context come from MCP
 tools, findings carry PR head line numbers, lens selection is disclosed in
