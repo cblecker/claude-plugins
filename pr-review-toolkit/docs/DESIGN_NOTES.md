@@ -152,8 +152,10 @@ agent turn, or once per later orchestrator turn. What changed:
 
 - **PR body.** The body rides in every specialist's and the selector's
   prompt on every turn. The orchestrator leaves HTML comments out of the
-  args, and `promptBody()` strips them again, collapses whitespace, and caps
-  the body at 5k chars with a truncation marker. It stays inside the JSON
+  args, and `promptBody()` strips them again, drops trailing whitespace and
+  extra blank lines (indentation stays: it carries meaning in code samples,
+  YAML, and nested lists), and caps the body at 5k chars with a truncation
+  marker. It stays inside the JSON
   context, where escaping keeps untrusted text from posing as prompt
   structure, and `<details>` stays because bot PRs keep changelogs there.
 - **Other authors' threads.** Synthesis sees threads only to judge overlap.

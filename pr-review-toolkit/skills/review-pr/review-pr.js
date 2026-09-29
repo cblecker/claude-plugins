@@ -938,8 +938,10 @@ function stripHtmlComments(text) {
   return String(text || '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
 }
 
+// Only trailing whitespace and extra blank lines go: indentation carries
+// meaning in code samples, YAML, and nested lists.
 function collapseWhitespace(text) {
-  return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim()
+  return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function capText(text, limit, noun) {
