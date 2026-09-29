@@ -124,8 +124,9 @@ configuration. Run all three as one Bash call:
 git fetch origin refs/heads/<base.ref> && git merge-base FETCH_HEAD HEAD && git rev-list --count HEAD..FETCH_HEAD
 ```
 
-The second output line is `merge_base`, the third is `base_ahead_count`
-(commits on the base not in the PR). The fully qualified ref cannot be parsed
+The fetch's own progress lines vary, so read the last two lines of output:
+`merge_base` (a 40-hex SHA), then `base_ahead_count` (an integer: commits on
+the base not in the PR). The fully qualified ref cannot be parsed
 as an option or a tag of the same name. If the fetch fails, stop honestly and
 quote its error. If `merge-base` fails, the checkout is likely shallow: stop
 honestly and suggest `git fetch --unshallow origin`.
