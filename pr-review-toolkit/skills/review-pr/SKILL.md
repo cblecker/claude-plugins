@@ -89,9 +89,10 @@ head, push commits, or pick one PR).
 
 Call `pull_request_read` with method `get`. Record: title, body, author,
 state, `base.ref`, the base repository full name, head SHA, and
-`mergeable_state` (the MCP response carries no `mergeable` boolean). When passing the body to the workflow, leave
-out `<!-- ... -->` HTML-comment blocks (template instructions and bot
-markers); keep everything else, including `<details>` content.
+`mergeable_state` (the MCP response carries no `mergeable` boolean). When
+passing the body to the workflow, leave out `<!-- ... -->` HTML-comment blocks
+(template instructions and bot markers); keep everything else, including
+`<details>` content.
 
 Verify the Environment Head SHA equals the PR's head SHA. On mismatch, stop
 with an honest error and name the fix: unpushed local commits need a push
@@ -126,10 +127,10 @@ git fetch origin refs/heads/<base.ref> && git merge-base FETCH_HEAD HEAD && git 
 
 The fetch's own progress lines vary, so read the last two lines of output:
 `merge_base` (a 40-hex SHA), then `base_ahead_count` (an integer: commits on
-the base not in the PR). The fully qualified ref cannot be parsed
-as an option or a tag of the same name. If the fetch fails, stop honestly and
-quote its error. If `merge-base` fails, the checkout is likely shallow: stop
-honestly and suggest `git fetch --unshallow origin`.
+the base not in the PR). The fully qualified ref cannot be parsed as an option
+or a tag of the same name. If the fetch fails, stop honestly and quote its
+error. If `merge-base` fails, the checkout is likely shallow: stop honestly
+and suggest `git fetch --unshallow origin`.
 
 ## Launch Analysis Workflow
 

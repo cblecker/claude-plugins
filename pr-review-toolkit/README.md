@@ -208,13 +208,13 @@ brings a finding back. If the reviewed commit is not in the head's history
 The selector agent picks lenses from the real diff with a liberal posture:
 when in doubt, the lens runs, and general correctness (code-reviewer) always
 runs. Specialists inherit the session model — no hardcoded model pins for
-review lenses (they become silent downgrades as models advance); effort is
-the only dial, set per lens (`high`, except comment-analyzer at `medium`)
-and recorded in `reviewMeta.lensEffort`. The two mechanical stages are pinned on purpose: the thread
-collector runs on Haiku and the lens selector on Sonnet. All specialists
-execute in parallel within a single workflow. The follow-up verifier is not
-a lens: it runs on the specialist agent type, in the same fan-out, only when
-a follow-up review was detected.
+review lenses (they become silent downgrades as models advance); effort is the
+only dial, set per lens (`high`, except comment-analyzer at `medium`) and
+recorded in `reviewMeta.lensEffort`. The two mechanical stages are pinned on
+purpose: the thread collector runs on Haiku and the lens selector on Sonnet.
+All specialists execute in parallel within a single workflow. The follow-up
+verifier is not a lens: it runs on the specialist agent type, in the same
+fan-out, only when a follow-up review was detected.
 
 ## Review Board
 
@@ -247,9 +247,9 @@ since, verdicts with ids `P1..Pn`, and whether the delta was available), and
 review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
 lenses were selected, why, and whether the all-lenses fallback engaged;
-`reviewMeta.reviewerIsAuthor` records that follow-up mode was skipped
-because you opened the PR, and `reviewMeta.warnings` holds a finished
-sentence for every degraded step below, which the board prints verbatim.
+`reviewMeta.reviewerIsAuthor` records that follow-up mode was skipped because
+you opened the PR, and `reviewMeta.warnings` holds a finished sentence for
+every degraded step below, which the board prints verbatim.
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
 recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)

@@ -7,16 +7,16 @@ the way it is.
 
 ## Review the head, not the merge ref
 
-GitHub's synthetic `refs/pull/N/merge` ref is lazily computed, absent when
-the PR is conflicted, and stale after pushes — verified in practice: stale
-test merges had `merge^2 != head`. Reviewing the merge result meant
-translating merge-result line numbers to PR head line numbers before
-posting, and made conflicted PRs unreviewable. 2.0 reviews the PR head
-directly: findings anchor to head line numbers from birth, a
-merge-conflicted PR reviews fine, and mergeability is a metadata signal on
-the board. Integration breakage is CI's job; base movement is reported
-honestly (`git rev-list --count HEAD..FETCH_HEAD`) instead
-of analyzing GitHub's synthetic merge tree.
+GitHub's synthetic `refs/pull/N/merge` ref is lazily computed, absent when the
+PR is conflicted, and stale after pushes — verified in practice: stale test
+merges had `merge^2 != head`. Reviewing the merge result meant translating
+merge-result line numbers to PR head line numbers before posting, and made
+conflicted PRs unreviewable. 2.0 reviews the PR head directly: findings anchor
+to head line numbers from birth, a merge-conflicted PR reviews fine, and
+mergeability is a metadata signal on the board. Integration breakage is CI's
+job; base movement is reported honestly
+(`git rev-list --count HEAD..FETCH_HEAD`) instead of analyzing GitHub's
+synthetic merge tree.
 
 ## Checkout as precondition
 
@@ -150,27 +150,27 @@ later copy.
 A 2.5 audit looked for text that is multiplied: once per specialist, once per
 agent turn, or once per later orchestrator turn. What changed:
 
-- **PR body.** The body rides in every specialist's and the selector's
-  prompt on every turn. The orchestrator leaves HTML comments out of the
-  args, and `promptBody()` strips them again, drops trailing whitespace and
-  extra blank lines (indentation stays: it carries meaning in code samples,
-  YAML, and nested lists), and caps the body at 5k chars with a truncation
-  marker. It stays inside the JSON
-  context, where escaping keeps untrusted text from posing as prompt
-  structure, and `<details>` stays because bot PRs keep changelogs there.
+- **PR body.** The body rides in every specialist's and the selector's prompt
+  on every turn. The orchestrator leaves HTML comments out of the args, and
+  `promptBody()` strips them again, drops trailing whitespace and extra blank
+  lines (indentation stays: it carries meaning in code samples, YAML, and
+  nested lists), and caps the body at 5k chars with a truncation marker. It
+  stays inside the JSON context, where escaping keeps untrusted text from
+  posing as prompt structure, and `<details>` stays because bot PRs keep
+  changelogs there.
 - **Other authors' threads.** Synthesis sees threads only to judge overlap.
   Other authors' bodies lose HTML comments, `<details>` blocks collapse to
-  their `<summary>` line, and bodies are
-  capped at 1000 chars, with the last three replies at 400 chars and a
-  `replyCount`. The reviewer's own threads and the collector records that
-  reply targets come from are untouched.
+  their `<summary>` line, and bodies are capped at 1000 chars, with the last
+  three replies at 400 chars and a `replyCount`. The reviewer's own threads
+  and the collector records that reply targets come from are untouched.
 - **One confidence scale.** Routing compares confidence across lenses, but
-  only code-reviewer had a rubric (plus its own ≥ 80 filter). A shared
-  0–100 rubric now sits in the standard output instructions and
-  code-reviewer's own was removed. Findings below 50 are written in one
-  line per field (title, claim, evidence, why it matters): `compactItem` drops their long text anyway. Higher
-  findings are not capped, because the main session answers follow-up
-  questions from exactly those fields and would otherwise re-read the code.
+  only code-reviewer had a rubric (plus its own ≥ 80 filter). A shared 0–100
+  rubric now sits in the standard output instructions and code-reviewer's own
+  was removed. Findings below 50 are written in one line per field (title,
+  claim, evidence, why it matters): `compactItem` drops their long text
+  anyway. Higher findings are not capped, because the main session answers
+  follow-up questions from exactly those fields and would otherwise re-read
+  the code.
 - **Optional text.** `suggestedFix` is optional, matching the "when one
   applies" instruction instead of inviting filler. Lenses return at most two
   positive observations, and synthesis keeps them by index
