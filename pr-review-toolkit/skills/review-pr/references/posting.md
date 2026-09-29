@@ -122,7 +122,8 @@ End the preview with a one-line tally:
 Only in a message whose text already contains the step 2 preview, ask for
 explicit approval with `AskUserQuestion`, called alone, never in parallel
 with other tools. The question repeats the tally, for example: "Post the
-review previewed above (3 line comments, 1 thread reply, event: COMMENT)?"
+review previewed above (3 line comments · 1 thread reply · review body: yes ·
+event: COMMENT)?"
 If you cannot point to a `### Review preview` block above whose contents
 match those counts, return to step 2 instead of asking. Use these options:
 
@@ -138,7 +139,8 @@ match those counts, return to step 2 instead of asking. Use these options:
 Accept approval only when the user selects "Post this review" or clearly
 confirms posting. Any edit, removal, conversion, move to the review body, or
 rejected reply target returns to step 2: show a fresh, complete preview (not
-only what changed), then ask again in step 3.
+only what changed), then ask again in step 3. If the change adds a line
+comment or moves its anchor, return to step 1 first to check that location.
 
 ## Post Approved Review
 
@@ -160,8 +162,7 @@ Post overlapping findings and follow-up replies using
 `pullNumber`. If the reply API rejects the target as invalid, do not silently
 change the posting location: stop before creating the review, convert the
 finding to a proposed new line comment, and return to Preview And Confirm
-step 2 —
-same as invalid line locations below. On re-approval, post only what has not
+step 1 to check its location. On re-approval, post only what has not
 been posted yet; replies that already succeeded are not sent again.
 
 ### Posting new line comments
