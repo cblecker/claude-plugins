@@ -190,7 +190,10 @@ diff, move that text into the review body and return to Preview And Confirm
 step 2: show the full revised preview, then ask for approval again before
 posting. The pending review persists across this
 re-preview: do not create a second one — on approval, submit the same
-pending review with the surviving comments and the revised body; if the
-user cancels instead, delete the pending review with
+pending review with the surviving comments and the revised body. Staged
+comments cannot be edited or removed individually, so if the approved
+revision changes or removes one, delete the pending review and post the
+full revised preview as a new one. If the user cancels instead, delete the
+pending review with
 `pull_request_review_write` method `delete_pending` so no staged comments
 linger.
