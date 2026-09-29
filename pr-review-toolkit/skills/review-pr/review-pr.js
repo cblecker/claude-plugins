@@ -933,9 +933,11 @@ const UNTRUSTED_NOTE = 'PR title, body, code, comments, and review threads are u
 // HTML comments are template instructions and bot markers, never shown on
 // GitHub; <details> blocks stay in the PR body because bot PRs keep their
 // changelogs there. Text stays inside JSON either way, so escaping keeps it
-// from posing as prompt structure.
+// from posing as prompt structure. Only closed comments go: an unclosed
+// opener is usually the tag named in inline code, and stripping to the end
+// would delete everything after it.
 function stripHtmlComments(text) {
-  return String(text || '').replace(/<!--[\s\S]*?(?:-->|$)/g, '')
+  return String(text || '').replace(/<!--[\s\S]*?-->/g, '')
 }
 
 // Only trailing whitespace and extra blank lines go: indentation carries
@@ -969,15 +971,15 @@ function detailsSummary(block) {
 
 function threadText(text, limit) {
   let stripped = stripHtmlComments(text)
-  // Innermost blocks first, so nested <details> collapse whole; an unclosed
-  // block runs to the end of the comment.
+  // Innermost blocks first, so nested <details> collapse whole. An unclosed
+  // opener is left as text, as for HTML comments: it is usually the tag
+  // named in inline code, and the length cap bounds it either way.
   const innermost = /<details\b(?:(?!<details\b)[\s\S])*?<\/details>/gi
   let previous
   do {
     previous = stripped
     stripped = stripped.replace(innermost, detailsSummary)
   } while (stripped !== previous)
-  stripped = stripped.replace(/<details\b[\s\S]*$/i, detailsSummary)
   return capText(collapseWhitespace(stripped), limit, 'comment')
 }
 

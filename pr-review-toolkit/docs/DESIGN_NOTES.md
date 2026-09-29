@@ -163,6 +163,11 @@ agent turn, or once per later orchestrator turn. What changed:
   their `<summary>` line, and bodies are capped at 1000 chars, with the last
   three replies at 400 chars and a `replyCount`. The reviewer's own threads
   and the collector records that reply targets come from are untouched.
+  Only closed comments and blocks are removed, here and in the PR body: an
+  unclosed `<!--` or `<details>` is usually the tag named in inline code, and
+  stripping to the end of the text would delete everything after it. Fully
+  Markdown-aware stripping was rejected: bot `<details>` blocks contain code
+  fences, so skipping fenced code would leave those blocks uncollapsed.
 - **One confidence scale.** Routing compares confidence across lenses, but
   only code-reviewer had a rubric (plus its own ≥ 80 filter). A shared 0–100
   rubric now sits in the standard output instructions and code-reviewer's own

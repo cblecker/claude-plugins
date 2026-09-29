@@ -237,7 +237,8 @@ recommended. A finding that overlaps one of your own earlier threads carries
 `followUpItemId` pointing at the matching follow-up verdict.
 
 Recommended and Other findings carry the specialist's own title, claim,
-evidence, why it matters, suggested fix, severity, confidence, and lens;
+evidence, why it matters, severity, confidence, and lens, plus a suggested
+fix when the specialist supplies one;
 findings merged from several lenses carry a merged title and claim and the
 distinct evidence of each. Already-covered and discarded findings carry only
 their title, claim, and routing reason. The board also includes positive
