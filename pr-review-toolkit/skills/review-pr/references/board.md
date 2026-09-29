@@ -19,8 +19,10 @@ in `reviewMeta.lensSelection.rationales` when the user asks.
 
 Then show merge signals from the metadata and the pinned range:
 
-- `mergeable` is false → `⚠ This PR has merge conflicts with <base.ref>.`
-- `mergeable` is null → `Mergeability is still computing on GitHub.`
+- `mergeable_state` is `dirty` → `⚠ This PR has merge conflicts with
+  <base.ref>.`
+- `mergeable_state` is `unknown` or absent → `Mergeability is still
+  computing on GitHub.`
 - `base_ahead_count` > 0 → `<base.ref> has moved <base_ahead_count> commits
   since this PR forked.`
 

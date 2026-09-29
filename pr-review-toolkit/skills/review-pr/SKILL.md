@@ -89,7 +89,7 @@ head, push commits, or pick one PR).
 
 Call `pull_request_read` with method `get`. Record: title, body, author,
 state, `base.ref`, the base repository full name, head SHA, and
-`mergeable` / `mergeable_state`. When passing the body to the workflow, leave
+`mergeable_state` (the MCP response carries no `mergeable` boolean). When passing the body to the workflow, leave
 out `<!-- ... -->` HTML-comment blocks (template instructions and bot
 markers); keep everything else, including `<details>` content.
 

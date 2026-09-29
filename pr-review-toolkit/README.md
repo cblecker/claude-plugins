@@ -162,7 +162,7 @@ without the skill's setup steps.
 
 The board reports mergeability from metadata instead of analyzing GitHub's
 synthetic merge ref: "merge conflicts with base" (or "mergeability still
-computing" while GitHub's `mergeable` is null), and "base has moved N
+computing" while GitHub's `mergeable_state` is `unknown`), and "base has moved N
 commits since this PR forked" when the base advanced. A merge-conflicted PR
 still reviews fine — integration breakage is CI's job. See
 `docs/DESIGN_NOTES.md` for the head-anchoring rationale.
