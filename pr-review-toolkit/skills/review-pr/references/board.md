@@ -12,10 +12,8 @@ Below the heading, include a one-line summary with section counts derived
 from section array lengths, plus the reviewer list from
 `reviewMeta.selectedReviewers` (full agent names): `N recommended, M other
 findings, K not posting. Reviewers: code-reviewer, pr-test-analyzer.` where
-K is `alreadyCovered.length + discarded.length`. If
-`reviewMeta.lensSelection.source` is `all-lenses-fallback`, add a line: the
-lens selector returned invalid output, so every lens ran. Add a one-line
-shape summary from `summary` (file count, additions/deletions, scale,
+K is `alreadyCovered.length + discarded.length`. Add a one-line shape
+summary from `summary` (file count, additions/deletions, scale,
 notable areas — or that the shape is unavailable); per-lens rationales live
 in `reviewMeta.lensSelection.rationales` when the user asks.
 
@@ -26,40 +24,21 @@ Then show merge signals from the metadata and the pinned range:
 - `base_ahead_count` > 0 → `<base.ref> has moved <base_ahead_count> commits
   since this PR forked.`
 
-If `reviewMeta.threadCollectionFailed` is true, warn: existing review threads
-could not be collected, so overlap classification and verdicts on your
-earlier threads are unavailable and recommended findings may duplicate
-existing comments.
-
-If `reviewMeta.synthesisFailed` is true, warn: the synthesis step did not
-complete, so duplicate findings from different lenses are listed separately,
-overlap with existing threads was not checked, and sections come from
-severity and confidence alone.
-
-If `reviewMeta.reviewsCollectionFailed` is true, warn: your submitted reviews
-could not be read, so asks made only in a review summary are not checked.
-
-If `reviewMeta.reviewerIsAuthor` is true, say in one line: you opened this
-PR, so your own threads and comments are author notes and follow-up mode is
-off.
-
-If `reviewMeta.failedReviewers` is non-empty, warn: name those lenses and say
-they did not complete, so the board is missing their coverage and the review is
-narrower than the reviewer list suggests.
+Then print each entry of `reviewMeta.warnings` verbatim, one per line,
+prefixed with `⚠`. They cover every degraded step of this run (lens fallback,
+failed lenses, thread or review collection, synthesis, follow-up verifier
+and delta); never omit one.
 
 ### 2. Follow-up review
 
 Include this section only when `followUp` is not null.
 
-Header line, from `followUp` and `reviewMeta.reviewerLogin`: `Follow-up
-review — you (@<login>) reviewed <reviewedCommit, 7 chars> on <reviewedAt,
-date only> (<reviewState>); <commitsSince> commits since.`, omitting the
-count clause when `commitsSince` is absent. When `reviewedCommit` is empty,
-write `you opened <threadCount> threads; no reviewed commit is known`
-instead. Otherwise, when `followUp.deltaAvailable` is false and
-`followUp.verifierFailed` is false, say in place of the count that what
-changed since your review could not be determined (usually because the
-branch was rewritten), so verdicts rest on the current code only.
+Header line, from `followUp` and the `reviewerLogin` recorded from `get_me`:
+`Follow-up review — you (@<login>) reviewed <reviewedCommit, 7 chars> on
+<reviewedAt, date only> (<reviewState>); <commitsSince> commits since.`,
+omitting the count clause when `commitsSince` is absent. When
+`reviewedCommit` is empty, write `you opened <threadCount> threads; no
+reviewed commit is known` instead.
 
 Then one line per entry of `followUp.items`, in order:
 `<glyph> <id> <path>:<line> — <ask> → <evidence>[; fixed in <fixedIn>]; thread
@@ -68,10 +47,6 @@ Then one line per entry of `followUp.items`, in order:
 flags are absent. For an item without a `threadId` (an ask from a review
 summary), write `review summary` in place of `<path>:<line>` and omit the
 thread state.
-
-If `followUp.verifierFailed` is true, say the follow-up verifier did not
-complete, so every thread is unverifiable and review-summary asks were not
-checked.
 
 ### 3. Recommended to post (full detail)
 

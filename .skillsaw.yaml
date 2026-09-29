@@ -12,7 +12,7 @@ rules:
       - "git rev-parse --show-toplevel"
       - "git rev-parse --abbrev-ref HEAD"
       - "git remote get-url origin | cut -d@ -f2-"
-      - "git config --get-regexp '^branch\\.'"
+      - "git config --get-regexp '^branch\\..*\\.merge$'"
       - "git status --porcelain"
       # pr-review-toolkit/skills/address-pr-feedback/SKILL.md
       - "git branch --show-current"

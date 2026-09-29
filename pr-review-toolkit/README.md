@@ -91,8 +91,8 @@ the author's own up-to-date branch.
    so the base is current at review time; this is the toolkit's only network
    git command — and pins `merge_base = git merge-base FETCH_HEAD HEAD`
    (`FETCH_HEAD` is exact regardless of the clone's refspec configuration).
-   `git rev-list --count <merge_base>..FETCH_HEAD` measures how far the
-   base has moved since the PR forked.
+   `git rev-list --count HEAD..FETCH_HEAD` measures how far the base has
+   moved since the PR forked. The three commands run as one chained call.
 
 ### Workflow
 
@@ -209,7 +209,8 @@ The selector agent picks lenses from the real diff with a liberal posture:
 when in doubt, the lens runs, and general correctness (code-reviewer) always
 runs. Specialists inherit the session model — no hardcoded model pins for
 review lenses (they become silent downgrades as models advance); effort is
-the only dial. The two mechanical stages are pinned on purpose: the thread
+the only dial, set per lens (`high`, except comment-analyzer at `medium`)
+and recorded in `reviewMeta.lensEffort`. The two mechanical stages are pinned on purpose: the thread
 collector runs on Haiku and the lens selector on Sonnet. All specialists
 execute in parallel within a single workflow. The follow-up verifier is not
 a lens: it runs on the specialist agent type, in the same fan-out, only when
@@ -246,9 +247,9 @@ since, verdicts with ids `P1..Pn`, and whether the delta was available), and
 review metadata:
 `reviewMeta.selectedReviewers` and `reviewMeta.lensSelection` record which
 lenses were selected, why, and whether the all-lenses fallback engaged;
-`reviewMeta.reviewerLogin` records the login used for follow-up detection
-and `reviewMeta.reviewerIsAuthor` that follow-up mode was skipped because
-you opened the PR.
+`reviewMeta.reviewerIsAuthor` records that follow-up mode was skipped
+because you opened the PR, and `reviewMeta.warnings` holds a finished
+sentence for every degraded step below, which the board prints verbatim.
 Thread resolution and outdated state (`isResolved`, `isOutdated`) are
 recorded only when the GitHub read tools expose them. If review-thread
 collection fails, the board says so (`reviewMeta.threadCollectionFailed`)
