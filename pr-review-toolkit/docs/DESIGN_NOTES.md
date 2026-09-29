@@ -7,16 +7,16 @@ the way it is.
 
 ## Review the head, not the merge ref
 
-GitHub's synthetic `refs/pull/N/merge` ref is lazily computed, absent when
-the PR is conflicted, and stale after pushes — verified in practice: stale
-test merges had `merge^2 != head`. Reviewing the merge result meant
-translating merge-result line numbers to PR head line numbers before
-posting, and made conflicted PRs unreviewable. 2.0 reviews the PR head
-directly: findings anchor to head line numbers from birth, a
-merge-conflicted PR reviews fine, and mergeability is a metadata signal on
-the board. Integration breakage is CI's job; base movement is reported
-honestly (`git rev-list --count <merge_base>..FETCH_HEAD`) instead
-of analyzing GitHub's synthetic merge tree.
+GitHub's synthetic `refs/pull/N/merge` ref is lazily computed, absent when the
+PR is conflicted, and stale after pushes — verified in practice: stale test
+merges had `merge^2 != head`. Reviewing the merge result meant translating
+merge-result line numbers to PR head line numbers before posting, and made
+conflicted PRs unreviewable. 2.0 reviews the PR head directly: findings anchor
+to head line numbers from birth, a merge-conflicted PR reviews fine, and
+mergeability is a metadata signal on the board. Integration breakage is CI's
+job; base movement is reported honestly
+(`git rev-list --count HEAD..FETCH_HEAD`) instead of analyzing GitHub's
+synthetic merge tree.
 
 ## Checkout as precondition
 
@@ -144,6 +144,88 @@ metadata (the orchestrator already has it), and already-covered and discarded
 items without their long text fields. Specialists return `evidence` as one
 string and fold their reasoning into `whyItMatters`, which shrinks every
 later copy.
+
+## Token efficiency (2.5)
+
+A 2.5 audit looked for text that is multiplied: once per specialist, once per
+agent turn, or once per later orchestrator turn. What changed:
+
+- **PR body.** The body rides in every specialist's and the selector's prompt
+  on every turn. The orchestrator leaves HTML comments out of the args, and
+  `promptBody()` strips them again, drops trailing whitespace and extra blank
+  lines (indentation stays: it carries meaning in code samples, YAML, and
+  nested lists), and caps the body at 5k chars with a truncation marker. It
+  stays inside the JSON context, where escaping keeps untrusted text from
+  posing as prompt structure, and `<details>` stays because bot PRs keep
+  changelogs there.
+- **Other authors' threads.** Synthesis sees threads only to judge overlap.
+  Other authors' bodies lose HTML comments, `<details>` blocks collapse to
+  their `<summary>` line, and bodies are capped at 1000 chars, with the last
+  three replies at 400 chars and a `replyCount`. The reviewer's own threads
+  and the collector records that reply targets come from are untouched.
+  Only closed comments and blocks are removed, here and in the PR body: an
+  unclosed `<!--` or `<details>` is usually the tag named in inline code, and
+  stripping to the end of the text would delete everything after it. Fully
+  Markdown-aware stripping was rejected: bot `<details>` blocks contain code
+  fences, so skipping fenced code would leave those blocks uncollapsed.
+- **One confidence scale.** Routing compares confidence across lenses, but
+  only code-reviewer had a rubric (plus its own ≥ 80 filter). A shared 0–100
+  rubric now sits in the standard output instructions and code-reviewer's own
+  was removed. Findings below 50 are written in one line per field (title,
+  claim, evidence, why it matters): `compactItem` drops their long text
+  anyway. Higher findings are not capped, because the main session answers
+  follow-up questions from exactly those fields and would otherwise re-read
+  the code.
+- **Optional text.** `suggestedFix` is optional, matching the "when one
+  applies" instruction instead of inviting filler. Lenses return at most two
+  positive observations, and synthesis keeps them by index
+  (`keepPositives`) instead of re-typing them, following the decisions-not-
+  findings precedent.
+- **Per-lens effort.** comment-analyzer runs at `medium`: its checks are
+  local (does this comment match the code beside it). The rest stay at
+  `high`; `reviewMeta.lensEffort` records what ran.
+- **Verifier delta.** Hunks are `[start, end]` pairs, and the delta diff
+  uses `--inter-hunk-context=5` so git merges nearby hunks instead of the
+  model transcribing each. A finding in a merged gap reads as changed, which
+  errs toward keeping it recommended.
+- **Fewer orchestrator turns.** `get_me` and the board.md read ride along
+  with the first GitHub call; fetch, merge-base, and the base-ahead count run
+  as one chained Bash call (`HEAD..FETCH_HEAD` counts the same commits as
+  `<merge_base>..FETCH_HEAD` and removes the dependency). PR resolution
+  lists pass `fields: ["number", "head"]`, and the branch-config preflight
+  reads only `merge` keys.
+- **Warnings in JS.** `reviewMeta.warnings` carries finished sentences for
+  every degraded step, so the board cannot skip one; the flags stay for the
+  menus that branch on them.
+
+Considered and rejected:
+
+- Trimming the upstream-derived lens prompts: unmeasured quality risk.
+- Capping evidence, why-it-matters, and fix text on postable findings: they
+  are what follow-up questions and drafting read.
+- Having the selector hand specialists the manifest or focus paths: one slip
+  drops a file from every lens at once.
+- Running the narrow lenses together in one agent: breaks per-lens effort,
+  failure attribution, and lens-attributed findings.
+- Reordering prompts for prefix caching: the shared context and the lens
+  text sit in one content block, so there is nothing to gain.
+- Pinning synthesis or the verifier to a smaller model, lowering selector
+  effort, or skipping synthesis for a lone finding: each saves little and
+  degrades the steps that gate what is posted.
+- Collector `perPage: 100`: bot-heavy threads would overflow the MCP result
+  and fail collection for the whole run.
+- Dropping sub-50 findings at the source: contradicts disclosure and invites
+  confidence inflation.
+- Showing only changed entries on re-preview: weakens the exact-preview
+  approval guarantee.
+
+On the posting side, the line-anchor check runs one diff per distinct path,
+batched in one turn, and a return to the check step reuses output already in
+the conversation. Drafting straight into the preview needed no change: the
+posting.md restructure already shows drafts only once, in the preview. A
+lighter head re-check before posting (a filtered PR list instead of `get`)
+was rejected: it saves little and adds a fallback path to the most
+safety-sensitive step.
 
 ## Invocation: named plugin workflow, not `scriptPath`
 
