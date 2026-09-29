@@ -963,9 +963,13 @@ const promptBody = capText(collapseWhitespace(stripHtmlComments(pr.body)), PR_BO
 const THREAD_BODY_LIMIT = 1000
 const THREAD_REPLY_LIMIT = 400
 const THREAD_REPLIES_KEPT = 3
+// Only known inline HTML comes out of a kept summary: a generic tag pattern
+// would also eat code such as Array<T> or x < y > 0 in a finding title.
+const SUMMARY_INLINE_TAGS = /<\/?(?:strong|b|em|i|code|span|a|br|sub|sup|picture|source|img)\b[^>]*>/gi
+
 function detailsSummary(block) {
   const match = /<summary\b[^>]*>([\s\S]*?)<\/summary>/i.exec(block)
-  const summary = match ? match[1].replace(/<[^>]*>/g, '').trim() : ''
+  const summary = match ? match[1].replace(SUMMARY_INLINE_TAGS, '').trim() : ''
   return summary ? '\n' + summary + '\n' : ''
 }
 
