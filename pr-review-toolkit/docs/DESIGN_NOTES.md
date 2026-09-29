@@ -211,9 +211,13 @@ Considered and rejected:
 - Showing only changed entries on re-preview: weakens the exact-preview
   approval guarantee.
 
-Posting-side savings (drafting straight into the preview, one anchor diff per
-path, a lighter head re-check) were deferred to follow the posting.md
-restructure.
+On the posting side, the line-anchor check runs one diff per distinct path,
+batched in one turn, and a return to the check step reuses output already in
+the conversation. Drafting straight into the preview needed no change: the
+posting.md restructure already shows drafts only once, in the preview. A
+lighter head re-check before posting (a filtered PR list instead of `get`)
+was rejected: it saves little and adds a fallback path to the most
+safety-sensitive step.
 
 ## Invocation: named plugin workflow, not `scriptPath`
 

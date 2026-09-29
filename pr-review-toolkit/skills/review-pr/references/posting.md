@@ -83,7 +83,11 @@ Follow these steps in order. Do not skip or merge steps.
 
 Run the line-anchor checks from "Line comments vs review body" for every
 proposed line comment, and move any finding that fails into the review body.
-Do not write preview text or ask any question in this step.
+Run the diff once per distinct path and check every line comment on that
+path against its output; issue the diffs for all paths in one turn. The
+range is pinned, so on a return to this step reuse output already in the
+conversation and diff only paths not yet checked. Do not write preview text
+or ask any question in this step.
 
 ### Step 2: Show
 
