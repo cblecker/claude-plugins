@@ -556,7 +556,7 @@ Score confidence from 0 to 100 on this shared scale:
 - 50-79: valid but minor, uncertain, or only partly evidenced
 - 0-49: speculative, pre-existing, or a nitpick
 
-For a finding below 50, keep the title, claim, and evidence to one line each.`
+For a finding below 50, keep the title, claim, evidence, and why it matters to one line each.`
 
 // Workflow agent() calls cannot pass per-call tool allowlists, so phase-specific
 // plugin agent types define the tool boundary for spawned agents.
@@ -956,20 +956,28 @@ const promptBody = capText(collapseWhitespace(stripHtmlComments(pr.body)), PR_BO
 
 // Other authors' threads reach synthesis only to judge overlap, which rests on
 // the gist of each comment; bot reviewers wrap theirs in long <details> blocks.
+// A block keeps its <summary> line, which is where a comment written entirely
+// inside one names its concern.
 const THREAD_BODY_LIMIT = 1000
 const THREAD_REPLY_LIMIT = 400
 const THREAD_REPLIES_KEPT = 3
+function detailsSummary(block) {
+  const match = /<summary\b[^>]*>([\s\S]*?)<\/summary>/i.exec(block)
+  const summary = match ? match[1].replace(/<[^>]*>/g, '').trim() : ''
+  return summary ? '\n' + summary + '\n' : ''
+}
+
 function threadText(text, limit) {
   let stripped = stripHtmlComments(text)
-  // Innermost blocks first, so nested <details> come out whole; an unclosed
+  // Innermost blocks first, so nested <details> collapse whole; an unclosed
   // block runs to the end of the comment.
   const innermost = /<details\b(?:(?!<details\b)[\s\S])*?<\/details>/gi
   let previous
   do {
     previous = stripped
-    stripped = stripped.replace(innermost, '')
+    stripped = stripped.replace(innermost, detailsSummary)
   } while (stripped !== previous)
-  stripped = stripped.replace(/<details\b[\s\S]*$/i, '')
+  stripped = stripped.replace(/<details\b[\s\S]*$/i, detailsSummary)
   return capText(collapseWhitespace(stripped), limit, 'comment')
 }
 
@@ -1377,7 +1385,9 @@ if (allFindings.length > 0) {
     // the gist the overlap judgement needs. Collector records are untouched,
     // so reply targets and resolution state still come from them.
     threads: threads.map(thread => {
-      const own = followUpLogin !== '' && thread.author === followUpLogin
+      // By login, not followUpLogin: on the reviewer's own PR follow-up is
+      // off, but their threads are still theirs.
+      const own = reviewerLogin !== '' && thread.author === reviewerLogin
       const replies = thread.replies || []
       const kept = own ? replies : replies.slice(-THREAD_REPLIES_KEPT)
       const record = {

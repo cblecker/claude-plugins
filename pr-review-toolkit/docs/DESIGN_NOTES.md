@@ -159,7 +159,8 @@ agent turn, or once per later orchestrator turn. What changed:
   context, where escaping keeps untrusted text from posing as prompt
   structure, and `<details>` stays because bot PRs keep changelogs there.
 - **Other authors' threads.** Synthesis sees threads only to judge overlap.
-  Other authors' bodies lose HTML comments and `<details>` blocks and are
+  Other authors' bodies lose HTML comments, `<details>` blocks collapse to
+  their `<summary>` line, and bodies are
   capped at 1000 chars, with the last three replies at 400 chars and a
   `replyCount`. The reviewer's own threads and the collector records that
   reply targets come from are untouched.
@@ -167,7 +168,7 @@ agent turn, or once per later orchestrator turn. What changed:
   only code-reviewer had a rubric (plus its own ≥ 80 filter). A shared
   0–100 rubric now sits in the standard output instructions and
   code-reviewer's own was removed. Findings below 50 are written in one
-  line per field: `compactItem` drops their long text anyway. Higher
+  line per field (title, claim, evidence, why it matters): `compactItem` drops their long text anyway. Higher
   findings are not capped, because the main session answers follow-up
   questions from exactly those fields and would otherwise re-read the code.
 - **Optional text.** `suggestedFix` is optional, matching the "when one
