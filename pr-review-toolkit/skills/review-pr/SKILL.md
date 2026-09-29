@@ -157,4 +157,6 @@ Present the board before drafting or posting anything.
 When the user chooses to draft, reply, approve, or post, read
 `${CLAUDE_SKILL_DIR}/references/posting.md` and follow it exactly. It
 governs drafting style, line-anchor validity, the exact preview, explicit
-approval, and the approved GitHub writes.
+approval, and the approved GitHub writes. Before any posting question, the
+user must see the exact draft text in a `### Review preview` block, following
+the numbered steps in `posting.md`.

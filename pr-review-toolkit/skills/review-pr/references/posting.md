@@ -4,9 +4,15 @@ Draft comments only in the conversation. GitHub write tools may be used
 only in the final posting step, after the exact preview is explicitly
 approved.
 
+The user must see the exact text of everything to be posted, as visible
+reply text, before any posting question is asked. Drafts held in reasoning,
+summaries such as "3 comments drafted", and tool output do not count as
+shown. Preview And Confirm below defines the required order.
+
 ## Draft Selected Comments
 
-Drafts should:
+Drafts are working text for the preview; they are shown to the user in
+Preview And Confirm step 2, not separately. Drafts should:
 
 - sound like the user wrote them
 - be concise and actionable
@@ -71,7 +77,18 @@ to review-body text when it has no valid line anchor.
 
 ## Preview And Confirm
 
-Before posting, show an exact preview.
+Follow these steps in order. Do not skip or merge steps.
+
+### Step 1: Check
+
+Run the line-anchor checks from "Line comments vs review body" for every
+proposed line comment, and move any finding that fails into the review body.
+Do not write preview text or ask any question in this step.
+
+### Step 2: Show
+
+Write the full preview as visible reply text under the heading
+`### Review preview`.
 
 For each finding being posted as a new line comment, show:
 
@@ -97,9 +114,18 @@ For review body text (non-line findings), show the review body.
 Show the proposed review event: `COMMENT`, `REQUEST_CHANGES`, `APPROVE`, or
 `No review event` for a run of replies only.
 
-Only after the line-anchor checks have returned and the full preview text is
-in the conversation, ask for explicit approval with `AskUserQuestion`, called
-alone, never in parallel with other tools. Use these options:
+End the preview with a one-line tally:
+`N line comments · N thread replies · review body: yes/no · event: <event>`.
+
+### Step 3: Ask
+
+Only in a message whose text already contains the step 2 preview, ask for
+explicit approval with `AskUserQuestion`, called alone, never in parallel
+with other tools. The question repeats the tally, for example: "Post the
+review previewed above (3 line comments · 1 thread reply · review body: yes ·
+event: COMMENT)?"
+If you cannot point to a `### Review preview` block above whose contents
+match those counts, return to step 2 instead of asking. Use these options:
 
 1. "Post this review"
 2. "Edit findings" — covers editing drafts, adding, or removing findings
@@ -108,9 +134,13 @@ alone, never in parallel with other tools. Use these options:
    resolved thread
 4. "Cancel"
 
+### Step 4: Re-approve
+
 Accept approval only when the user selects "Post this review" or clearly
-confirms posting. If the user requests edits or removals, update the preview
-and ask for approval again.
+confirms posting. Any edit, removal, conversion, move to the review body, or
+rejected reply target returns to step 2: show a fresh, complete preview (not
+only what changed), then ask again in step 3. If the change adds a line
+comment or moves its anchor, return to step 1 first to check that location.
 
 ## Post Approved Review
 
@@ -122,7 +152,8 @@ Use GitHub write tools only in this final approved step. Post thread
 replies first, then the review, so a rejected reply is handled before any
 review exists. If any write fails or the run stops partway, report exactly
 what was posted and whether a pending review exists; completing the rest
-needs a fresh preview and approval, and never re-sends what already posted.
+needs a fresh preview and approval (Preview And Confirm step 2), and never
+re-sends what already posted.
 
 ### Posting thread replies for overlap findings and follow-ups
 
@@ -130,8 +161,8 @@ Post overlapping findings and follow-up replies using
 `add_reply_to_pull_request_comment` with the numeric `commentId` and
 `pullNumber`. If the reply API rejects the target as invalid, do not silently
 change the posting location: stop before creating the review, convert the
-finding to a proposed new line comment, and return to Preview And Confirm —
-same as invalid line locations below. On re-approval, post only what has not
+finding to a proposed new line comment, and return to Preview And Confirm
+step 1 to check its location. On re-approval, post only what has not
 been posted yet; replies that already succeeded are not sent again.
 
 ### Posting new line comments
@@ -155,10 +186,14 @@ body.
 ### Invalid locations
 
 If a line comment cannot be added because the location is invalid for the PR
-diff, move that text into the review body, show the revised preview, and ask
-for approval again before posting. The pending review persists across this
+diff, move that text into the review body and return to Preview And Confirm
+step 2: show the full revised preview, then ask for approval again before
+posting. The pending review persists across this
 re-preview: do not create a second one — on approval, submit the same
-pending review with the surviving comments and the revised body; if the
-user cancels instead, delete the pending review with
+pending review with the surviving comments and the revised body. Staged
+comments cannot be edited or removed individually, so if the approved
+revision changes or removes one, delete the pending review and post the
+full revised preview as a new one. If the user cancels instead, delete the
+pending review with
 `pull_request_review_write` method `delete_pending` so no staged comments
 linger.
