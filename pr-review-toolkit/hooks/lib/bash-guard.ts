@@ -74,7 +74,7 @@ function refusedArg(arg: string, sub: string): boolean {
     return REFUSED_LONG.some((full) => name.startsWith(full) || (name.length >= 3 && full.startsWith(name)))
   }
   if (arg === '-h' || /^-[^-]*O/.test(arg)) return true // usage viewer; -O<orderfile>, also bundled (-pO...)
-  return sub === 'blame' && arg.startsWith('-S') // -S <revs-file>: a file's lines echo in the errors
+  return sub === 'blame' && /^-[^-]*S/.test(arg) // -S <revs-file>, also bundled (-wSl): a file's lines echo in the errors
 }
 
 function isReadOnlyGit(words: string[]): boolean {
