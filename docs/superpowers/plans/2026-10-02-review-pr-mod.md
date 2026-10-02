@@ -41,8 +41,9 @@ session; *(re-verify)* marks something not directly observed.
 - Workflow completion reaches the main conversation as a `prompt.attachment`
   (type `queued_command`) when Claude is mid-turn *(probed: rewritten silently)*,
   or as a `prompt.submit` with `origin.kind: 'task-notification'` when Claude is
-  idle *(probed: delivery path observed; rewriting it via `next({ ...e, text })`
-  is re-verify)*. Never answer `prompt.submit` without `next` or with `{ drop }`:
+  idle *(probed: rewriting it via `next({ ...e, text })` delivers only the
+  new text, no warning — Task 0, 2026-10-02)*. The notice text carries
+  `<task-id>`, `<status>` and the workflow's `<result>`. Never answer `prompt.submit` without `next` or with `{ drop }`:
   both show a transcript warning *(probed)*.
 - `$.model.complete` is text-only (no schema option): strip code fences, parse,
   validate, retry in code *(probed)*.
@@ -50,8 +51,9 @@ session; *(re-verify)* marks something not directly observed.
 - `tool.call` carries `agentId` and `tool_use_id` and fires before `tool.check`;
   `tool.check` has no `agentId` *(types)*.
 - `TaskStop` via `$.tool.call({ tool: 'TaskStop', task_id })` stops a
-  mod-spawned agent *(probed)*; stopping a workflow by its `taskId` is
-  re-verify.
+  mod-spawned agent *(probed)*, and stops a workflow by its `taskId`
+  (`task_type: local_workflow`) *(probed — Task 0)*. A stopped workflow sends
+  no completion notice *(probed)*, so cancel must update the run itself.
 - Limits: a hook's own execution 10 s (time inside `next` and `$` calls
   excluded); all `session.end` hooks together 1.5 s; `$.process.run` 30 s
   default. `$.prompt.submit` resolves when the turn starts — never `await` it in
@@ -173,7 +175,7 @@ session; *(re-verify)* marks something not directly observed.
     *(probed on cblecker/dp-check#50: pending create → comment → out-of-diff
     comment `isError` → `delete_pending` → nothing left)*
 14. **Cancel/cleanup:** pane cancel → `TaskStop` with the workflow `taskId`
-    *(re-verify for workflows)*; `session.end` (`/clear`, `/resume`) →
+    *(probed for workflows; no completion notice follows)*; `session.end` (`/clear`, `/resume`) →
     fire-and-forget `TaskStop`, then reset `review.run` (1.5 s budget for all
     `session.end` hooks).
 
@@ -187,8 +189,8 @@ session; *(re-verify)* marks something not directly observed.
 
 ## Open items for the spec
 
-- Re-verify: rewriting the idle-path completion `prompt.submit`; `TaskStop` on a
-  workflow `taskId`.
+- ~~Re-verify~~ done in Task 0: idle-path rewrite works; `TaskStop` stops a
+  workflow (no completion notice follows).
 - Per-lens timeout: none in v1 beyond Workflow's own handling, or a
   run-level timeout (~15 min) that calls `TaskStop`.
 - Pane layout per state: study the built-in `diff` mod (scrolling, focus,
