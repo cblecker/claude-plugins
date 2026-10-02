@@ -1,6 +1,6 @@
 {
   "name": "pr-review-toolkit",
-  "version": "2.5.1",
+  "version": "3.0.0",
   "description": "Comprehensive PR review board from a local PR head checkout",
   "author": {
     "name": "cblecker",
@@ -8,5 +8,6 @@
   },
   "keywords": ["pr-review", "code-review", "workflow", "pull-request"],
   "dependencies": ["github"],
-  "workflows": ["./skills/review-pr/review-pr.js"]
+  "workflows": ["./skills/review-pr/review-pr.js"],
+  "types": "./types/index.d.ts"
 }

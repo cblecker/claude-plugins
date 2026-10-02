@@ -24,3 +24,6 @@ rules:
 
 exclude:
   - "gws/skills/**"
+  # Mod manifest ({"modules": [...]}), not a command-hooks file; claude-hooks-valid
+  # would demand a "hooks" key. `claude plugin validate` checks it instead.
+  - "pr-review-toolkit/hooks/hooks.json"
