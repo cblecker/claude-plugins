@@ -229,6 +229,13 @@ and scratchpad/tmp leftovers: user deletes (the Bash sandbox can't).
 
 # review-pr Workflow + Mod Implementation Plan
 
+> **Amendment (2026-10-02, during execution):** Claude Code refuses `$` passed across a file
+> import, and `$.state` atoms must be declared in the same file that reads them. So `hooks/lib/*.ts`
+> is pure and takes an injected `io: Io` (`run`/`mcp`/`complete`, declared in `hooks/lib/io.ts`)
+> wherever this plan writes `fn($, ...)`. Each hooks file (`register.ts`, `pane.tsx`) declares its
+> own `runAtom` and builds `Io` with a local `makeIo($)`, and there is no `hooks/lib/state.ts`.
+> Shared types live in the self-contained `types/index.d.ts`, re-exported by `hooks/lib/types.ts`.
+
 **Execution method (user choice): subagent-driven** — use
 superpowers:subagent-driven-development; a fresh implementer and a fresh
 reviewer per task, whole-branch review at the end. After exiting plan mode,
