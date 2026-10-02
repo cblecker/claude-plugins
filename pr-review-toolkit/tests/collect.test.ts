@@ -63,6 +63,11 @@ test('parses owner/repo from ssh and https origins', () => {
   expect(parseOwnerRepo('https://gitlab.com/x/y.git')).toBe(null)
 })
 
+test('parseOwnerRepo reads a URL whose password holds an @ and still requires the host', () => {
+  expect(parseOwnerRepo('https://user:p@ss@github.com/o/r.git')).toEqual({ owner: 'o', repo: 'r' })
+  expect(parseOwnerRepo('https://github.com@evil.com/o/r')).toBe(null)
+})
+
 test('parseOwnerRepo requires github.com as the whole host', () => {
   expect(parseOwnerRepo('https://notgithub.com/x/y')).toBe(null)
   expect(parseOwnerRepo('https://gitlab.com/github.com/y')).toBe(null)
@@ -72,6 +77,8 @@ test('parseOwnerRepo requires github.com as the whole host', () => {
 test('stripOriginCredentials drops userinfo from URL origins and leaves scp-style ones alone', () => {
   expect(stripOriginCredentials('https://user:tok3n@github.com/o/r.git')).toBe('https://github.com/o/r.git')
   expect(stripOriginCredentials('https://tok3n@github.com/o/r')).toBe('https://github.com/o/r')
+  expect(stripOriginCredentials('https://user:p@ss@github.com/o/r.git')).toBe('https://github.com/o/r.git')
+  expect(stripOriginCredentials('https://github.com/o/r@v1')).toBe('https://github.com/o/r@v1')
   expect(stripOriginCredentials('git@github.com:o/r.git')).toBe('git@github.com:o/r.git')
   expect(stripOriginCredentials('https://github.com/o/r')).toBe('https://github.com/o/r')
 })
@@ -162,6 +169,25 @@ test('collectThreads follows the after cursor across pages', async () => {
 test('collectThreads reports zero threads as a successful read', async () => {
   const io = ioWith({ mcp: async () => textResult({ review_threads: [], totalCount: 0, pageInfo: pageInfo(false) }) })
   expect(await collectThreads(io, ref)).toEqual({ threads: [], failed: false })
+})
+
+test('collectThreads reports a thread cut short of its total_count as incomplete but keeps what it read', async () => {
+  const cut = { ...thread('T1', 1), total_count: 3 }
+  const io = ioWith({
+    mcp: async (_tool, args) => textResult(args.after
+      ? { review_threads: [thread('T2', 2)], pageInfo: pageInfo(false) }
+      : { review_threads: [cut], pageInfo: pageInfo(true, 'C1') }),
+  })
+  const out = await collectThreads(io, ref)
+  expect(out.failed).toBe(true)
+  expect(out.threads.map((t) => t.id)).toEqual(['T1', 'T2'])
+})
+
+test('collectThreads treats a thread holding all its comments as complete', async () => {
+  const io = ioWith({ mcp: async () => textResult({ review_threads: [currentThread, outdatedThread], totalCount: 2, pageInfo: pageInfo(false) }) })
+  const out = await collectThreads(io, ref)
+  expect(out.failed).toBe(false)
+  expect(out.threads.length).toBe(2)
 })
 
 test('collectThreads skips threads it cannot map', async () => {
@@ -302,18 +328,27 @@ test('resolvePr refuses a non-github origin without calling GitHub', async () =>
   expect(out).toEqual({ error: 'origin https://gitlab.com/o/r.git is not a github.com repository' })
 })
 
-test('resolvePr uses the head filter and matches on head sha', async () => {
+test('resolvePr takes the head filter\'s single PR as the candidate whatever its head sha', async () => {
   const calls: McpCall[] = []
   const io = ioWith({
     mcp: async (tool, args) => {
       calls.push({ tool, args })
-      return textResult([{ number: 4, head: { sha: 'old' } }, { number: 5, head: { sha: 'abc123' } }])
+      return textResult([{ number: 4, head: { sha: 'stale-local-checkout' } }])
     },
   })
-  expect(await resolvePr(io, env())).toEqual({ owner: 'o', repo: 'r', number: 5 })
+  expect(await resolvePr(io, env())).toEqual({ owner: 'o', repo: 'r', number: 4 })
   expect(calls.length).toBe(1)
   expect(calls[0]!.tool).toBe('list_pull_requests')
   expect(calls[0]!.args).toEqual({ owner: 'o', repo: 'r', state: 'open', head: 'o:feat/x', fields: ['number', 'head'], perPage: 10 })
+})
+
+test('resolvePr reports several head-filter PRs without scanning', async () => {
+  const calls: McpCall[] = []
+  const io = ioWith({
+    mcp: async (tool, args) => { calls.push({ tool, args }); return textResult([{ number: 4, head: { sha: 'a' } }, { number: 5, head: { sha: 'b' } }]) },
+  })
+  expect(await resolvePr(io, env())).toEqual({ error: 'Several open PRs in o/r have head abc123. Check out the PR head, push local commits, or pick one PR.' })
+  expect(calls.length).toBe(1)
 })
 
 test('resolvePr scans open PRs by head sha when the head filter finds nothing', async () => {
@@ -330,6 +365,58 @@ test('resolvePr scans open PRs by head sha when the head filter finds nothing', 
   expect(calls[1]!.args).toEqual({ owner: 'o', repo: 'r', state: 'open', fields: ['number', 'head'], perPage: 100, page: 1 })
   expect(calls[2]!.args.page).toBe(2)
   expect(calls.length).toBe(3)
+})
+
+test('resolvePr scans every page, so a duplicate head sha on a later page is several', async () => {
+  const calls: McpCall[] = []
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, head: { sha: i === 0 ? 'abc123' : `s${i}` } }))
+  const io = ioWith({
+    mcp: async (_tool, args) => {
+      calls.push({ tool: 'list_pull_requests', args })
+      if (args.head) return textResult([])
+      return textResult(args.page === 1 ? page1 : [{ number: 7, head: { sha: 'abc123' } }])
+    },
+  })
+  expect(await resolvePr(io, env())).toEqual({ error: 'Several open PRs in o/r have head abc123. Check out the PR head, push local commits, or pick one PR.' })
+  expect(calls.length).toBe(3)
+})
+
+test('resolvePr keeps scanning past a match and returns it when no later page repeats it', async () => {
+  const calls: McpCall[] = []
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, head: { sha: i === 3 ? 'abc123' : `s${i}` } }))
+  const io = ioWith({
+    mcp: async (_tool, args) => {
+      calls.push({ tool: 'list_pull_requests', args })
+      if (args.head) return textResult([])
+      return textResult(args.page === 1 ? page1 : [{ number: 8, head: { sha: 'other' } }])
+    },
+  })
+  expect(await resolvePr(io, env())).toEqual({ owner: 'o', repo: 'r', number: 1003 })
+  expect(calls.map((c) => c.args.page)).toEqual([undefined, 1, 2])
+})
+
+test('resolvePr says the scan covered only the first 2000 open PRs when the cap hits with no match', async () => {
+  const calls: McpCall[] = []
+  const full = Array.from({ length: 100 }, (_, i) => ({ number: 1000 + i, head: { sha: `s${i}` } }))
+  const io = ioWith({
+    mcp: async (_tool, args) => { calls.push({ tool: 'list_pull_requests', args }); return textResult(args.head ? [] : full) },
+  })
+  const out = await resolvePr(io, env())
+  expect(calls.length).toBe(21)
+  expect(calls[20]!.args.page).toBe(20)
+  expect('error' in out && out.error).toContain('first 2000 open PRs in o/r')
+  expect('error' in out && out.error).toContain('abc123')
+})
+
+test('resolvePr still finds a match on the last scanned page', async () => {
+  const io = ioWith({
+    mcp: async (_tool, args) => {
+      if (args.head) return textResult([])
+      const page = Number(args.page)
+      return textResult(Array.from({ length: 100 }, (_, i) => ({ number: page * 1000 + i, head: { sha: page === 20 && i === 0 ? 'abc123' : `s${page}-${i}` } })))
+    },
+  })
+  expect(await resolvePr(io, env())).toEqual({ owner: 'o', repo: 'r', number: 20000 })
 })
 
 test('resolvePr skips the head filter on a detached HEAD', async () => {
