@@ -2,12 +2,17 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { RunState } from './lib/types'
 import { applyDeposit } from './lib/deposit'
+import { isReadOnlyCommand } from './lib/bash-guard'
 
 // `$` never crosses a file import: read/update need an atom declared in the same
 // file as the hooks that use them, so each hooks file declares its own.
 const runAtom = atom({ plugin: 'pr-review-toolkit', key: 'run' }, null as RunState | null)
 async function getRun($: Parameters<typeof read>[0]): Promise<RunState | null> { return read($, runAtom) }
 async function setRun($: Parameters<typeof update>[0], fn: (r: RunState | null) => RunState | null) { await update($, runAtom, fn) }
+
+// tool_use_ids of in-flight Bash calls made by a subagent during an active run.
+// Module state, lost on reload; every entry is removed when its call returns.
+const lensBash = new Set<string>()
 
 export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
@@ -38,5 +43,25 @@ export const register: Register = (on) => {
     let answer = 'rejected: unknown run'
     await setRun($, (r) => { const out = applyDeposit(r, e, 'followup'); answer = out.answer; return out.run })
     return { result: answer }
+  })
+
+  // Lens agents run read-only git constantly; auto-allow exactly that and leave every
+  // other Bash call to Claude Code's own decision. `tool.check` fires inside the
+  // `tool.call` hook's `next(e)`, so a call is remembered only while it is in flight,
+  // and only when a subagent makes it during an active run (`agentId` is absent on
+  // the main loop; it cannot tell a lens from any other subagent).
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const run = await getRun($)
+    if (e.agentId && run && run.phase === 'progress' && run.taskId) lensBash.add(e.tool_use_id)
+    try { return await next(e) } finally { lensBash.delete(e.tool_use_id) }
+  })
+  on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
+    const core = await next(e)
+    // Only an `ask` is upgraded: a deny rule or a managed policy keeps its say.
+    if (core.decision !== 'ask' || !e.tool_use_id || !lensBash.has(e.tool_use_id)) return core
+    const command = (e.input as { command?: unknown } | null | undefined)?.command
+    return typeof command === 'string' && isReadOnlyCommand(command)
+      ? { decision: 'allow' as const, reason: 'pr-review-toolkit: read-only git for a review lens' }
+      : core
   })
 }
