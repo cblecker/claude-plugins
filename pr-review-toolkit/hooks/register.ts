@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 import type { RunState } from './lib/types'
 import { applyDeposit } from './lib/deposit'
-import { isReadOnlyCommand } from './lib/bash-guard'
+import { shouldAutoAllow } from './lib/bash-guard'
 
 // `$` never crosses a file import: read/update need an atom declared in the same
 // file as the hooks that use them, so each hooks file declares its own.
@@ -51,17 +51,13 @@ export const register: Register = (on) => {
   // and only when a subagent makes it during an active run (`agentId` is absent on
   // the main loop; it cannot tell a lens from any other subagent).
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (!e.agentId) return next(e)
     const run = await getRun($)
-    if (e.agentId && run && run.phase === 'progress' && run.taskId) lensBash.add(e.tool_use_id)
+    if (run && run.phase === 'progress' && run.taskId) lensBash.add(e.tool_use_id)
     try { return await next(e) } finally { lensBash.delete(e.tool_use_id) }
   })
   on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
     const core = await next(e)
-    // Only an `ask` is upgraded: a deny rule or a managed policy keeps its say.
-    if (core.decision !== 'ask' || !e.tool_use_id || !lensBash.has(e.tool_use_id)) return core
-    const command = (e.input as { command?: unknown } | null | undefined)?.command
-    return typeof command === 'string' && isReadOnlyCommand(command)
-      ? { decision: 'allow' as const, reason: 'pr-review-toolkit: read-only git for a review lens' }
-      : core
+    return e.tool_use_id && lensBash.has(e.tool_use_id) ? shouldAutoAllow(e.input, core) : core
   })
 }

@@ -10,8 +10,10 @@
 
 const GIT_SUBCOMMANDS = new Set(['rev-parse', 'diff', 'log', 'show', 'blame', 'merge-base', 'rev-list', 'status'])
 // Characters that are inert outside quotes: no expansion, no operator, and no way
-// to start an option a quoted form could not. `~` and `^` appear in revisions.
-const PLAIN = /[A-Za-z0-9_@%+=:,./^~-]/
+// to start an option a quoted form could not. `~` appears in revisions (`HEAD~3`).
+// `^` is left out: under zsh's EXTENDED_GLOB it is a glob, and a committed file named
+// `--output=x` would then expand into an option; quote it (`'HEAD^'`) instead.
+const PLAIN = /[A-Za-z0-9_@%+=:,./~-]/
 const CONTROL = /[\x00-\x08\x0a-\x1f\x7f]/
 
 // Splits the command into `&&` / `||` / `;` / `|` separated segments of words, with
@@ -54,11 +56,25 @@ function parse(cmd: string): string[][] | null {
   return endSegment() ? segments : null
 }
 
-// `--output=<file>` (or `--output <file>`) makes git diff/log/show write a file. Git
-// refuses abbreviations of it today; refuse the prefixes anyway.
-function writesFile(arg: string): boolean {
-  const name = arg.split('=')[0]!
-  return name.startsWith('--output') || (name.length >= 3 && '--output'.startsWith(name))
+// Long options that write a file, read one from outside the checkout, run another
+// program or open a viewer. Git accepts unambiguous abbreviations, so a prefix of
+// one (`--cont` for `--contents`) is refused too, and so is anything that extends it.
+const REFUSED_LONG = ['--output', '--no-index', '--contents', '--orderfile', '--ignore-revs-file', '--show-signature', '--help']
+
+// Words that name something outside the checkout, directly or through the shell:
+// an absolute or `~` path, a zsh `=cmd`, the same behind `--opt=` or a bundled `-xX`
+// short option, or any `..` path segment (revision ranges like `a..b` stay allowed).
+const OUTSIDE = [/^[=/~]/, /=[/~]/, /^-[A-Za-z0-9]*[/~]/, /(^|\/)\.\.(\/|$)|\.\.\//]
+
+function refusedArg(arg: string, sub: string): boolean {
+  if (OUTSIDE.some((re) => re.test(arg))) return true
+  if (arg.includes('%G')) return true // %G? and friends run gpg over the commit's signature
+  if (arg.startsWith('--')) {
+    const name = arg.split('=')[0]!
+    return REFUSED_LONG.some((full) => name.startsWith(full) || (name.length >= 3 && full.startsWith(name)))
+  }
+  if (arg === '-h' || /^-[^-]*O/.test(arg)) return true // usage viewer; -O<orderfile>, also bundled (-pO...)
+  return sub === 'blame' && arg.startsWith('-S') // -S <revs-file>: a file's lines echo in the errors
 }
 
 function isReadOnlyGit(words: string[]): boolean {
@@ -69,11 +85,12 @@ function isReadOnlyGit(words: string[]): boolean {
     else break
   }
   const sub = words[i]
-  return sub !== undefined && GIT_SUBCOMMANDS.has(sub) && !words.slice(i + 1).some(writesFile)
+  return sub !== undefined && GIT_SUBCOMMANDS.has(sub) && !words.slice(i + 1).some((arg) => refusedArg(arg, sub))
 }
 
+// `-N`, `-nN`, `-n N`: always with the dash, since a bare number would name a file.
 function isHeadTail(args: string[]): boolean {
-  if (args.length === 1) return /^(?:-n)?-?\d+$/.test(args[0]!)
+  if (args.length === 1) return /^-(?:n-?)?\d+$/.test(args[0]!)
   return args.length === 2 && args[0] === '-n' && /^-?\d+$/.test(args[1]!)
 }
 
@@ -88,4 +105,22 @@ export function isReadOnlyCommand(command: string): boolean {
     if (program === 'head' || program === 'tail') return isHeadTail(args)
     return false
   })
+}
+
+export type ToolCheckResult = { decision: 'allow' | 'ask' | 'deny'; reason?: string; rule?: string }
+
+// The Bash arguments that do not change what runs. Anything else (a sandbox override,
+// extra network hosts, ...) widens what the command may do, so the call is not ours to allow.
+const SAFE_INPUT_KEYS = new Set(['command', 'description', 'timeout', 'run_in_background'])
+
+// The `tool.check` verdict for a lens agent's Bash call. Only Claude Code's plain
+// default `ask` is upgraded to `allow`; a deny, an ask that a settings rule asked for,
+// and an already-allowed call come back untouched.
+export function shouldAutoAllow(input: unknown, core: ToolCheckResult): ToolCheckResult {
+  if (core.decision !== 'ask' || core.rule) return core
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return core
+  if (!Reflect.ownKeys(input).every((key) => typeof key === 'string' && SAFE_INPUT_KEYS.has(key))) return core
+  const command = (input as { command?: unknown }).command
+  if (typeof command !== 'string' || !isReadOnlyCommand(command)) return core
+  return { decision: 'allow', reason: 'pr-review-toolkit: read-only git for a review lens' }
 }
