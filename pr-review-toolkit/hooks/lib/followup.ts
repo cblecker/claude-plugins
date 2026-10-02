@@ -1,6 +1,9 @@
 import type { Io } from './io'
 import type { Delta, FollowUpContext, Review, ReviewSummary, Thread } from './types'
 
+// A commit SHA. Commit ids from GitHub reach git command lines, so only this shape is accepted.
+const SHA_RE = /^[0-9a-f]{7,40}$/
+
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review. A port of
 // review-pr.js (follow-up detection block); logins compare exactly, as there:
@@ -42,9 +45,8 @@ export function detectFollowUp(threads: Thread[], reviews: Review[], login: stri
     }))
   if (myThreads.length === 0 && !lastReview) return null
 
-  // commitId is remote data interpolated into git commands; accept only a
-  // commit SHA, the same guard as mergeBase.
-  const reviewedCommit = lastReview && /^[0-9a-f]{7,40}$/.test(String(lastReview.commitId || ''))
+  // commitId is remote data interpolated into git commands; accept only a commit SHA.
+  const reviewedCommit = lastReview && SHA_RE.test(String(lastReview.commitId || ''))
     ? String(lastReview.commitId)
     : ''
   return {
@@ -56,7 +58,7 @@ export function detectFollowUp(threads: Thread[], reviews: Review[], login: stri
   }
 }
 
-type FileHunks = { path: string; hunks: [number, number][] }
+type FileHunks = NonNullable<Delta['files']>[number]
 
 const SIMPLE_ESCAPES: Record<string, string> = { a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '"': '"', '\\': '\\' }
 
@@ -141,11 +143,14 @@ const GIT_TIMEOUT_MS = 120000
 // What changed since the commit the reviewer last reviewed: the number of
 // commits and, per changed file, the head-side line ranges of each change.
 // Any failure (a commit that is not a SHA, one that is not an ancestor of head
-// such as after a force-push, git failing or not running) is `available: false`:
-// a file missing from `files` reads as unchanged, so a partial answer is never given.
+// such as after a force-push, git failing or not running, or a diff the host
+// truncated) is `available: false`: a file missing from `files` reads as
+// unchanged, so an incomplete file list is never given. What the diff has no
+// hunk for still reads as unchanged, as in the original workflow: binary files
+// and pure renames.
 export async function computeDelta(io: Io, root: string, reviewedCommit: string, head: string): Promise<Delta> {
   // Both are remote data on a git command line: a SHA, and nothing an option could be.
-  if (!/^[0-9a-f]{7,40}$/.test(reviewedCommit)) return { available: false }
+  if (!SHA_RE.test(reviewedCommit)) return { available: false }
   if (head === '' || head.startsWith('-')) return { available: false }
   const opts = { cwd: root, timeoutMs: GIT_TIMEOUT_MS }
   try {
@@ -159,6 +164,8 @@ export async function computeDelta(io: Io, root: string, reviewedCommit: string,
       '--src-prefix=a/', '--dst-prefix=b/', '-U0', '--inter-hunk-context=5', range, '--',
     ], opts)
     if (count.exitCode !== 0 || diff.exitCode !== 0) return { available: false }
+    // The host keeps only the first 4 MiB of stdout; the rest of a cut diff is files that would read as unchanged.
+    if (diff.truncated) return { available: false }
     return { available: true, commitsSince: Number(String(count.stdout).trim()) || 0, files: parseDeltaHunks(String(diff.stdout)) }
   } catch {
     return { available: false }

@@ -275,6 +275,19 @@ test('computeDelta is unavailable when rev-list or diff fails', async () => {
   expect(await computeDelta(gitIo({ diff: bad }).io, '/repo', reviewed, head)).toEqual({ available: false })
 })
 
+test('computeDelta is unavailable when the host truncated the diff output', async () => {
+  const diff = 'diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -3,0 +4,2 @@\n+a\n+b\n'
+  const cut: ProcResult = { exitCode: 0, stdout: diff, stderr: '', truncated: true }
+  expect(await computeDelta(gitIo({ diff: cut }).io, '/repo', reviewed, head)).toEqual({ available: false })
+  // An explicit `truncated: false` is a complete diff.
+  const whole: ProcResult = { ...cut, truncated: false }
+  expect(await computeDelta(gitIo({ diff: whole }).io, '/repo', reviewed, head)).toEqual({
+    available: true,
+    commitsSince: 2,
+    files: [{ path: 'x.go', hunks: [[4, 5]] }],
+  })
+})
+
 test('computeDelta is unavailable when git cannot be run', async () => {
   const io: Io = {
     run: async () => { throw new Error('timed out') },
