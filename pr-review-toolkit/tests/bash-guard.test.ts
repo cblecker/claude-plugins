@@ -145,6 +145,32 @@ test('head and tail take only a dashed line count', () => {
   expect(ok('git log | tail -n 5 6')).toBe(false)
 })
 
+// The git commands review-pr.js tells its agents to run, spelled as the prompts spell
+// them (checkoutInstructions, followUpPrompt) with real SHAs and quoted head paths: a
+// lens or the follow-up verifier running them is never stopped for a permission prompt.
+// Keep in step with the backticked `git ...` templates in skills/review-pr/review-pr.js.
+const MB = '0123456789abcdef0123456789abcdef01234567'
+const HD = 'fedcba9876543210fedcba9876543210fedcba98'
+const RC = '89abcdef0123456789abcdef0123456789abcdef'
+test('allows every git command template the review workflow prompts name', () => {
+  const templates = [
+    // checkoutInstructions: the manifest, per-file patches, and the full patch.
+    `git -c core.quotePath=false diff --name-status ${MB}..${HD}`,
+    `git -c core.quotePath=false diff --numstat ${MB}..${HD}`,
+    `git --literal-pathspecs diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${MB} ${HD} -- 'pr-review-toolkit/hooks/lib/pane.ts'`,
+    `git --literal-pathspecs diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${MB} ${HD} -- 'docs/a file (draft).md'`,
+    `git --literal-pathspecs diff --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ ${MB} ${HD}`,
+    // checkoutInstructions: history over the pinned range, as the agent definition spells it.
+    `git --literal-pathspecs log --oneline ${MB}..${HD} -- 'src/a.go'`,
+    `git --literal-pathspecs blame -L 10,20 ${HD} -- 'src/a.go'`,
+    `git --literal-pathspecs show ${HD} -- 'src/a.go'`,
+    // followUpPrompt: what changed at an ask, and the commit that fixed it.
+    `git --literal-pathspecs diff --no-ext-diff --no-textconv ${RC} ${HD} -- 'pr-review-toolkit/hooks/lib/pane.ts'`,
+    `git --literal-pathspecs log --oneline ${RC}..${HD} -- 'pr-review-toolkit/hooks/lib/pane.ts'`,
+  ]
+  for (const command of templates) expect([command, ok(command)]).toEqual([command, true])
+})
+
 const readOnly = { command: 'git log --oneline -3' }
 const ask = { decision: 'ask' as const, reason: 'needs approval' }
 

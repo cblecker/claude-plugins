@@ -346,10 +346,17 @@ const REVIEWERS = {
   }
 }
 
-const config = typeof args === 'string' ? JSON.parse(args) : (args || {})
+const MOD_NEEDED = 'review-pr-analysis needs args injected by the pr-review-toolkit mod (run, lenses). Run /pr-review-toolkit:review-pr with the plugin\'s mod loaded.'
+let config
+try {
+  config = typeof args === 'string' ? JSON.parse(args) : (args || {})
+} catch (e) {
+  throw new Error(MOD_NEEDED)
+}
+config = config && typeof config === 'object' ? config : {}
 const pr = config.pr || {}
 if (!config.run || !Array.isArray(config.lenses) || config.lenses.length === 0) {
-  throw new Error('review-pr-analysis needs args injected by the pr-review-toolkit mod (run, lenses). Run /pr-review-toolkit:review-pr with the plugin\'s mod loaded.')
+  throw new Error(MOD_NEEDED)
 }
 // Own keys only: a name such as 'constructor' must not resolve through the
 // object prototype.
@@ -422,11 +429,12 @@ function checkoutInstructions() {
 
 // Set by the mod on a follow-up review; null on a first review. The mod also
 // computes the delta, what changed since the reviewed commit. The verifier's
-// git commands name a range only when that delta is available and the
-// reviewed commit is a SHA.
+// git commands name a range only when that delta is available (with its file
+// list, which the prompt tells the verifier to read) and the reviewed commit
+// is a SHA.
 const followUp = config.followUp || null
 const reviewedCommit = followUp && SHA_RE.test(String(followUp.reviewedCommit || '')) ? String(followUp.reviewedCommit) : ''
-const deltaRange = reviewedCommit && followUp.delta && followUp.delta.available === true
+const deltaRange = reviewedCommit && followUp.delta && followUp.delta.available === true && Array.isArray(followUp.delta.files)
   ? reviewedCommit + '..' + pr.headSha
   : ''
 
@@ -447,7 +455,7 @@ const FOLLOWUP_SHAPE = '{ "run": string, "items": [{ "threadId"?: string, "ask":
 function reportInstructions(tool, shape, lens) {
   return '\n\n## Reporting\n\nReport by calling ' + tool + ' with run "' + config.run + '"'
     + (lens ? ' and lens "' + lens + '"' : '')
-    + ' and your complete result. If it answers "rejected", fix exactly what it names and call it again. After it answers "accepted", return {"submitted": true}.'
+    + ' and your complete result. If it answers "rejected", fix exactly what it names and call it again. After it answers "accepted", return {"submitted": true}. If it cannot be accepted, return {"submitted": false}.'
     + ' Report even when a list is empty: an agent that never reports counts as failed.'
     + '\n\nInput shape (? marks an optional field): ' + shape
 }
