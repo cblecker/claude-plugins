@@ -45,6 +45,16 @@ test('our failed notice is rewritten to the failure line naming the status', () 
   expect(completionLine(true, 'completed')).toBe('Review complete — the board is opening in the review pane (/review-board).')
 })
 
+test('a notice for a cancelled run is rewritten to a cancelled line, whatever its status', () => {
+  const cancelled = { taskId: 'w1', phase: 'failed' as const, error: 'Cancelled' }
+  const line = 'Review cancelled — see the review pane (/review-board).'
+  expect(rewriteNotice(notice('w1', 'completed'), cancelled)).toEqual({ text: line, line, ok: false, status: 'completed' })
+  expect(rewriteNotice(notice('w1', 'killed'), cancelled)?.text).toBe(line)
+  // A run that failed for another reason keeps the failure line.
+  expect(rewriteNotice(notice('w1', 'failed'), { taskId: 'w1', phase: 'failed', error: 'Workflow failed' })?.text).toBe('Review failed: failed — see the review pane.')
+  expect(rewriteNotice(notice('w2', 'completed'), cancelled)).toBe(null)
+})
+
 test("another task's notice, or one with no run, passes through", () => {
   expect(rewriteNotice(notice('w2', 'completed'), run)).toBe(null)
   expect(rewriteNotice(notice('w1', 'completed'), null)).toBe(null)

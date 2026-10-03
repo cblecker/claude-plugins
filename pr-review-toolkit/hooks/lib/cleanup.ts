@@ -41,12 +41,22 @@ export function recoverPosting(run: RunState | null): RunState | null {
   return { ...run, phase: 'done', error: INTERRUPTED }
 }
 
+// A reload (session.start) also loses the detached synthesis a completed notice started.
+// The run it was building the board for is left in progress and synthesizing for good, so
+// the reload drives it again: the task to finish, or null when no run is in that state.
+// Safe to run twice: the board is written only onto a run still synthesizing, so if the
+// first synthesis was alive after all, the second finds the run past it and writes nothing.
+export function interruptedSynthesis(run: RunState | null): string | null {
+  return run?.phase === 'progress' && run.synthesizing && run.taskId ? run.taskId : null
+}
+
 // The workflow launch returned `taskId` for the run holding `nonce`. The id is stored.
-// A run cancelled in the launch window is no longer in progress: it keeps its phase
-// (the launch must not bring it back), and the workflow that started anyway is to be
-// stopped (`stop`).
+// A launch whose run is gone is never wanted, and neither is one whose run was cancelled
+// in the launch window: the workflow that started anyway is to be stopped (`stop`). A run
+// that is no longer in progress keeps its phase (the launch must not bring it back); a run
+// that is gone or is another one is left as it is.
 export function launched(run: RunState | null, nonce: string, taskId: string): { run: RunState | null; stop: boolean } {
-  if (!run || run.run !== nonce) return { run, stop: false }
+  if (!run || run.run !== nonce) return { run, stop: true }
   return run.phase === 'progress'
     ? { run: { ...run, taskId }, stop: false }
     : { run: { ...run, taskId }, stop: true }

@@ -1,4 +1,5 @@
 import type { RunState } from './types'
+import { CANCELLED } from './cleanup'
 
 // The workflow's completion notice, as Claude Code delivers it: a `<task-notification>`
 // block carrying `<task-id>`, `<status>` and the workflow's `<result>`. Only the exact
@@ -28,14 +29,18 @@ export function completionLine(ok: boolean, status: string): string {
   return ok ? 'Review complete — the board is opening in the review pane (/review-board).' : `Review failed: ${status} — see the review pane.`
 }
 
+export const CANCELLED_LINE = 'Review cancelled — see the review pane (/review-board).'
+
 // What the hooks do with a notice's text: the full new text (our notice replaced by the
 // one line, any surrounding text kept) with the status it carried, or null to pass the
-// text through (another task's notice, or no run to match).
-export function rewriteNotice(text: string, run: Pick<RunState, 'taskId'> | null | undefined): { text: string; line: string; ok: boolean; status: string } | null {
+// text through (another task's notice, or no run to match). A notice that arrives for a
+// run the person cancelled says so, whatever status it carries, and is never `ok`.
+export function rewriteNotice(text: string, run: (Pick<RunState, 'taskId'> & Partial<Pick<RunState, 'phase' | 'error'>>) | null | undefined): { text: string; line: string; ok: boolean; status: string } | null {
   const hit = locate(text, run?.taskId)
   if (!hit) return null
-  const ok = hit.status === 'completed'
-  const line = completionLine(ok, hit.status)
+  const cancelled = run?.phase === 'failed' && run.error === CANCELLED
+  const ok = !cancelled && hit.status === 'completed'
+  const line = cancelled ? CANCELLED_LINE : completionLine(ok, hit.status)
   return { text: hit.replaceWith(line), line, ok, status: hit.status }
 }
 

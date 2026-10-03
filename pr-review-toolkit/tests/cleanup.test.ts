@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
-import { cancellable, cancelRun, cleanupPlan, CANCELLED, INTERRUPTED, launched, POSTING_REFUSAL, recoverPosting } from '../hooks/lib/cleanup'
+import { cancellable, cancelRun, cleanupPlan, CANCELLED, INTERRUPTED, interruptedSynthesis, launched, POSTING_REFUSAL, recoverPosting } from '../hooks/lib/cleanup'
 import { claimNotice, finishable, rewriteNotice } from '../hooks/lib/completion'
 import { inFlightError, launchGate } from '../hooks/lib/launch'
 import type { Phase, RunState } from '../hooks/lib/types'
@@ -92,8 +92,9 @@ test('the cancel control is offered in progress, on the board, drafting and prev
 test('a cancelled run still recognises its late notice, but never claims it, and can be replaced', () => {
   const cancelled = cancelRun(run({ synthesizing: true })).run
   const text = '<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n</task-notification>'
-  // The notice is rewritten (no workflow result reaches the transcript) ...
-  expect(rewriteNotice(text, cancelled)?.ok).toBe(true)
+  // The notice is rewritten (no workflow result reaches the transcript), to a cancelled
+  // line, not to "the board is opening" ...
+  expect(rewriteNotice(text, cancelled)).toMatchObject({ ok: false, status: 'completed', text: 'Review cancelled — see the review pane (/review-board).' })
   // ... but it does not advance the run.
   expect(claimNotice(cancelled, 't1', true, 'completed')).toEqual({ run: cancelled, claimed: false })
   // prepare_review may replace it; the same preparation cannot launch again.
@@ -105,7 +106,7 @@ test('a preparation cancelled before it launched cannot launch afterwards', () =
   expect('deny' in launchGate(prepared, { pr: 'o/r#1' }, HEAD, 1)).toBe(false)
   const cancelled = cancelRun(prepared).run
   const gate = launchGate(cancelled, { pr: 'o/r#1' }, HEAD, 1)
-  expect('deny' in gate && gate.deny).toMatch(/cancelled.*prepare_review/)
+  expect('deny' in gate && gate.deny).toMatch(/^The person cancelled this review in the review pane\. Stop; do not prepare or launch it again unless they ask\.$/)
 })
 
 // ---- the launch returning after a cancel ----
@@ -113,9 +114,10 @@ test('a preparation cancelled before it launched cannot launch afterwards', () =
 test('the workflow launch stores its taskId on the run holding its nonce', () => {
   const launching = run({ taskId: undefined })
   expect(launched(launching, 'r1', 'w9')).toEqual({ run: { ...launching, taskId: 'w9' }, stop: false })
-  // Another run, or none: untouched.
-  expect(launched(launching, 'r2', 'w9')).toEqual({ run: launching, stop: false })
-  expect(launched(null, 'r1', 'w9')).toEqual({ run: null, stop: false })
+  // A launch whose run is gone is never wanted: another run replaced it (prepare_review),
+  // or the session ended meanwhile. The run, if any, is left as it is; the workflow stops.
+  expect(launched(launching, 'r2', 'w9')).toEqual({ run: launching, stop: true })
+  expect(launched(null, 'r1', 'w9')).toEqual({ run: null, stop: true })
 })
 
 test('a launch that returns after a cancel keeps the cancelled phase and gets its workflow stopped', () => {
@@ -135,6 +137,16 @@ test('a run found posting after a reload ends as done with a warning, never a po
   expect(out?.posted).toEqual(['F1'])
 })
 
+test('a reload mid-synthesis names the run to finish: in progress, synthesizing, launched', () => {
+  expect(interruptedSynthesis(run({ synthesizing: true }))).toBe('t1')
+  expect(interruptedSynthesis(run())).toBe(null)
+  expect(interruptedSynthesis(run({ synthesizing: true, taskId: undefined }))).toBe(null)
+  for (const phase of PHASES.filter((p) => p !== 'progress')) expect(interruptedSynthesis(run({ phase, synthesizing: true }))).toBe(null)
+  // A cancelled run cleared the flag, so it is not driven again.
+  expect(interruptedSynthesis(cancelRun(run({ synthesizing: true })).run)).toBe(null)
+  expect(interruptedSynthesis(null)).toBe(null)
+})
+
 test('a reload leaves every other phase, and no run, as it was', () => {
   for (const phase of PHASES.filter((p) => p !== 'posting')) {
     const r = run({ phase })
@@ -147,6 +159,7 @@ test('a reload leaves every other phase, and no run, as it was', () => {
 
 const WORKFLOW = 'pr-review-toolkit:review-pr-analysis'
 const END = { sessionId: 's1', resume: { id: 's1' } }
+const START = { cwd: '/w', surface: 'terminal' as const, isInteractive: true }
 
 const finding = (title: string, severity: string, confidence: number, path: string, line: number) =>
   ({ location: { path, line }, severity, confidence, title, claim: 'claim ' + title, evidence: 'evidence ' + title, whyItMatters: 'why ' + title })
@@ -271,7 +284,7 @@ test('cancel in progress stops the workflow, marks the run cancelled, and turns 
   // A completion notice that was already on its way is rewritten, and changes nothing:
   // the run stays cancelled and no board opens.
   const notice = await $.prompt.submit(NOTICE())
-  expect(notice.text).toBe('Review complete — the board is opening in the review pane (/review-board).')
+  expect(notice.text).toBe('Review cancelled — see the review pane (/review-board).')
   await clock.settle()
   expect(await ui.find({ type: 'Text', text: '⚠ Review cancelled.' })).toBeDefined()
   expect(w.opened).toEqual([{ id: 'pr-review', title: 'PR review' }])
@@ -296,7 +309,7 @@ test('cancel before the workflow launched fails the run with nothing to stop, an
   expect(seen.stopped).toEqual([])
   expect(await ui.find({ type: 'Text', text: '⚠ Review cancelled.' })).toBeDefined()
   const out = await $.tool.call({ tool: 'Workflow', name: WORKFLOW, args: { pr: 'o/r#1' } } as Parameters<typeof $.tool.call>[0])
-  expect(out.deny).toBe('This preparation was cancelled; run prepare_review again.')
+  expect(out.deny).toBe('The person cancelled this review in the review pane. Stop; do not prepare or launch it again unless they ask.')
   expect(seen.nonce).toBe('')
   await ui.unmount()
 })
@@ -325,7 +338,7 @@ test('a cancel pressed while the workflow is launching is not undone by the laun
   expect(await ui.find({ type: 'Text', text: '⚠ Review cancelled.' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Running / })).toBeUndefined()
   // Its notice, should one come, is still the plugin's to rewrite.
-  expect((await $.prompt.submit(NOTICE('killed'))).text).toBe('Review failed: killed — see the review pane.')
+  expect((await $.prompt.submit(NOTICE('killed'))).text).toBe('Review cancelled — see the review pane (/review-board).')
   await ui.unmount()
 })
 
@@ -354,6 +367,78 @@ test('cancel while the board is being built drops the board', async ($, on) => {
   await ui.unmount()
 })
 
+test('a reload mid-synthesis starts the synthesis again, and the board still opens once', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  const model: { current?: Promise<unknown>; calls?: number } = {}
+  const w = world(on, { holdModel: model })
+  const seen = review(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await launch($)
+  await deposit($, seen.nonce)
+  // The synthesis the notice starts never answers: the environment it ran in is gone.
+  model.current = new Promise<never>(() => {})
+  const asked = model.calls ?? 0
+  await $.prompt.submit(NOTICE())
+  for (let i = 0; i < 100 && (model.calls ?? 0) === asked; i++) await ui.find({ key: 'nothing' })
+  expect(model.calls).toBeGreaterThan(asked)
+  expect(await ui.find({ type: 'Text', text: /^Synthesizing…/ })).toBeDefined()
+
+  // The reload runs session.start; the model answers for the second synthesis.
+  model.current = undefined
+  await $.session.start(START)
+  await clock.settle()
+  expect(await ui.find({ type: 'Text', text: /^Recommended to post \(2\) / })).toBeDefined()
+  expect(w.opened).toEqual([{ id: 'pr-review', title: 'PR review' }, { id: 'pr-review', title: 'PR review' }])
+  await ui.unmount()
+})
+
+test('a session.start that finds a cancelled run does not synthesize it', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  const model: { current?: Promise<unknown>; calls?: number } = {}
+  world(on, { holdModel: model })
+  const seen = review(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await launch($)
+  await deposit($, seen.nonce)
+  model.current = new Promise<never>(() => {})
+  const asked = model.calls ?? 0
+  await $.prompt.submit(NOTICE())
+  for (let i = 0; i < 100 && (model.calls ?? 0) === asked; i++) await ui.find({ key: 'nothing' })
+  await ui.press({ key: 'cancel' })
+  const before = model.calls
+  await $.session.start(START)
+  await clock.settle()
+  expect(model.calls).toBe(before)
+  expect(await ui.find({ type: 'Text', text: '⚠ Review cancelled.' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a session that ends while the workflow is launching leaves no workflow running', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  world(on)
+  const stopped: string[] = []
+  let ended = null as (() => Promise<unknown>) | null
+  on('tool.call', { tool: 'Workflow' }, async () => {
+    await ended?.()
+    return { result: { taskId: 'w1' } }
+  })
+  on('tool.call', { tool: 'TaskStop' }, async (_$, e) => {
+    const id = String((e as { task_id?: unknown }).task_id)
+    stopped.push(id)
+    return { result: { message: 'Stopped', task_id: id, task_type: 'local_workflow' } }
+  })
+  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
+  ended = () => $.session.end({ reason: 'clear', ...END })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  await $.tool.call({ tool: 'Workflow', name: WORKFLOW, args: { pr: 'o/r#1' } } as Parameters<typeof $.tool.call>[0])
+  await clock.settle()
+  // The run was dropped by the end; the workflow that started afterwards is stopped.
+  expect(stopped).toEqual(['w1'])
+  expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeDefined()
+  await ui.unmount()
+})
+
 // A board with two recommended findings, drafted and previewed, the GitHub writes held
 // (release() lets them through): Post pressed once, so the run is posting.
 async function posting($: Kit, on: On, release: { go?: () => void }, extra: (on: On) => void = () => {}) {
@@ -378,7 +463,6 @@ async function posting($: Kit, on: On, release: { go?: () => void }, extra: (on:
   expect(await ui.find({ type: 'Text', text: 'Posting to o/r#1…' })).toBeDefined()
   return { ui, w, seen, clock }
 }
-const START = { cwd: '/w', surface: 'terminal' as const, isInteractive: true }
 
 test('a reload during a post ends the run as interrupted, and the late outcome cannot reopen it', async ($, on) => {
   const release: { go?: () => void } = {}

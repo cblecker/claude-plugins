@@ -49,8 +49,9 @@ export type World = {
 // `placed: false` answers every pane open as a narrow terminal does: open, not drawn.
 // `hold`: a promise every review write waits for before it is answered (a post that is
 // still in flight until the test lets it go); `holdModel`: the same for every model call
-// made while its `current` is set (a synthesis that is still being built).
-export function world(on: On, opts: { placed?: boolean; hold?: Promise<unknown>; holdModel?: { current?: Promise<unknown> } } = {}): World {
+// made while its `current` is set (a synthesis that is still being built); `calls` counts
+// the model calls made.
+export function world(on: On, opts: { placed?: boolean; hold?: Promise<unknown>; holdModel?: { current?: Promise<unknown>; calls?: number } } = {}): World {
   const w: World = { opened: [], writes: [], prompts: [], logged: [], toasts: [] }
   on('process.run', async (_$, e) => {
     const line = e.argv.slice(1).join(' ')
@@ -64,7 +65,7 @@ export function world(on: On, opts: { placed?: boolean; hold?: Promise<unknown>;
     if (WRITES.includes(key)) { w.writes.push({ key, args: e.args }); await opts.hold }
     return { value: { content: [{ type: 'text' as const, text: JSON.stringify(GITHUB[key]) }], isError: false } }
   })
-  on('model.complete', async () => (await opts.holdModel?.current, { value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }))
+  on('model.complete', async () => (opts.holdModel && (opts.holdModel.calls = (opts.holdModel.calls ?? 0) + 1), await opts.holdModel?.current, { value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }))
   on('ui.open', async (_$, e) => {
     w.opened.push(e)
     return { value: opts.placed === false ? { isPlaced: false as const, reason: 'the terminal is 100 columns wide; an unasked pane needs 144' } : { isPlaced: true as const } }
