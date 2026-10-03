@@ -168,7 +168,8 @@ the checkout path, the pinned `merge_base`, the lens list with each lens's
 effort, the follow-up context, and a run nonce. The hook launches only from a
 fresh preparation and denies, with the reason, when the preparation was already
 used, a run is in flight, `HEAD` moved since it was prepared, or you cancelled
-it. No bulk data rides `args`: agents gather their own diff context from the
+it; it also denies a call that names a `script`, `scriptPath` or
+`resumeFromRunId` beside the workflow name. No bulk data rides `args`: agents gather their own diff context from the
 checkout. The workflow:
 
 - fans out the selected specialists in parallel; each reads the checkout
@@ -197,7 +198,8 @@ taking the keyboard, when the board is ready.
 
 The skill never launches the script by path: a `scriptPath` launch carries no
 workflow name, so the launch hook would not match it and the args would never
-be injected. The workflow's registered name is deliberately distinct from the
+be injected; a call that names both is denied, since `scriptPath` would win
+over the name and take the injected args to another script. The workflow's registered name is deliberately distinct from the
 skill's: named workflows surface as slash commands under
 `<plugin>:<workflow-name>`, and a workflow named `review-pr` would shadow the
 skill's `/pr-review-toolkit:review-pr` entry, dispatching bare workflow
