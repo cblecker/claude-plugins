@@ -142,6 +142,14 @@ test('refuses while a launched run is in progress, without touching git or GitHu
   expect(w.tools.length).toBe(0)
 })
 
+test('refuses while a review is being posted, without touching git or GitHub', async () => {
+  const w = world()
+  const existing: RunState = { ...(await prepared()), run: 'rx', taskId: 't1', phase: 'posting' }
+  expect(await failure(w, existing)).toBe('The review of o/r#1 is being posted; wait for posting to finish.')
+  expect(w.runs.length).toBe(0)
+  expect(w.tools.length).toBe(0)
+})
+
 test('replaces a finished run or one that was prepared but never launched', async () => {
   const before = await prepared()
   expect((await prepared({}, { ...before, run: 'rx', taskId: 't1', phase: 'board' })).phase).toBe('progress')

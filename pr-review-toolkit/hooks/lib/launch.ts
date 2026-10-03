@@ -15,8 +15,10 @@ export type LaunchArgs = {
 }
 export type LaunchGate = { deny: string } | { args: LaunchArgs; nonce: string }
 
-// A launched run whose workflow has not finished: it must not be replaced or relaunched.
+// A launched run whose workflow has not finished, or a review being posted: it must
+// not be replaced or relaunched.
 export function inFlightError(run: RunState | null): string | null {
+  if (run?.phase === 'posting') return `The review of ${run.handle} is being posted; wait for posting to finish.`
   return run && run.taskId && run.phase === 'progress'
     ? `A review run is already in progress for ${run.handle}; cancel it in the review pane first.`
     : null

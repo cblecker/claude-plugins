@@ -44,10 +44,10 @@ An overlap without a `commentId` has no reply target. Draft the finding as a
 
 ### Follow-up replies
 
-Draft one reply per selected follow-up item on that item's thread, using its
-`commentId`. State plainly what is still open as of the reviewed head, in one
-or two sentences, drawing on the item's `evidence`; for a `partial` item say
-what was addressed and what remains. Do not restate the original request. A
+Draft one reply per selected follow-up item, unless merged (below), on that
+item's thread, using its `commentId`. State plainly what is still open as of
+the reviewed head, in one or two sentences, drawing on the item's `evidence`;
+for a `partial` item say what was addressed and what remains. Do not restate the original request. A
 follow-up item without a `commentId` (an ask from a review summary) has no
 reply target: draft it as a `body` comment, naming the thread's `path` and
 `line` when the item has them.
@@ -61,7 +61,9 @@ replies that repeat each other: set its `id` to the finding's id and its
 earlier request stands, then adds only what is new. It is a `reply` with the
 thread's `commentId`; when the thread has no `commentId`, it is a `body` draft
 with the same `alsoCovers`, naming the thread's path and line. Never list an id
-as a draft's `id` and also in `alsoCovers`, and never in two drafts.
+as a draft's `id` and also in `alsoCovers`, and never in two drafts. When several
+selected findings name the same follow-up item, only one of their drafts carries
+it in `alsoCovers`; draft the other findings on their own.
 
 ### Line comments vs review body
 
@@ -93,5 +95,7 @@ one draft per merged pair, as its `drafts` array:
 - `alsoCovers`: ids of other selected items the same comment speaks for, on
   `reply` and `body` drafts only (see "One comment for one thread")
 
-If the tool answers `rejected`, fix exactly what it names and call it again. To
-reword drafts when the user asks, call it again with the full set of drafts.
+If the tool answers `rejected` and names errors in the drafts, fix exactly what
+it names and call it again. If it says not to call it again, stop: no drafts are
+being collected. To reword drafts when the user asks, call it again with the full
+set of drafts.

@@ -17,6 +17,22 @@ export type Deposit = { findings: Finding[]; positiveObservations: string[] }
 // reply and body drafts only. Every selected id is covered exactly once, as an id or in alsoCovers.
 export type Draft = { id: string; kind: 'line' | 'reply' | 'body'; path?: string; line?: number; commentId?: number; body: string; alsoCovers?: string[] }
 export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE'
+// The posting plan, fixed when drafts are accepted: the preview shows it and posting sends
+// exactly it. Each entry posts for `covers` (its draft's id, then the draft's alsoCovers).
+// A reply's thread fields come from the board item it targets; isResolved absent = unknown.
+export type PlannedReply = { id: string; covers: string[]; commentId: number; body: string; threadPath?: string; threadLine?: number; isResolved?: boolean }
+export type PlannedLineComment = { id: string; covers: string[]; path: string; line: number; body: string }
+// A line draft posted in the review body instead: its line is outside the PR diff, or the
+// diff could not be read, so the anchor is unknown.
+export type MovedDraft = { id: string; path: string; line: number; reason: 'outside-diff' | 'diff-unavailable' }
+// headSha/mergeBase: the range the anchors were checked against. body: the review body as it
+// posts (body drafts and moved line drafts, in draft order); bodyCovers: the ids it posts for.
+// alreadyPosted: ids whose drafts were left out because they had posted already.
+export type PostingPlan = {
+  headSha: string; mergeBase: string
+  replies: PlannedReply[]; lineComments: PlannedLineComment[]
+  body: string; bodyCovers: string[]; moved: MovedDraft[]; alreadyPosted: string[]
+}
 export type Phase = 'progress' | 'board' | 'drafting' | 'preview' | 'posting' | 'done' | 'failed'
 // The PR's shape: counts from git, notable areas from the lens selector.
 export type ChangeSummary = { scale: string; changedFileCount?: number; additions?: number; deletions?: number; notableAreas: string[]; shapeUnavailable: boolean }
@@ -67,6 +83,8 @@ export type RunState = {
   synthesizing?: boolean; failedLenses?: string[]; verifierFailed?: boolean
   deposits: Record<string, Deposit>; verdicts: Verdict[] | null
   board?: Board; selected: string[]; drafts: Draft[]; event: ReviewEvent | null; posted: string[]
+  // plan: what posts, fixed with the drafts. error in 'preview' or 'done': the last post's failure.
+  plan?: PostingPlan
 }
 
 declare module 'claude-code' {

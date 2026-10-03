@@ -90,3 +90,11 @@ test('inFlightError: only a launched run still in progress is in flight', () => 
   expect(inFlightError({ ...run, run: 'rx', taskId: 't1', phase: 'board' })).toBe(null)
   expect(inFlightError({ ...run, run: 'rx', taskId: 't1' })).toBe('A review run is already in progress for o/r#1; cancel it in the review pane first.')
 })
+
+test('inFlightError: a review being posted is in flight too', () => {
+  const posting = 'The review of o/r#1 is being posted; wait for posting to finish.'
+  expect(inFlightError({ ...run, run: 'rx', taskId: 't1', phase: 'posting' })).toBe(posting)
+  expect(inFlightError({ ...run, phase: 'posting' })).toBe(posting)
+  expect(denial(launchGate({ ...run, run: 'rx', taskId: 't1', phase: 'posting' }, { pr: 'o/r#1' }, 'abc1234', 1))).toBe(posting)
+  for (const phase of ['preview', 'done'] as const) expect(inFlightError({ ...run, run: 'rx', taskId: 't1', phase })).toBe(null)
+})

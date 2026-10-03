@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import { acceptDrafts, draftPrompt, validateDrafts } from '../hooks/lib/drafting'
+import { acceptDrafts, cleanDrafts, draftPrompt, draftsRejection, validateDrafts } from '../hooks/lib/drafting'
+import type { PostingPlan } from '../hooks/lib/types'
 
 const PATH = '/plugins/pr-review-toolkit/skills/review-pr/references/drafting.md'
 
@@ -10,7 +11,9 @@ const board: any = {
   alreadyCovered: [], discarded: [],
   followUp: { items: [{ id: 'P2', commentId: 7, ask: 'x', status: 'partial', evidence: 'e' }] },
 }
-const run: any = { selected: ['F1', 'P2'], phase: 'drafting', board, drafts: [] }
+const run: any = { selected: ['F1', 'P2'], phase: 'drafting', board, drafts: [], pr: { headSha: 'abc1234' }, mergeBase: 'def5678' }
+const NO_RETRY = 'Do not call set_drafts again unless the user asks for drafts.'
+const plan: PostingPlan = { headSha: 'abc1234', mergeBase: 'def5678', replies: [], lineComments: [], body: 'x', bodyCovers: ['F1'], moved: [], alreadyPosted: [] }
 
 const line = { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: 'b' }
 const reply = { id: 'P2', kind: 'reply', commentId: 7, body: 'r' }
@@ -68,13 +71,27 @@ test('alsoCovers names only selected ids, in an array of strings, on reply or bo
 })
 
 test('a reply targets a thread one of the items it covers is on', () => {
-  expect(validateDrafts(run, [line, { ...reply, commentId: 9 }])).toContain('P2: reply commentId 9 is not the reply target of the items it covers')
+  expect(validateDrafts(run, [line, { ...reply, commentId: 9 }])).toContain('P2: reply commentId 9 is not the reply target of the items it covers (comment 7)')
   // The finding's overlap thread and the follow-up item's thread are the same thread.
   expect(validateDrafts(run, [{ id: 'F1', kind: 'reply', commentId: 7, body: 'b', alsoCovers: ['P2'] }])).toEqual([])
   // A finding with no overlap has no thread to reply on.
   const withF3 = { ...run, selected: ['F3'] }
   expect(validateDrafts(withF3, [{ id: 'F3', kind: 'reply', commentId: 7, body: 'b' }])).toContain('F3: the items it covers have no reply target; use a line or body draft')
   expect(validateDrafts(withF3, [{ id: 'F3', kind: 'body', body: 'b' }])).toEqual([])
+})
+
+test('a merged reply must land on the thread of every item it covers that has one', () => {
+  // F1 overlaps thread 7 and F5 thread 8: one reply cannot speak for both.
+  const twoThreads = {
+    ...run, selected: ['F1', 'F5'],
+    board: { ...board, recommendedToPost: [...board.recommendedToPost, { id: 'F5', title: 'v', severity: 'important', confidence: 80, existingReviewOverlap: { status: 'overlaps', commentId: 8 } }] },
+  }
+  for (const commentId of [7, 8]) {
+    expect(validateDrafts(twoThreads, [{ id: 'F1', kind: 'reply', commentId, body: 'b', alsoCovers: ['F5'] }])).toContain('F1: the items it covers are on different threads (F1: comment 7, F5: comment 8); write one reply per thread')
+  }
+  // An item with no thread of its own may ride along on the reply.
+  const withF3 = { ...run, selected: ['F1', 'F3'] }
+  expect(validateDrafts(withF3, [{ id: 'F1', kind: 'reply', commentId: 7, body: 'b', alsoCovers: ['F3'] }])).toEqual([])
 })
 
 test('the prompt carries selected items and points at drafting.md by the given path', () => {
@@ -85,6 +102,7 @@ test('the prompt carries selected items and points at drafting.md by the given p
   expect(p).toContain('mcp__pr-review-toolkit__set_drafts')
   expect(p).toContain('untrusted')
   expect(p).toContain('F1, P2')
+  expect(p).toContain('if it says not to call it again, stop')
 })
 
 test('the prompt carries only the selected items, whichever section they sit in', () => {
@@ -118,20 +136,43 @@ test('set_drafts is accepted while drafts are being collected and moves the run 
   }
 })
 
+test('accepting stores the posting plan and clears a stale plan and posting error', () => {
+  const out = acceptDrafts({ ...run, phase: 'preview', error: 'old post error' }, [line, reply], plan)
+  expect(out.run!.plan).toBe(plan)
+  expect('error' in out.run!).toBe(false)
+  const noPlan = acceptDrafts({ ...run, phase: 'preview', plan }, [line, reply])
+  expect('plan' in noPlan.run!).toBe(false)
+})
+
+test('a plan checked against another head or range is refused', () => {
+  const r = { ...run, pr: { headSha: 'fff9999' } }
+  const out = acceptDrafts(r, [line, reply], plan)
+  expect(out.answer).toBe('rejected: the review changed while the drafts were being checked. Call set_drafts again.')
+  expect(out.run).toBe(r)
+  expect(acceptDrafts({ ...run, mergeBase: '0000000' }, [line, reply], plan).answer).toMatch(/^rejected: the review changed/)
+})
+
+test('draftsRejection: the refusal acceptDrafts would give, or null', () => {
+  expect(draftsRejection(run, [line, reply])).toBe(null)
+  expect(draftsRejection(null, [line, reply])).toBe('rejected: no review board is open. ' + NO_RETRY)
+  expect(draftsRejection({ ...run, phase: 'done' }, [line, reply])).toBe('rejected: no drafts are being collected right now. ' + NO_RETRY)
+  expect(draftsRejection(run, [line])).toBe('rejected: missing drafts for: P2. Call set_drafts again.')
+})
+
 test('set_drafts is refused in any other phase, leaving the run as it was', () => {
   for (const phase of ['progress', 'board', 'posting', 'done', 'failed']) {
     const r = { ...run, phase, drafts: [{ id: 'old' }] }
     const out = acceptDrafts(r, [line, reply])
-    expect(out.answer).toBe('rejected: no drafts are being collected right now')
+    expect(out.answer).toBe('rejected: no drafts are being collected right now. ' + NO_RETRY)
     expect(out.run).toBe(r)
   }
 })
 
 test('set_drafts without a review board is refused', () => {
-  expect(acceptDrafts(null, [line, reply])).toEqual({ answer: 'rejected: no review board is open', run: null })
+  expect(acceptDrafts(null, [line, reply])).toEqual({ answer: 'rejected: no review board is open. ' + NO_RETRY, run: null })
   const noBoard = { ...run, board: undefined }
   const out = acceptDrafts(noBoard, [line, reply])
-  expect(out.answer).toBe('rejected: no review board is open')
+  expect(out.answer).toBe('rejected: no review board is open. ' + NO_RETRY)
   expect(out.run).toBe(noBoard)
 })
 
@@ -155,6 +196,18 @@ test('accepted drafts keep only their known fields', () => {
   expect(out.run!.drafts).toEqual([line, reply])
   const merged = acceptDrafts(run, [{ id: 'F1', kind: 'reply', commentId: 7, body: 'b', alsoCovers: ['P2'] }])
   expect(merged.run!.drafts).toEqual([{ id: 'F1', kind: 'reply', commentId: 7, body: 'b', alsoCovers: ['P2'] }])
+})
+
+test('stored drafts keep path and line only on line drafts, commentId only on replies', () => {
+  expect(cleanDrafts([
+    { id: 'F1', kind: 'line', path: 'a.go', line: 3, commentId: 7, body: 'b' },
+    { id: 'P2', kind: 'reply', commentId: 7, path: 'a.go', line: 3, body: 'r' },
+    { id: 'F3', kind: 'body', path: 'b.go', line: 4, commentId: 7, body: 'x' },
+  ])).toEqual([
+    { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: 'b' },
+    { id: 'P2', kind: 'reply', commentId: 7, body: 'r' },
+    { id: 'F3', kind: 'body', body: 'x' },
+  ])
 })
 
 test('accepting leaves the given run untouched', () => {
