@@ -7,6 +7,8 @@ import { claimNotice, failSynthesis, finishable, rewriteNotice, withOutcome } fr
 import { shouldAutoAllow } from './lib/bash-guard'
 import { git } from './lib/git'
 import { prepareReview } from './lib/prepare'
+import { synthesize } from './lib/synthesis'
+import { buildBoard } from './lib/board'
 import { inFlightError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
 
@@ -40,11 +42,19 @@ function withoutNonce(r: RunState): RunState {
   return rest
 }
 
-// Task 11 replaces this stub with synthesis and the board. It runs detached once a
-// completed notice has claimed the run (`synthesizing`), and sets the board last. It
-// writes only onto the run it was started for (R36): keep the `finishable` guard.
+// Synthesis and the board, run detached once a completed notice has claimed the run
+// (`synthesizing`). The run is read once: its deposits, threads, follow-up and verdicts
+// are final when the workflow has completed. Synthesis can take minutes, so the board
+// is written only onto the run it was started for, still synthesizing (a cancel clears
+// that flag, a newer run has another taskId). A throw reaches failRun.
 async function finishRun($: EngineInterface, taskId: string) {
-  await setRun($, (r) => (finishable(r, taskId) ? { ...withOutcome(r), phase: 'board', synthesizing: false } : r))
+  const claimed = await getRun($)
+  if (!finishable(claimed, taskId)) return
+  const run = withOutcome(claimed)
+  const board = buildBoard(run, await synthesize(makeIo($), run))
+  await setRun($, (r) => (finishable(r, taskId)
+    ? { ...r, failedLenses: run.failedLenses, verifierFailed: run.verifierFailed, board, phase: 'board', synthesizing: false }
+    : r))
 }
 
 async function failRun($: EngineInterface, taskId: string, err: unknown) {
