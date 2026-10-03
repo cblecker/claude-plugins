@@ -153,8 +153,8 @@ const finding = (title: string, severity: string, confidence: number, path: stri
 const NOTICE = (status = 'completed') => ({ text: `<task-notification>\n<task-id>w1</task-id>\n<status>${status}</status>\n</task-notification>`, origin: { kind: 'task-notification' as const }, wait: false })
 
 // The workflow launches with task id w1 and records the nonce it was given; TaskStop is
-// recorded by task id.
-function review(on: On) {
+// recorded by task id (and, given `hold`, not answered until it settles).
+function review(on: On, hold?: Promise<unknown>) {
   const seen = { nonce: '', stopped: [] as string[] }
   on('tool.call', { tool: 'Workflow' }, async (_$, e) => {
     seen.nonce = String((e as { args?: { run?: unknown } }).args?.run ?? '')
@@ -163,6 +163,7 @@ function review(on: On) {
   on('tool.call', { tool: 'TaskStop' }, async (_$, e) => {
     const id = String((e as { task_id?: unknown }).task_id)
     seen.stopped.push(id)
+    await hold
     return { result: { message: 'Stopped', task_id: id, task_type: 'local_workflow' } }
   })
   // What the engine does beneath the plugin as a session ends or (re)starts.
@@ -202,6 +203,23 @@ test('session.end stops the running workflow without waiting for it, resets the 
 const deposit = ($: Kit, nonce: string) => $.tool.call({ tool: 'mcp__pr-review-toolkit__submit_findings', run: nonce, lens: 'code-reviewer',
   findings: [finding('Parser drops the last token', 'critical', 95, 'a.go', 3), finding('Error is swallowed', 'important', 90, 'b.go', 5)],
   positiveObservations: [] } as Parameters<typeof $.tool.call>[0])
+
+test('session.end does not wait for TaskStop to answer', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  world(on)
+  let answer!: () => void
+  const seen = review(on, new Promise<void>((resolve) => { answer = resolve }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await launch($)
+
+  // TaskStop is asked for and still unanswered when the end resolves, run already reset.
+  expect(await $.session.end({ reason: 'clear', ...END })).toEqual({ sessionId: 's1' })
+  expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeDefined()
+  expect(seen.stopped).toEqual(['w1'])
+  answer()
+  await clock.settle()
+  await ui.unmount()
+})
 
 test('session.end on a board stops nothing, and still resets the run', async ($, on) => {
   const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
