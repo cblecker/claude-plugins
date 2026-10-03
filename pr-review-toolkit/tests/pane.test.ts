@@ -321,6 +321,17 @@ test('posting, done and failed views', () => {
   expect(failed).toContain('/pr-review-toolkit:review-pr')
 })
 
+test('the posting view says what to do if posting seems stuck', () => {
+  expect(textOf(onPreview({ phase: 'posting' }))).toContain('If posting seems stuck, check the PR on GitHub; /clear resets the review.')
+})
+
+test('a failed or cancelled run lists what had already posted', () => {
+  const cancelled = textOf(onPreview({ phase: 'failed', error: 'Cancelled', posted: ['P1', 'F1'] }))
+  expect(cancelled).toContain('⚠ Review cancelled.')
+  expect(cancelled).toContain('Already posted to o/r#1: P1, F1.')
+  expect(textOf(base({ phase: 'failed', error: 'Workflow failed' }))).not.toContain('Already posted')
+})
+
 test('a cancelled run says it was cancelled, not that it failed', () => {
   const cancelled = textOf(base({ phase: 'failed', error: 'Cancelled', taskId: 'w1', run: 'r1' }))
   expect(cancelled).toContain('⚠ Review cancelled.')

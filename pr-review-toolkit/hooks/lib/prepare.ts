@@ -46,7 +46,7 @@ export async function prepareReview(io: Io, existing: RunState | null): Promise<
   try {
     env = await readEnvironment(io)
   } catch (e) {
-    return { error: `Could not read the checkout: ${message(e)}. Run /review-pr from a git checkout of the PR head whose origin is on github.com.` }
+    return { error: `Could not read the checkout: ${message(e)}. Run /pr-review-toolkit:review-pr from a git checkout of the PR head whose origin is on github.com.` }
   }
   const ref = await resolvePr(io, env)
   if ('error' in ref) return { error: ref.error }
@@ -61,7 +61,7 @@ export async function prepareReview(io: Io, existing: RunState | null): Promise<
     return { error: `Could not read ${handle} from GitHub: ${message(e)}` }
   }
   if (pr.headSha !== env.head) {
-    return { error: `The checkout is at ${env.head}, but the head of ${handle} is ${pr.headSha || 'unknown'}. Unpushed local commits need a push first; if the PR has new commits, fetch them and check out its new head, then run /review-pr again.` }
+    return { error: `The checkout is at ${env.head}, but the head of ${handle} is ${pr.headSha || 'unknown'}. Unpushed local commits need a push first; if the PR has new commits, fetch them and check out its new head, then run /pr-review-toolkit:review-pr again.` }
   }
   if (pr.state.toLowerCase() !== 'open') return { error: `${handle} is ${pr.state || 'not open'}; only an open PR can be reviewed.` }
   // A fork clone points at the fork and would pin the wrong merge base. The PR is read
@@ -69,7 +69,7 @@ export async function prepareReview(io: Io, existing: RunState | null): Promise<
   // repository that GitHub redirected; the fix is the same.
   const originRepo = `${ref.owner}/${ref.repo}`
   if (pr.baseRepo && pr.baseRepo.toLowerCase() !== originRepo.toLowerCase()) {
-    return { error: `origin points at ${originRepo}, but the base repository of ${handle} is ${pr.baseRepo}. A fork clone, or a repository that was renamed or transferred, does this. Point origin at ${pr.baseRepo} (git remote set-url origin <its URL>) and run /review-pr again.` }
+    return { error: `origin points at ${originRepo}, but the base repository of ${handle} is ${pr.baseRepo}. A fork clone, or a repository that was renamed or transferred, does this. Point origin at ${pr.baseRepo} (git remote set-url origin <its URL>) and run /pr-review-toolkit:review-pr again.` }
   }
 
   let pinned: PinnedRange

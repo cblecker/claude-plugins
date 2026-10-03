@@ -210,13 +210,21 @@ test('collectThreads fails on a tool error, a throw, unparsable text, or the wro
   for (const mcp of cases) expect(await collectThreads(ioWith({ mcp }), ref)).toEqual({ threads: [], failed: true })
 })
 
-test('collectThreads fails when a later page breaks', async () => {
-  const io = ioWith({
-    mcp: async (_tool, args) => args.after
-      ? { isError: true, content: [{ type: 'text', text: 'boom' }] }
-      : textResult({ review_threads: [thread('T1', 1)], pageInfo: pageInfo(true, 'C1') }),
-  })
-  expect((await collectThreads(io, ref)).failed).toBe(true)
+test('collectThreads fails when a later page breaks, keeping the pages already read (R19)', async () => {
+  const later: Array<() => Promise<McpResult>> = [
+    async () => ({ isError: true, content: [{ type: 'text', text: 'boom' }] }),
+    async () => { throw new Error('boom') },
+    async () => textResult('not json'),
+    async () => textResult({ threads: [thread('T2', 2)], pageInfo: pageInfo(false) }),
+  ]
+  for (const page2 of later) {
+    const io = ioWith({
+      mcp: async (_tool, args) => args.after ? page2() : textResult({ review_threads: [thread('T1', 1)], pageInfo: pageInfo(true, 'C1') }),
+    })
+    const out = await collectThreads(io, ref)
+    expect(out.failed).toBe(true)
+    expect(out.threads.map((t) => t.id)).toEqual(['T1'])
+  }
 })
 
 test('collectThreads fails instead of looping when the cursor is missing or stuck', async () => {

@@ -160,7 +160,9 @@ test('replaces a finished run or one that was prepared but never launched', asyn
 
 test('a checkout git cannot read is an error naming git\'s complaint', async () => {
   const w = world({ git: { 'rev-parse HEAD': fail('fatal: not a git repository (or any of the parent directories): .git', 128) } })
-  expect(await failure(w)).toMatch(/not a git repository/)
+  const e = await failure(w)
+  expect(e).toMatch(/not a git repository/)
+  expect(e).toContain('Run /pr-review-toolkit:review-pr from a git checkout of the PR head')
   expect(w.tools.length).toBe(0)
 })
 
@@ -182,6 +184,7 @@ test('a head that differs from the checkout stops with the push or fetch fix', a
   expect(e).toMatch(new RegExp(OLD))
   expect(e).toMatch(/push/)
   expect(e).toMatch(/fetch/)
+  expect(e).toContain('then run /pr-review-toolkit:review-pr again.')
   expect(w.ran('fetch')).toBe(false)
 })
 
@@ -194,6 +197,7 @@ test('an origin that is not the PR\'s base repository stops (R18), compared with
   expect(e).toMatch(/upstream\/r/)
   expect(e).toMatch(/o\/r/)
   expect(e).toMatch(/git remote set-url origin/)
+  expect(e).toContain('and run /pr-review-toolkit:review-pr again.')
   expect((await prepared({ mcp: { 'pull_request_read:get': prJson({ base: { ref: 'main', repo: { full_name: 'O/R' } } }) } })).pr.baseRepo).toBe('O/R')
 })
 

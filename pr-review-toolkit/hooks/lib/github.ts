@@ -149,17 +149,18 @@ export function toThread(raw: any): Thread | null {
 // Every review thread on the PR, following `pageInfo.endCursor` via `after`. A
 // tool error, unparsable result, a page without `review_threads`, or a thread
 // that carries fewer comments than its `total_count` is a failed read; a PR with
-// zero threads is a successful one.
+// zero threads is a successful one. A failed read keeps the threads of the pages
+// already read (R19: dropping them would hide real overlap).
 export async function collectThreads(io: Io, ref: PrRef): Promise<{ threads: Thread[]; failed: boolean }> {
+  const threads: Thread[] = []
   try {
-    const threads: Thread[] = []
     let after: string | undefined
     // A thread whose `total_count` exceeds the comments it carries was cut short:
     // the read goes on, but it is reported as incomplete.
     let truncated = false
     for (let i = 0; i < 50; i++) {
       const page = await mcpJson(io, 'pull_request_read', { method: 'get_review_comments', owner: ref.owner, repo: ref.repo, pullNumber: ref.number, perPage: 100, ...(after ? { after } : {}) })
-      if (!Array.isArray(page?.review_threads)) return { threads: [], failed: true }
+      if (!Array.isArray(page?.review_threads)) return { threads, failed: true }
       for (const t of page.review_threads) {
         const th = toThread(t)
         if (th) threads.push(th)
@@ -172,7 +173,7 @@ export async function collectThreads(io: Io, ref: PrRef): Promise<{ threads: Thr
       after = next
     }
     return { threads, failed: true }
-  } catch { return { threads: [], failed: true } }
+  } catch { return { threads, failed: true } }
 }
 
 // One get_reviews item -> Review (the author is `user.login`, copied verbatim).

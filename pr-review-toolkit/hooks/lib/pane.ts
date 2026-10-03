@@ -491,8 +491,15 @@ function previewView(run: RunState, opts: Required<ViewOptions>): ViewNode {
   ])
 }
 
+// Cancel and prepare are refused while posting (R44), so the way out of a post that
+// never returns is named here.
 function postingView(run: RunState): ViewNode {
-  return column([heading(run), text(`Posting to ${run.handle}…`), dim(tally(run))])
+  return column([
+    heading(run),
+    text(`Posting to ${run.handle}…`),
+    dim(tally(run)),
+    dim('If posting seems stuck, check the PR on GitHub; /clear resets the review.'),
+  ])
 }
 
 function doneView(run: RunState): ViewNode {
@@ -505,10 +512,12 @@ function doneView(run: RunState): ViewNode {
   ])
 }
 
+// A run cancelled after a partial post still has public comments on the PR: name them.
 function failedView(run: RunState): ViewNode {
   return column([
     heading(run),
     warn(run.error === CANCELLED ? 'Review cancelled.' : `Review failed: ${run.error ?? 'unknown error'}`),
+    run.posted.length ? text(`Already posted to ${run.handle}: ${run.posted.join(', ')}.`) : null,
     ...run.warnings.map(warn),
     dim('Run /pr-review-toolkit:review-pr to start a new review.'),
   ])
