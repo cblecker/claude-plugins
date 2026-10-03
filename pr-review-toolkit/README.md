@@ -12,8 +12,8 @@ findings straight back to the mod.
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** The review pane is a Claude Code mod, and
-  no plugin manifest field can state a minimum version, so this is the only
-  place it is recorded.
+  no plugin manifest field can state a minimum version, so it is stated here
+  and in the skill.
 - **Personal machines only.** Managed setups block the mod: managed settings
   that set `allowedMcpServers` refuse its tool registration (`prepare_review`,
   the deposit tools, `set_drafts`), and `allowManagedModsOnly` refuses the

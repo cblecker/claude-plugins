@@ -79,7 +79,8 @@ call in the mod, so it holds no tools by construction.
 Through 2.2 the specialist agent was a *denylist* agent, so read-only MCP
 (gopls and other language servers) stayed usable while the github plugin's
 write surface was hard-denied. 2.3 makes it an allowlist of `Bash`, `Read`,
-`Grep`, and `Glob`, based on transcripts of real runs:
+`Grep`, and `Glob` (3.0 adds the mod's two deposit tools), based on transcripts
+of real runs:
 
 - Behind a custom `ANTHROPIC_BASE_URL` (e.g. a LiteLLM gateway) Claude Code
   turns MCP tool search off, so every inherited MCP schema is sent on every
@@ -370,8 +371,10 @@ lens selection, synthesis, the board, and posting, and a pane replaces the text
 board and the question loop. Claude makes two tool calls (`prepare_review`,
 then `Workflow`) and stops.
 
-**Platform facts the design rests on.** Each was observed on Claude Code
-2.1.287 in a real session, not assumed from the types:
+**Platform facts the design rests on.** Most were observed on Claude Code
+2.1.287 in a design session; the rest (the hook ordering and `agentId`
+availability, the execution limits) come from the mods API types for that
+build:
 
 - A mod cannot start the Workflow tool: `$.tool.call` refuses it. The skill
   therefore stays the entry and Claude launches the workflow. A `tool.call` hook
