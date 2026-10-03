@@ -292,7 +292,7 @@ test('fetchPr maps the observed get shape and strips HTML comments from the body
       return textResult({
         number: 112, title: 'fix: x', body: '<!-- template\nnote -->## Summary\r\n\r\nText <!-- inline --> more\r\n<details>keep</details>', state: 'open',
         mergeable_state: 'clean', user: { login: 'cblecker' },
-        head: { ref: 'fix/x', sha: '70ffdb8c85dc32d63a84662a11d1ed416d2e6b00' }, base: { ref: 'main', sha: '45eee1d' },
+        head: { ref: 'fix/x', sha: '70ffdb8c85dc32d63a84662a11d1ed416d2e6b00' }, base: { ref: 'main', sha: '45eee1d', repo: { full_name: 'cblecker/claude-plugins' } },
       })
     },
   })
@@ -300,9 +300,17 @@ test('fetchPr maps the observed get shape and strips HTML comments from the body
   expect(pr).toEqual({
     owner: 'cblecker', repo: 'claude-plugins', number: 112, title: 'fix: x', body: '## Summary\r\n\r\nText  more\r\n<details>keep</details>',
     author: 'cblecker', state: 'open', baseRef: 'main', headSha: '70ffdb8c85dc32d63a84662a11d1ed416d2e6b00', mergeableState: 'clean',
+    baseRepo: 'cblecker/claude-plugins',
   })
   expect(calls[0]!.tool).toBe('pull_request_read')
   expect(calls[0]!.args).toEqual({ method: 'get', owner: 'cblecker', repo: 'claude-plugins', pullNumber: 112 })
+})
+
+test('fetchPr leaves baseRepo unset when the response does not name the base repository', async () => {
+  const io = ioWith({ mcp: async () => textResult({ title: 't', state: 'open', base: { ref: 'main' }, head: { sha: 'abc' } }) })
+  const pr = await fetchPr(io, ref)
+  expect(pr.baseRepo).toBe(undefined)
+  expect(pr.baseRef).toBe('main')
 })
 
 test('fetchPr throws on a tool error and on an empty result', async () => {

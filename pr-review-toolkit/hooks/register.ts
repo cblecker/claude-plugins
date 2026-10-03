@@ -1,14 +1,43 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, Register } from 'claude-code'
 import type { RunState } from './lib/types'
+import type { Io } from './lib/io'
 import { applyDeposit } from './lib/deposit'
 import { shouldAutoAllow } from './lib/bash-guard'
+import { git } from './lib/git'
+import { prepareReview } from './lib/prepare'
+import { inFlightError, launchGate } from './lib/launch'
+import type { LaunchGate } from './lib/launch'
+
+const WORKFLOW = 'pr-review-toolkit:review-pr-analysis'
 
 // `$` never crosses a file import: read/update need an atom declared in the same
 // file as the hooks that use them, so each hooks file declares its own.
 const runAtom = atom({ plugin: 'pr-review-toolkit', key: 'run' }, null as RunState | null)
 async function getRun($: Parameters<typeof read>[0]): Promise<RunState | null> { return read($, runAtom) }
 async function setRun($: Parameters<typeof update>[0], fn: (r: RunState | null) => RunState | null) { await update($, runAtom, fn) }
+
+// The lib's I/O, spelled with this hook's `$` (lib files never see `$`). GitHub
+// calls go to the github plugin's MCP server.
+function makeIo($: EngineInterface): Io {
+  return {
+    run: async (argv, opts) => {
+      const r = await $.process.run(argv, opts)
+      return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr, truncated: r.isStdoutTruncated }
+    },
+    mcp: (tool, args) => $.mcp.call('plugin:github:github', tool, args),
+    complete: async (req) => {
+      const r = await $.model.complete({ ...req, effort: req.effort as ModelEffort | undefined })
+      return { isAnswered: r.isAnswered, text: r.isAnswered ? r.text : '' }
+    },
+  }
+}
+
+// The run without its launch nonce: a launch that did not start gives the nonce back.
+function withoutNonce(r: RunState): RunState {
+  const { run: _nonce, ...rest } = r
+  return rest
+}
 
 // tool_use_ids of in-flight Bash calls made by a subagent during an active run.
 // Module state, lost on reload; every entry is removed when its call returns.
@@ -29,7 +58,47 @@ export const register: Register = (on) => {
       description: 'Internal to review-pr: the follow-up verifier reports its verdicts here. Not for the main conversation.',
       inputSchema: { type: 'object', required: ['run', 'items'], properties: { run: { type: 'string' }, items: { type: 'array', items: { type: 'object' } } } },
     })
+    await $.tool.register({
+      name: 'prepare_review',
+      description: 'Prepare a PR review of the current checkout: resolves the PR, collects review data, selects review lenses. Returns { handle } to pass as args.pr to the review-pr-analysis Workflow, or { error } to report verbatim.',
+      inputSchema: { type: 'object', properties: {} },
+    })
     return next(e)
+  })
+
+  // Prepare the review as code and store it. The in-flight check runs again at the
+  // write, so a run launched while this one was being prepared is never replaced.
+  on('tool.call', { tool: 'mcp__pr-review-toolkit__prepare_review' }, async ($) => {
+    const out = await prepareReview(makeIo($), await getRun($))
+    if ('error' in out) return { result: JSON.stringify({ error: out.error }) }
+    let clash = null as string | null
+    await setRun($, (cur) => { clash = inFlightError(cur); return clash ? cur : out.run })
+    return { result: JSON.stringify(clash ? { error: clash } : { handle: out.run.handle }) }
+  })
+
+  // The analysis workflow launches only from a fresh preparation: the gate runs
+  // inside the state update, so two launches cannot both claim one preparation.
+  // The nonce is stored before the workflow starts (its agents may deposit at
+  // once); the taskId follows, and a launch that did not start gives the nonce back.
+  on('tool.call', { tool: 'Workflow', name: WORKFLOW }, async ($, e, next) => {
+    const run = await getRun($)
+    let head = ''
+    if (run) { try { head = (await git(makeIo($), ['rev-parse', 'HEAD'], run.checkoutPath)).trim() } catch {} }
+    const now = await $.clock.now()
+    let gate = { deny: '' } as LaunchGate
+    await setRun($, (cur) => {
+      gate = launchGate(cur, e.args, head, now)
+      return !cur || 'deny' in gate ? cur : { ...cur, run: gate.nonce, deposits: {}, verdicts: null }
+    })
+    if ('deny' in gate) return { deny: gate.deny }
+    const nonce = gate.nonce
+    const release = () => setRun($, (cur) => (cur && cur.run === nonce && !cur.taskId ? withoutNonce(cur) : cur))
+    let r
+    try { r = await next({ ...e, args: gate.args }) } catch (err) { await release(); throw err }
+    const taskId = r.deny === undefined ? (r.result as { taskId?: unknown } | undefined)?.taskId : undefined
+    if (typeof taskId === 'string' && taskId) await setRun($, (cur) => (cur && cur.run === nonce ? { ...cur, taskId, phase: 'progress' } : cur))
+    else await release()
+    return r
   })
 
   // The deposit tools answer themselves: validate against the run's nonce and

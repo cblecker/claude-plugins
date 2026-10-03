@@ -108,6 +108,7 @@ export async function fetchPr(io: Io, ref: PrRef): Promise<PrMeta> {
     title: str(p.title), body: str(p.body).replace(/<!--[\s\S]*?-->/g, ''),
     author: str(p.user?.login), state: str(p.state), baseRef: str(p.base?.ref), headSha: str(p.head?.sha),
     mergeableState: typeof p.mergeable_state === 'string' ? p.mergeable_state : undefined,
+    baseRepo: str(p.base?.repo?.full_name) || undefined,
   }
 }
 

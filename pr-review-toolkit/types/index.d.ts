@@ -20,7 +20,9 @@ export type Board = {
   recommendedToPost: BoardItem[]; discussionOnly: BoardItem[]; alreadyCovered: BoardItem[]; discarded: BoardItem[]
   positiveObservations: string[]; summary: unknown; followUp: unknown; reviewMeta: Record<string, unknown>
 }
-export type PrMeta = { owner: string; repo: string; number: number; title: string; body: string; author: string; state: string; baseRef: string; headSha: string; mergeableState?: string }
+// baseRepo is the base repository's `owner/repo` as GitHub names it (`base.repo.full_name`),
+// absent when the response does not say; prepare_review checks it against origin.
+export type PrMeta = { owner: string; repo: string; number: number; title: string; body: string; author: string; state: string; baseRef: string; headSha: string; mergeableState?: string; baseRepo?: string }
 export type RunState = {
   handle: string; phase: Phase; error?: string; warnings: string[]
   pr: PrMeta; checkoutPath: string; mergeBase: string; baseAheadCount: number; reviewerLogin: string
