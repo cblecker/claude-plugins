@@ -173,14 +173,17 @@ export function startPosting(run: RunState | null): { run: RunState | null; bloc
 }
 
 // After postReview: what posted is recorded whatever the phase (never lost, never
-// duplicated); a run still posting goes to 'done' when finished, else back to the
-// preview with the error.
+// duplicated) and leaves the selection, so a reword after a partial post drafts only
+// what is still to post (a merged draft can never tie a posted id to an unposted one
+// and be dropped with it). A run still posting goes to 'done' when finished, else back
+// to the preview with the error.
 export function finishPosting(run: RunState | null, out: PostResult): RunState | null {
   if (!run) return run
   const posted = [...run.posted, ...out.posted.filter((id, i) => !run.posted.includes(id) && out.posted.indexOf(id) === i)]
-  if (run.phase !== 'posting') return { ...run, posted }
+  const selected = run.selected.filter((id) => !out.posted.includes(id))
+  if (run.phase !== 'posting') return { ...run, posted, selected }
   const { error: _lastError, ...rest } = run
-  return { ...rest, posted, phase: out.finished ? 'done' : 'preview', ...(out.error ? { error: out.error } : {}) }
+  return { ...rest, posted, selected, phase: out.finished ? 'done' : 'preview', ...(out.error ? { error: out.error } : {}) }
 }
 
 // One GitHub write: ok, refused by GitHub (isError: nothing happened), or unanswered

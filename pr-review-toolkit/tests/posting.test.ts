@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { buildPlan, emptyPlan, finishPosting, inDiff, planPosting, postingBlockers, postReview, startPosting, submittedEvent } from '../hooks/lib/posting'
 import type { PostResult } from '../hooks/lib/posting'
+import { acceptDrafts } from '../hooks/lib/drafting'
 import type { Io, McpResult, ProcResult } from '../hooks/lib/io'
 import type { Draft, PostingPlan, RunState } from '../hooks/lib/types'
 
@@ -429,13 +430,28 @@ test('startPosting claims a postable preview once; finishPosting records what po
   const ok: PostResult = { posted: ['F4', 'P1', 'F1'], log: [], finished: true }
   expect(finishPosting(claim.run, ok)).toMatchObject({ phase: 'done', posted: ['F4', 'P1', 'F1'] })
   const failed: PostResult = { posted: ['F4', 'P1'], error: 'boom', log: [], finished: false }
-  expect(finishPosting(claim.run, failed)).toMatchObject({ phase: 'preview', error: 'boom', posted: ['F4', 'P1'] })
+  // Posted items leave the selection: a reword drafts only what is still to post.
+  expect(finishPosting(claim.run, failed)).toMatchObject({ phase: 'preview', error: 'boom', posted: ['F4', 'P1'], selected: ['F1', 'F2'] })
   const unknown: PostResult = { posted: ['F1'], error: 'maybe', log: [], finished: true }
   expect(finishPosting(claim.run, unknown)).toMatchObject({ phase: 'done', error: 'maybe' })
   // What posted is recorded whatever the phase, without duplicates.
   const moved = { ...claim.run!, phase: 'board' as const, posted: ['F4'] }
   expect(finishPosting(moved, failed)).toMatchObject({ phase: 'board', posted: ['F4', 'P1'] })
   expect(finishPosting(null, ok)).toBe(null)
+})
+
+test('after a partial post, a reword cannot tie the posted item to one still to post', () => {
+  // P1's reply posted, F4's line comment did not (the review failed).
+  const claimed = startPosting(planned([{ id: 'P1', kind: 'reply', commentId: 9, body: 'p' }, { id: 'F4', kind: 'line', path: 'a.go', line: 3, body: 'f' }], undefined, { selected: ['F4', 'P1'] })).run
+  const after = finishPosting(claimed, { posted: ['P1'], error: 'review failed', log: [], finished: false })!
+  expect(after.selected).toEqual(['F4'])
+  // The model's merge of F4 with P1 is refused, so F4 is drafted on its own and posts.
+  expect(acceptDrafts(after, [{ id: 'F4', kind: 'reply', commentId: 9, body: 'r', alsoCovers: ['P1'] }]).answer).toContain('alsoCovers names unknown id P1')
+  const ok = acceptDrafts(after, [{ id: 'F4', kind: 'reply', commentId: 9, body: 'r' }])
+  expect(ok.answer).toMatch(/^accepted/)
+  const plan = planPosting(ok.run!, ok.run!.drafts, {})
+  expect(plan.replies.map((r) => r.covers)).toEqual([['F4']])
+  expect(plan.alreadyPosted).toEqual([])
 })
 
 test('emptyPlan is pinned to the run\'s head and posts nothing', () => {
