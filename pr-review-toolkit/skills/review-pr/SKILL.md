@@ -20,5 +20,6 @@ with the pr-review-toolkit mod loaded.
 2. Call the Workflow tool with `name: pr-review-toolkit:review-pr-analysis` and
    `args: { pr: <handle from step 1> }`. Pass nothing else. The workflow script
    is `review-pr.js` beside this file; always launch it by name, never by path.
-3. Stop. The review pane shows progress and the board; when it asks you to
-   draft comments, follow `${CLAUDE_SKILL_DIR}/references/drafting.md`.
+3. Stop. The review pane shows progress and the board (`/review-board` opens
+   it); when it asks you to draft comments, follow
+   `${CLAUDE_SKILL_DIR}/references/drafting.md`.

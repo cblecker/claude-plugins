@@ -32,7 +32,7 @@ test('the verifier fails only when a follow-up was due and no verdicts arrived',
 
 test('our completed notice is rewritten to the one line, with no workflow data left', () => {
   const hit = rewriteNotice(notice('w1', 'completed'), run)
-  const line = 'Review complete — the board is opening in the review pane.'
+  const line = 'Review complete — the board is opening in the review pane (/review-board).'
   expect(hit).toEqual({ text: line, line, ok: true, status: 'completed' })
   expect(hit?.text).not.toMatch(/leaked|task-notification|w1/)
 })
@@ -42,7 +42,7 @@ test('our failed notice is rewritten to the failure line naming the status', () 
   expect(rewriteNotice(notice('w1', 'failed'), run)).toEqual({ text: line, line, ok: false, status: 'failed' })
   expect(rewriteNotice(notice('w1', 'killed'), run)?.text).toBe('Review failed: killed — see the review pane.')
   expect(completionLine(false, 'killed')).toBe('Review failed: killed — see the review pane.')
-  expect(completionLine(true, 'completed')).toBe('Review complete — the board is opening in the review pane.')
+  expect(completionLine(true, 'completed')).toBe('Review complete — the board is opening in the review pane (/review-board).')
 })
 
 test("another task's notice, or one with no run, passes through", () => {
@@ -77,12 +77,12 @@ test('two notices in one text: only ours is replaced, the other kept whole', () 
 })
 
 test('text around our notice is kept', () => {
-  const line = 'Review complete — the board is opening in the review pane.'
+  const line = 'Review complete — the board is opening in the review pane (/review-board).'
   expect(rewriteNotice(`Earlier text\n${notice('w1', 'completed')}\nLater text`, run)?.text).toBe(`Earlier text\n${line}\nLater text`)
 })
 
 test('a text with no wrapper is taken whole; an unterminated wrapper never leaks', () => {
-  const line = 'Review complete — the board is opening in the review pane.'
+  const line = 'Review complete — the board is opening in the review pane (/review-board).'
   expect(rewriteNotice('<task-id>w1</task-id> <status>completed</status>', run)?.text).toBe(line)
   const open = '<task-notification>\n<task-id>w1</task-id>\n<status>completed</status>\n<result>{"findings":[]}</result>'
   expect(rewriteNotice(open, run)?.text).toBe(line)

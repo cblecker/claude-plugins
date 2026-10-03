@@ -25,7 +25,7 @@ export function noticeFor(text: string, taskId?: string): { status: string } | n
 }
 
 export function completionLine(ok: boolean, status: string): string {
-  return ok ? 'Review complete — the board is opening in the review pane.' : `Review failed: ${status} — see the review pane.`
+  return ok ? 'Review complete — the board is opening in the review pane (/review-board).' : `Review failed: ${status} — see the review pane.`
 }
 
 // What the hooks do with a notice's text: the full new text (our notice replaced by the

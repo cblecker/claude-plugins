@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelEffort, Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, Register, UiOpenResult } from 'claude-code'
 import type { RunState } from './lib/types'
 import type { Io } from './lib/io'
 import { applyDeposit } from './lib/deposit'
@@ -67,13 +67,23 @@ async function finishRun($: EngineInterface, taskId: string) {
   })
   if (!written) { $.ui.log('review board dropped: run no longer finishable', { to: 'debug' }); return }
   // The completed notice says the board is opening there; the person may have closed the pane.
-  await openPane($)
+  await openPane($, false)
 }
 
-// The review pane (pane.tsx draws it). A pane that could not open leaves the tool's
-// or command's own answer as it was.
-async function openPane($: EngineInterface) {
-  try { await $.ui.open({ id: PANE_ID, title: 'PR review', focus: true }) } catch (err) { $.ui.log(`review pane not opened: ${String(err)}`, { to: 'debug' }) }
+// The review pane (pane.tsx draws it). Only the person's own /review-board gives it the
+// keys (R46): a pane holding the keys presses its buttons' hotkeys, and an unasked open
+// must never turn typing meant for the prompt into board actions. An unasked open that
+// waits undrawn (a narrow terminal) says how to open it. Answers the open's result, or
+// null when it failed; a failure leaves the tool's or command's own answer as it was.
+async function openPane($: EngineInterface, asked: boolean): Promise<UiOpenResult | null> {
+  try {
+    const opened = await $.ui.open({ id: PANE_ID, title: 'PR review', ...(asked ? { focus: true as const } : {}) })
+    if (!opened.isPlaced && !asked) $.ui.toast('PR review: run /review-board to open the review pane')
+    return opened
+  } catch (err) {
+    $.ui.log(`review pane not opened: ${String(err)}`, { to: 'debug' })
+    return null
+  }
 }
 
 async function failRun($: EngineInterface, taskId: string, err: unknown) {
@@ -147,8 +157,8 @@ export const register: Register = (on) => {
   })
 
   on('command.run', { command: 'review-board' }, async ($) => {
-    await openPane($)
-    return {}
+    const opened = await openPane($, true)
+    return opened && !opened.isPlaced ? { text: `The review pane is open but not drawn yet: ${opened.reason}` } : {}
   })
 
   // Prepare the review as code and store it. The in-flight check runs again at the
@@ -158,7 +168,7 @@ export const register: Register = (on) => {
     if ('error' in out) return { result: JSON.stringify({ error: out.error }) }
     let clash = null as string | null
     await setRun($, (cur) => { clash = inFlightError(cur); return clash ? cur : out.run })
-    if (!clash) await openPane($)
+    if (!clash) await openPane($, false)
     return { result: JSON.stringify(clash ? { error: clash } : { handle: out.run.handle }) }
   })
 

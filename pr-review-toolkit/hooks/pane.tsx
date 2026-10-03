@@ -122,6 +122,8 @@ export function registerPane(on: On) {
     return drawView($.ui.resolve(e), view(run, { columns: e.props.bodyColumns, focused: e.props.isFocused }), {
       press: (key) => press($, key, shown),
       submit: (key, value) => submit($, key, value),
+      // Links in review text come from the PR and the lenses: a click opens nothing.
+      link: (_key, href) => $.ui.toast(`PR review: links in review text are not opened from the pane (${href.slice(0, 200)})`),
     })
   })
 }

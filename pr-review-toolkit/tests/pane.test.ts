@@ -1,16 +1,16 @@
 import { expect, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
 import {
-  applyKey, approvalCaveat, approveWithoutComments, askPrompt, backToBoard, backToPreview, demoteItem, drawView, findNode, promoteItem,
-  rewordPrompt, setEvent, startDrafting, startReword, suggestedEvent, tally, toggleSelect, tooPickyRun, view, viewKeys, viewText,
+  applyKey, approvalCaveat, approveWithoutComments, askPrompt, backToBoard, backToPreview, clean, demoteItem, drawView, findNode, promoteItem,
+  rewordPrompt, setEvent, startDrafting, startReword, suggestedEvent, tally, textChunks, toggleSelect, tooPickyRun, view, viewKeys, viewText,
 } from '../hooks/lib/pane'
 import type { ViewNode } from '../hooks/lib/pane'
 import { finalizeBoard } from '../hooks/lib/board'
 import { draftsRejection } from '../hooks/lib/drafting'
 import { emptyPlan, postingBlockers } from '../hooks/lib/posting'
 import type { Board, FollowUpBoard, PostingPlan, RunState, Severity, Thread } from '../hooks/lib/types'
+import { HEAD, MB, PANE, world } from './world'
 
-const HEAD = 'a'.repeat(40)
-const MB = 'b'.repeat(40)
 const OLD = 'c'.repeat(40)
 
 // ---- fixtures: a prepared run, and a board built by the real board code ----
@@ -321,6 +321,61 @@ test('posting, done and failed views', () => {
   expect(failed).toContain('/pr-review-toolkit:review-pr')
 })
 
+test('nothing that posts or approves is one key away (R46)', () => {
+  const hotkey = (run: RunState, key: string): string | undefined => {
+    const node = findNode(view(run), key)
+    if (!node || node.type !== 'Button') throw new Error(`no button ${key}`)
+    return node.props.hotkey
+  }
+  expect(hotkey(onBoard(), 'approve')).toBeUndefined()
+  expect(hotkey(onPreview(), 'post')).toBeUndefined()
+  expect(hotkey(onPreview(), 'event-approve')).toBeUndefined()
+  expect(hotkey(approveWithoutComments(onBoard())!, 'post')).toBeUndefined()
+  // The rest keep their keys; none of them writes to GitHub.
+  expect(['draft', 'too-picky'].map((k) => hotkey(onBoard(), k))).toEqual(['d', 't'])
+  expect(['event-comment', 'event-request', 'edit'].map((k) => hotkey(onPreview(), k))).toEqual(['c', 'r', 'e'])
+  expect(textOf(onPreview())).toContain('Post has no shortcut key: click it, or Tab to it and press Enter.')
+})
+
+test('review text is cleaned for display: controls, bidi controls and separators', () => {
+  expect(clean('a\r\nb\rc d e')).toBe('a\nb\nc\nd\ne')
+  expect(clean('x‮evil‬⁦y⁩‎‏')).toBe('xevily')
+  expect(clean('tab\there\u0007bell\u009Fc1')).toBe('tab\there bell c1')
+})
+
+test('long text: one-liners are bounded, exact text is split into whole chunks', () => {
+  const b = board()
+  b.recommendedToPost[0] = { ...b.recommendedToPost[0]!, title: 't'.repeat(20000) }
+  const titleLine = textOf(onBoard({ board: b })).split('\n').find((l) => l.startsWith('F1 a.go:3 — '))!
+  expect(titleLine.length).toBeLessThan(2100)
+  expect(titleLine.endsWith('…')).toBe(true)
+  expect(textOf(onPreview({ error: 'e'.repeat(50000) })).split('\n').find((l) => l.startsWith('⚠ e'))!.length).toBeLessThanOrEqual(2002)
+  const text = 'a'.repeat(9999) + '😀' + 'b'.repeat(25000)
+  const chunks = textChunks(text)
+  expect(chunks.join('')).toBe(text)
+  expect(chunks.every((c) => c.length <= 10000)).toBe(true)
+  // The pair is never split: the first chunk stops before it.
+  expect(chunks[0]!.length).toBe(9999)
+  expect(textChunks('short')).toEqual(['short'])
+})
+
+test('item details are a keyed Markdown, so their links are the pane\'s to handle', () => {
+  const node = findNode({ type: 'Box', props: { flexDirection: 'column' }, children: [] }, 'x')
+  expect(node).toBeUndefined()
+  const md: string[] = []
+  const walk = (n: ViewNode) => { if (n.type === 'Box') n.children.forEach(walk); else if (n.type === 'Markdown') md.push(n.props.key ?? '') }
+  walk(view(onBoard()))
+  expect(md).toEqual(['details-F1', 'details-F2'])
+})
+
+test('preview view: replies alone post with a note that no review event is submitted', () => {
+  const repliesOnly = { plan: plan({ lineComments: [], body: '', bodyCovers: [] }), drafts: [{ id: 'P1', kind: 'reply' as const, commentId: 7, body: 'b', alsoCovers: ['F1'] }], selected: ['F1', 'P1'] }
+  expect(textOf(onPreview(repliesOnly))).toContain('Thread replies post on their own; no review event is submitted.')
+  // An approval with the replies is a review event.
+  expect(textOf(onPreview({ ...repliesOnly, event: 'APPROVE' }))).not.toContain('post on their own')
+  expect(textOf(onPreview())).not.toContain('post on their own')
+})
+
 // ---- the state changes the buttons make ----
 
 test('select toggles recommended findings and follow-up items, on the board only', () => {
@@ -415,6 +470,11 @@ test('edit returns to the board and a late set_drafts is then refused (R34)', ()
   expect(applyKey(onBoard({ phase: 'drafting' }), 'back')!.phase).toBe('board')
   const posting = onPreview({ phase: 'posting' })
   expect(backToBoard(posting)).toBe(posting)
+  // Leaving an approval without comments drops its Approve, so Draft starts from Comment.
+  const left = backToBoard(approveWithoutComments(onBoard()))!
+  expect(left.event).toBe(null)
+  expect(startDrafting(left)!.event).toBe('COMMENT')
+  expect(backToBoard(onPreview({ event: 'APPROVE' }))!.event).toBe('APPROVE')
 })
 
 test('reword keeps the preview to come back to; back to preview needs it', () => {
@@ -483,18 +543,7 @@ test('reword prompt: the instruction, the selected ids, set_drafts, and the draf
 
 // ---- mounted through the engine ----
 
-const PANE = { plugin: 'pr-review-toolkit', component: 'Pane', requestId: 'pr-review', viewport: { columns: 120, rows: 40 },
-  props: { title: 'PR review', isFocused: true, bodyColumns: 100, placement: 'inline', scroll: { offset: 0, bodyRows: 30 }, view: {} } } as const
-
-test('board view lists recommended findings and toggles selection', async ($, on) => {
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine'] }))
-  // seed state through the board-loaded path: fire the commands the pane relies on
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeDefined()
-  await ui.unmount()
-})
-
-test('the empty pane draws on every surface', async ($) => {
+test('with no review, the pane says so on every surface', async ($) => {
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeDefined()
@@ -502,19 +551,35 @@ test('the empty pane draws on every surface', async ($) => {
   }
 })
 
+// A draft body past a Text child's 10000 characters, a surrogate pair across the cut.
+const LONG = 'x'.repeat(9999) + '😀' + 'y'.repeat(2000)
+const longPreview = onPreview({
+  error: 'Posting stopped: ' + 'e'.repeat(5000),
+  plan: plan({ lineComments: [{ ...plan().lineComments[0]!, body: LONG }], body: LONG + ' (body)' }),
+})
+const LINK = 'https://evil.example/x'
+const linkBoard = (() => {
+  const b = board()
+  b.recommendedToPost[0] = { ...b.recommendedToPost[0]!, claim: `see [the docs](${LINK})` }
+  return onBoard({ board: b })
+})()
+
 // Every phase's view, drawn by the engine on every surface: a tree a surface cannot draw
-// (an element it lacks, a prop it refuses) fails the mount. Drawn by a test hook on
-// another pane id, from fixtures, since a test cannot seed the plugin's state.
+// (an element it lacks, a prop it refuses, a text child over 10000 characters) fails the
+// mount. Drawn by a test hook on another pane id, from fixtures, since a test cannot seed
+// the plugin's state.
 const PHASES: [string, RunState | null][] = [
   ['none', null],
   ['prepared', base({ warnings: ['Review threads may be incomplete.'], lensSource: 'all-lenses-fallback' })],
   ['running', base({ taskId: 'w1', run: 'r1' })],
   ['synthesizing', base({ taskId: 'w1', run: 'r1', synthesizing: true })],
   ['board', onBoard({ pr: { ...base().pr, mergeableState: 'dirty' }, baseAheadCount: 2, posted: ['P2'], board: board({ failedReviewers: ['pr-test-analyzer'], followUp: followUp({ verifierFailed: true }) }) })],
+  ['board with a link', linkBoard],
   ['empty board', onBoard({ selected: [], board: finalizeBoard(null, [], [], { threads: [], threadCollectionFailed: false, reviewsCollectionFailed: false, synthesisFailed: false, followUp: null, followUpDelta: null, summary: { scale: 'small', notableAreas: [], shapeUnavailable: true }, selectedReviewers: [], lensEffort: {}, failedReviewers: [], lensSelection: { source: 'selector', rationales: {} }, reviewerIsAuthor: true }) })],
   ['drafting', onBoard({ phase: 'drafting' })],
   ['rewording', onPreview({ phase: 'drafting' })],
   ['preview', onPreview({ error: 'Posting stopped: 422 Validation Failed.', plan: plan({ moved: [{ id: 'F6', path: 'e.go', line: 1, reason: 'diff-unavailable' }], alreadyPosted: ['P3'], replies: [{ ...plan().replies[0]!, isResolved: true }] }) })],
+  ['long preview', longPreview],
   ['preview blocked', onPreview({ event: null })],
   ['approve', approveWithoutComments(onBoard())],
   ['posting', onPreview({ phase: 'posting' })],
@@ -522,16 +587,22 @@ const PHASES: [string, RunState | null][] = [
   ['failed', base({ phase: 'failed', error: 'Workflow failed' })],
 ]
 
-test('every phase draws on every surface, its controls wired by key', async ($, on) => {
-  let current: RunState | null = null
-  const acted: string[] = []
+// The fixture views drawn by a test hook on pane id 'spec', every act recorded by key.
+function specPane(on: On) {
+  const state = { current: null as RunState | null, columns: 0, acted: [] as string[] }
   on('ui.render', { component: 'Pane', requestId: 'spec' }, (h, e) =>
-    drawView(h.ui.resolve(e), view(current, { columns: e.props.bodyColumns, focused: e.props.isFocused }), {
-      press: (key) => acted.push(key),
-      submit: (key, value) => acted.push(`${key}=${value}`),
+    drawView(h.ui.resolve(e), view(state.current, { columns: state.columns || e.props.bodyColumns, focused: e.props.isFocused }), {
+      press: (key) => state.acted.push(key),
+      submit: (key, value) => state.acted.push(`${key}=${value}`),
+      link: (key, href) => state.acted.push(`link:${key}=${href}`),
     }))
+  return state
+}
+
+test('every phase draws on every surface, its controls wired by key', async ($, on) => {
+  const spec = specPane(on)
   for (const [name, run] of PHASES) {
-    current = run
+    spec.current = run
     for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ ...PANE, requestId: 'spec', surface })
       const keys = viewKeys(view(run))
@@ -552,59 +623,49 @@ test('every phase draws on every surface, its controls wired by key', async ($, 
     const ui = await $.ui.mount({ ...PANE, requestId: 'spec', surface: 'terminal' })
     if (button) {
       await ui.press({ key: button, plugin: 'test' })
-      expect(acted.at(-1)).toBe(button)
+      expect(spec.acted.at(-1)).toBe(button)
     }
     if (field) {
       await ui.input({ key: field, text: 'why?', plugin: 'test' })
-      expect(acted.at(-1)).toBe(`${field}=why?`)
+      expect(spec.acted.at(-1)).toBe(`${field}=why?`)
     }
     await ui.unmount()
   }
 })
 
-// A checkout of o/r#1 at HEAD whose GitHub side has no threads or reviews, answered
-// beneath the plugin: git by argv prefix, GitHub by tool and method.
-const proc = (stdout: string, exitCode = 0) => ({ exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
-const GIT: Record<string, ReturnType<typeof proc>> = {
-  'rev-parse HEAD': proc(HEAD + '\n'),
-  'rev-parse --show-toplevel': proc('/w\n'),
-  'rev-parse --abbrev-ref HEAD': proc('feat/x\n'),
-  'remote get-url origin': proc('git@github.com:o/r.git\n'),
-  'config --get-regexp': proc('', 1),
-  'status --porcelain': proc(''),
-  'fetch origin refs/heads/main': proc(''),
-  'merge-base FETCH_HEAD HEAD': proc(MB + '\n'),
-  'rev-list --count HEAD..FETCH_HEAD': proc('0\n'),
-  '-c core.quotePath=false diff --name-status': proc('M\ta.go\n'),
-  '-c core.quotePath=false diff --numstat': proc('3\t1\ta.go\n'),
-  'diff --shortstat': proc(' 1 file changed, 3 insertions(+), 1 deletion(-)\n'),
-}
-const GITHUB: Record<string, unknown> = {
-  get_me: { login: 'me' },
-  list_pull_requests: [{ number: 1, head: { sha: HEAD } }],
-  'pull_request_read:get': { number: 1, title: 'Fix the parser', body: '', state: 'open', mergeable_state: 'clean', user: { login: 'author' }, head: { ref: 'feat/x', sha: HEAD }, base: { ref: 'main', repo: { full_name: 'o/r' } } },
-  'pull_request_read:get_review_comments': { review_threads: [], pageInfo: { hasNextPage: false } },
-  'pull_request_read:get_reviews': [],
-}
-const GIT_KEYS = Object.keys(GIT).sort((a, b) => b.length - a.length)
+test('the board and the preview draw in a narrow pane', async ($, on) => {
+  const spec = specPane(on)
+  for (const run of [onBoard(), onPreview(), onBoard({ phase: 'drafting' }), approveWithoutComments(onBoard())]) {
+    spec.current = run
+    spec.columns = 24
+    const ui = await $.ui.mount({ ...PANE, requestId: 'spec', surface: 'terminal', viewport: { columns: 30, rows: 20 }, props: { ...PANE.props, bodyColumns: 24 } })
+    for (const key of viewKeys(view(run))) expect(await ui.find({ key })).toBeDefined()
+    await ui.unmount()
+  }
+})
 
-test('prepare_review opens the pane, and the pane follows the run register.ts writes (R14, R21)', async ($, on) => {
-  const opened: unknown[] = []
-  on('process.run', async (_$, e) => {
-    const line = e.argv.slice(1).join(' ')
-    const key = GIT_KEYS.find((k) => line === k || line.startsWith(k + ' '))
-    if (!key) throw new Error('unexpected git ' + line)
-    return { value: GIT[key]! }
-  })
-  on('mcp.call', async (_$, e) => {
-    const key = typeof e.args.method === 'string' ? `${e.tool}:${e.args.method}` : e.tool
-    if (!(key in GITHUB)) throw new Error('unexpected tool ' + key)
-    return { value: { content: [{ type: 'text' as const, text: JSON.stringify(GITHUB[key]) }], isError: false } }
-  })
-  // The lens selector gives no answer, so every lens runs.
-  on('model.complete', async () => ({ value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }))
-  on('ui.open', async (_$, e) => { opened.push(e); return { value: { isPlaced: true as const } } })
+test('a draft body over 10000 characters draws whole and exact', async ($, on) => {
+  const spec = specPane(on)
+  spec.current = longPreview
+  const ui = await $.ui.mount({ ...PANE, requestId: 'spec', surface: 'terminal' })
+  const body = await ui.find({ type: 'Text', text: LONG })
+  expect(body?.text).toBe(LONG)
+  expect(body?.children).toHaveLength(2)
+  expect((await ui.find({ type: 'Text', text: LONG + ' (body)' }))?.text).toBe(LONG + ' (body)')
+  await ui.unmount()
+})
 
+test('a link in review text is the pane\'s to handle, never opened by the surface', async ($, on) => {
+  const spec = specPane(on)
+  spec.current = linkBoard
+  const ui = await $.ui.mount({ ...PANE, requestId: 'spec', surface: 'terminal' })
+  await ui.press({ key: 'details-F1', link: { href: LINK }, plugin: 'test' })
+  expect(spec.acted.at(-1)).toBe(`link:details-F1=${LINK}`)
+  await ui.unmount()
+})
+
+test('prepare_review opens the pane without the keys, and the pane follows the run register.ts writes (R14, R21, R46)', async ($, on) => {
+  const w = world(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeDefined()
   const out = await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
@@ -613,14 +674,27 @@ test('prepare_review opens the pane, and the pane follows the run register.ts wr
   expect(await ui.find({ type: 'Text', text: /^o\/r#1 — Fix the parser$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Analyzing: / })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /No review in progress/ })).toBeUndefined()
-  expect(opened).toEqual([{ id: 'pr-review', title: 'PR review', focus: true }])
+  // Unasked: no focus, so typing meant for the prompt never presses the pane's keys.
+  expect(w.opened).toEqual([{ id: 'pr-review', title: 'PR review' }])
+  expect(w.toasts).toEqual([])
   await ui.unmount()
 })
 
-test('/review-board opens the pane', async ($, on) => {
-  const opened: unknown[] = []
-  on('ui.open', async (_$, e) => { opened.push(e); return { value: { isPlaced: true as const } } })
-  const out = await $.command.run({ command: 'review-board', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
+const RUN_REVIEW_BOARD = { command: 'review-board', args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 120 } }
+
+test('/review-board opens the pane with the keys', async ($, on) => {
+  const w = world(on)
+  const out = await $.command.run(RUN_REVIEW_BOARD)
   expect(out.text).toBeUndefined()
-  expect(opened).toEqual([{ id: 'pr-review', title: 'PR review', focus: true }])
+  expect(w.opened).toEqual([{ id: 'pr-review', title: 'PR review', focus: true }])
+})
+
+test('a pane that waits undrawn says how to open it', async ($, on) => {
+  const w = world(on, { placed: false })
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  expect(w.toasts).toEqual(['PR review: run /review-board to open the review pane'])
+  // Asked, the command says why instead.
+  const out = await $.command.run(RUN_REVIEW_BOARD)
+  expect(out.text).toBe('The review pane is open but not drawn yet: the terminal is 100 columns wide; an unasked pane needs 144')
+  expect(w.toasts).toHaveLength(1)
 })

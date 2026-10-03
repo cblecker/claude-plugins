@@ -17,7 +17,7 @@ export type TextStyle = { bold?: true; dimColor?: true; italic?: true }
 export type ViewNode =
   | { type: 'Box'; props: { flexDirection: 'row' | 'column'; gap?: number; paddingLeft?: number; marginTop?: number; flexWrap?: 'wrap' }; children: ViewNode[] }
   | { type: 'Text'; props: TextStyle; text: string }
-  | { type: 'Markdown'; props: { text: string } }
+  | { type: 'Markdown'; props: { key?: string; text: string } }
   | { type: 'Button'; props: { key: string; label: string; hotkey?: string; plain?: true; dimColor?: true; variant?: 'primary' } }
   | { type: 'Input'; props: { key: string; label: string; placeholder?: string; submitLabel?: string } }
 export type ViewOptions = { columns?: number; focused?: boolean }
@@ -25,20 +25,45 @@ export type ViewOptions = { columns?: number; focused?: boolean }
 export const PANE_ID = 'pr-review'
 export const DRAFTING_REF = '/skills/review-pr/references/drafting.md'
 
-// Surfaces refuse a whole tree over a stray control character (Markdown takes tab and
-// newline only), and PR text routinely carries \r\n.
+// Surfaces refuse a whole tree over a stray control character (a Text or Markdown takes
+// tab and newline only), and PR text routinely carries \r\n. Bidirectional controls go
+// too, so review text cannot reorder what the pane shows; line and paragraph separators
+// become newlines.
 const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g
+const BIDI = /[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g
 export function clean(value: unknown): string {
-  return String(value ?? '').replace(/\r\n?/g, '\n').replace(CONTROL, ' ')
+  return String(value ?? '').replace(/\r\n?|[\u2028\u2029]/g, '\n').replace(CONTROL, ' ').replace(BIDI, '')
 }
-const oneLine = (value: unknown): string => clean(value).replace(/\s*\n\s*/g, ' ').trim()
+
+// A string cut to at most `max` UTF-16 units, never between the halves of a surrogate pair.
+function cutAt(text: string, max: number): string {
+  const cut = text.slice(0, max)
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut
+}
+// A one-line string, bounded: titles, labels and messages from the review or GitHub.
+const ONE_LINE_MAX = 2000
+const oneLine = (value: unknown, max = ONE_LINE_MAX): string => {
+  const line = clean(value).replace(/\s*\n\s*/g, ' ').trim()
+  return line.length > max ? cutAt(line, max - 1) + '…' : line
+}
 // Markdown draws at most 10000 characters.
 const MD_MAX = 9800
 function clip(text: string): string {
-  if (text.length <= MD_MAX) return text
-  let cut = text.slice(0, MD_MAX)
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1)
-  return cut + '\n\n… (cut here; ask Claude about this item for the rest)'
+  return text.length <= MD_MAX ? text : cutAt(text, MD_MAX) + '\n\n… (cut here; ask Claude about this item for the rest)'
+}
+// A Text's string child holds at most 10000 characters, so exact text longer than that
+// (a draft body) is drawn as several children, whole.
+const TEXT_MAX = 10000
+export function textChunks(text: string): string[] {
+  const out: string[] = []
+  let rest = text
+  while (rest.length > TEXT_MAX) {
+    const piece = cutAt(rest, TEXT_MAX)
+    out.push(piece)
+    rest = rest.slice(piece.length)
+  }
+  out.push(rest)
+  return out
 }
 
 const column = (children: (ViewNode | null)[], props: Partial<Extract<ViewNode, { type: 'Box' }>['props']> = {}): ViewNode =>
@@ -48,11 +73,17 @@ const row = (children: (ViewNode | null)[], props: Partial<Extract<ViewNode, { t
 const text = (value: string, style: TextStyle = {}): ViewNode => ({ type: 'Text', props: style, text: clean(value) })
 const dim = (value: string): ViewNode => text(value, { dimColor: true })
 const warn = (value: string): ViewNode => text('⚠ ' + oneLine(value))
-const markdown = (value: string): ViewNode => ({ type: 'Markdown', props: { text: clip(clean(value)) } })
+// Markdown carries the review's own text, so it is keyed: a click on one of its links is
+// the pane's to handle (see drawView), and never opens the link.
+const markdown = (key: string, value: string): ViewNode => ({ type: 'Markdown', props: { key, text: clip(clean(value)) } })
 const button = (key: string, label: string, extra: { hotkey?: string; plain?: true; dimColor?: true; variant?: 'primary' } = {}): ViewNode =>
   ({ type: 'Button', props: { key, label: oneLine(label), ...extra } })
-// A Button pressed by its hotkey while the pane holds the keys, drawn `d: label`.
+// A Button pressed by its hotkey while the pane holds the keys, drawn `d: label`. Only
+// actions that change nothing on GitHub have one.
 const action = (key: string, hotkey: string, label: string): ViewNode => button(key, label, { hotkey, plain: true })
+// A Button with no hotkey, for what posts or approves (R46): a click, or Enter once the
+// person has walked the focus onto it, never a stray letter.
+const deliberate = (key: string, label: string, primary = false): ViewNode => button(key, label, primary ? { variant: 'primary' } : {})
 const input = (key: string, label: string, placeholder: string, submitLabel: string): ViewNode =>
   ({ type: 'Input', props: { key, label, placeholder, submitLabel } })
 
@@ -82,13 +113,21 @@ export function findNode(node: ViewNode, key: string): ViewNode | undefined {
 // The spec drawn with a surface's element table (what `$.ui.resolve(e)` returns), each
 // Button and Input wired by key to the given handlers. A surface without Input
 // (mobile) draws the rest.
-export type ViewHandlers = { press: (key: string) => unknown; submit: (key: string, value: string) => unknown }
+export type ViewHandlers = {
+  press: (key: string) => unknown
+  submit: (key: string, value: string) => unknown
+  // A link clicked in a keyed Markdown: handled here instead of opened.
+  link: (key: string, href: string) => unknown
+}
 export function drawView(E: Elements[RenderSurface], node: ViewNode, on: ViewHandlers): RenderElement {
   const draw = (n: ViewNode): RenderNode | null => {
     switch (n.type) {
       case 'Box': return E.Box({ ...n.props, children: n.children.map(draw).filter((c): c is RenderNode => c !== null) })
-      case 'Text': return E.Text({ ...n.props, children: n.text })
-      case 'Markdown': return E.Markdown(n.props)
+      case 'Text': { const parts = textChunks(n.text); return E.Text({ ...n.props, children: parts.length === 1 ? parts[0] : parts }) }
+      case 'Markdown': {
+        const key = n.props.key
+        return key ? E.Markdown({ ...n.props, key, onLinkPress: (link) => { void on.link(key, link.href) } }) : E.Markdown(n.props)
+      }
       case 'Button': {
         const key = n.props.key
         return E.Button({ ...n.props, onPress: () => { void on.press(key) } })
@@ -237,7 +276,7 @@ function shapeLine(board: Board): string {
   const s = board.summary
   if (!s || s.shapeUnavailable) return 'Shape: unavailable.'
   const counts = s.changedFileCount != null ? `${plural(s.changedFileCount, 'file', 'files')}, +${s.additions ?? 0}/−${s.deletions ?? 0}, ` : ''
-  const areas = s.notableAreas?.length ? ` Notable: ${s.notableAreas.map(oneLine).join(', ')}.` : ''
+  const areas = s.notableAreas?.length ? ` Notable: ${s.notableAreas.map((a) => oneLine(a)).join(', ')}.` : ''
   return `Shape: ${counts}${s.scale}.${areas}`
 }
 
@@ -274,7 +313,7 @@ function recommendedItem(run: RunState, item: BoardItem): ViewNode {
     column([
       dim(meta),
       tag ? text(tag) : null,
-      body ? markdown(body) : null,
+      body ? markdown(`details-${item.id}`, body) : null,
       dim(recommendation(item)),
       askInput(item.id),
     ], { paddingLeft: 4 }),
@@ -320,7 +359,7 @@ function boardView(run: RunState, opts: Required<ViewOptions>): ViewNode {
     row([
       selected.length ? action('draft', 'd', `Draft ${selected.length} selected`) : dim('Select items to draft.'),
       action('too-picky', 't', 'Too picky'),
-      ownPr(run) ? null : action('approve', 'a', 'Approve without comments'),
+      ownPr(run) ? null : deliberate('approve', 'Approve without comments'),
       // Task 16: the cancel button (Esc) goes here.
     ], { marginTop: 1, flexWrap: 'wrap', gap: 2 }),
     caveat ? warn(caveat) : null,
@@ -357,7 +396,7 @@ function draftingView(run: RunState): ViewNode {
       action('back', 'b', 'Back to board'),
       rewording ? action('preview', 'v', 'Back to preview') : null,
       // Task 16: the cancel button (Esc) goes here.
-    ], { marginTop: 1, gap: 2 }),
+    ], { marginTop: 1, gap: 2, flexWrap: 'wrap' }),
   ])
 }
 
@@ -388,10 +427,11 @@ function noReplyTarget(run: RunState): string[] {
   })
 }
 
-const EVENTS: { key: string; hotkey: string; event: ReviewEvent; label: string }[] = [
+// Approve has no hotkey: with Post it is never one stray letter away (R46).
+const EVENTS: { key: string; hotkey?: string; event: ReviewEvent; label: string }[] = [
   { key: 'event-comment', hotkey: 'c', event: 'COMMENT', label: 'Comment' },
   { key: 'event-request', hotkey: 'r', event: 'REQUEST_CHANGES', label: 'Request changes' },
-  { key: 'event-approve', hotkey: 'a', event: 'APPROVE', label: 'Approve' },
+  { key: 'event-approve', event: 'APPROVE', label: 'Approve' },
 ]
 
 function previewView(run: RunState, opts: Required<ViewOptions>): ViewNode {
@@ -402,20 +442,26 @@ function previewView(run: RunState, opts: Required<ViewOptions>): ViewNode {
   const posted = (covers: string[]): boolean => covers.some((id) => isPosted(run, id))
   const caveat = run.event === 'APPROVE' ? approvalCaveat(run) : null
   const missing = noReplyTarget(run)
+  // Replies with no line or body content submit no review, whatever event is chosen.
+  const repliesAlone = plan.replies.length > 0 && !plan.lineComments.length && !plan.body.trim() && !submittedEvent(run)
   return column([
     heading(run),
     run.error ? warn(run.error) : null,
     opts.focused ? null : dim('Focus the pane (ctrl+x tab) to use its keys.'),
     text('Review preview', { bold: true }),
-    row(EVENTS.filter((e) => !ownPr(run) || e.event === 'COMMENT').map((e) => action(e.key, e.hotkey, `${run.event === e.event ? '●' : '○'} ${e.label}${e.event === suggested && e.event !== 'COMMENT' ? ' (suggested)' : ''}`)), { flexWrap: 'wrap', gap: 2 }),
+    row(EVENTS.filter((e) => !ownPr(run) || e.event === 'COMMENT').map((e) => {
+      const label = `${run.event === e.event ? '●' : '○'} ${e.label}${e.event === suggested && e.event !== 'COMMENT' ? ' (suggested)' : ''}`
+      return e.hotkey ? action(e.key, e.hotkey, label) : deliberate(e.key, label)
+    }), { flexWrap: 'wrap', gap: 2 }),
     caveat ? warn(caveat) : null,
     text(tally(run)),
+    repliesAlone ? dim('Thread replies post on their own; no review event is submitted.') : null,
     row([
-      blockers.length ? null : action('post', 'p', 'Post this review'),
+      blockers.length ? null : deliberate('post', 'Post this review', true),
       action('edit', 'e', 'Edit (back to the board)'),
       // Task 16: the cancel button (Esc) goes here.
-    ], { gap: 2 }),
-    blockers.length ? dim(`Posting is off: ${blockers[0]}`) : null,
+    ], { gap: 2, flexWrap: 'wrap' }),
+    blockers.length ? dim(`Posting is off: ${oneLine(blockers[0])}`) : dim('Post has no shortcut key: click it, or Tab to it and press Enter.'),
     run.drafts.length ? input('reword', 'Reword:', 'tell Claude what to change in the drafts', 'send') : null,
     plan.lineComments.length ? column([
       rule(`Line comments (${plan.lineComments.length})`, opts.columns),
@@ -548,11 +594,13 @@ export function setEvent(run: RunState | null, event: ReviewEvent): RunState | n
 }
 
 // Edit: back to the board, the drafts and plan dropped (a late set_drafts is then refused,
-// R34); the selection and event stay.
+// R34); the selection and event stay, except that leaving an approval without comments
+// drops its Approve, so the next draft starts from Comment (R32).
 export function backToBoard(run: RunState | null): RunState | null {
   if (!run || !run.board || (run.phase !== 'preview' && run.phase !== 'drafting')) return run
   const { plan: _plan, error: _error, ...rest } = run
-  return { ...rest, phase: 'board', drafts: [] }
+  const approvalOnly = run.event === 'APPROVE' && run.drafts.length === 0
+  return { ...rest, phase: 'board', drafts: [], ...(approvalOnly ? { event: null } : {}) }
 }
 
 // Back to a preview whose reword is still out (its plan is kept while Claude redrafts).
