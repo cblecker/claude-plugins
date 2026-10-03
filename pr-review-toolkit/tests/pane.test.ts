@@ -236,10 +236,10 @@ test('item text from the PR cannot carry control characters into the drawing', (
 test('drafting view says Claude is drafting, with a way back', () => {
   const run = onBoard({ phase: 'drafting' })
   expect(textOf(run)).toContain('Claude is drafting… comments for F1, F2.')
-  expect(keysOf(run)).toEqual(['back'])
+  expect(keysOf(run)).toEqual(['back', 'cancel'])
   const rewording = onPreview({ phase: 'drafting' })
   expect(textOf(rewording)).toContain('Claude is drafting… revising the drafts as you asked.')
-  expect(keysOf(rewording)).toEqual(['back', 'preview'])
+  expect(keysOf(rewording)).toEqual(['back', 'preview', 'cancel'])
 })
 
 test('preview view: what posts, the tally, event choice, post and edit (R27, R30)', () => {
@@ -319,6 +319,49 @@ test('posting, done and failed views', () => {
   const failed = textOf(base({ phase: 'failed', error: 'Workflow failed' }))
   expect(failed).toContain('⚠ Review failed: Workflow failed')
   expect(failed).toContain('/pr-review-toolkit:review-pr')
+})
+
+test('a cancelled run says it was cancelled, not that it failed', () => {
+  const cancelled = textOf(base({ phase: 'failed', error: 'Cancelled', taskId: 'w1', run: 'r1' }))
+  expect(cancelled).toContain('⚠ Review cancelled.')
+  expect(cancelled).not.toContain('Review failed')
+  expect(cancelled).toContain('/pr-review-toolkit:review-pr')
+})
+
+// Cancel (Task 16): offered wherever the run can still be abandoned, never while posting,
+// and never on a hotkey (R46): Esc returns the focus to the prompt and a Button's hotkey is
+// one letter or digit, so it is a button to click, or to Tab to and press Enter on.
+test('cancel is offered in progress (any stage), on the board, drafting and previewing, and not otherwise', () => {
+  const offered: [string, RunState][] = [
+    ['prepared', base()],
+    ['running', base({ taskId: 'w1', run: 'r1' })],
+    ['synthesizing', base({ taskId: 'w1', run: 'r1', synthesizing: true })],
+    ['board', onBoard()],
+    ['drafting', onBoard({ phase: 'drafting' })],
+    ['rewording', onPreview({ phase: 'drafting' })],
+    ['preview', onPreview()],
+    ['blocked preview', onPreview({ event: null })],
+  ]
+  for (const [name, run] of offered) {
+    const node = findNode(view(run), 'cancel')
+    expect(node === undefined ? `${name}: no cancel` : label(node)).toBe('Cancel review')
+  }
+  const absent: [string, RunState | null][] = [
+    ['none', null],
+    ['posting', onPreview({ phase: 'posting' })],
+    ['done', onPreview({ phase: 'done', posted: ['F1'] })],
+    ['failed', base({ phase: 'failed', error: 'Workflow failed' })],
+    ['cancelled', base({ phase: 'failed', error: 'Cancelled' })],
+  ]
+  for (const [name, run] of absent) expect(`${name}: ${keysOf(run).includes('cancel')}`).toBe(`${name}: false`)
+})
+
+test('cancel has no hotkey, so a stray letter cannot reach it (R46)', () => {
+  for (const run of [base({ taskId: 'w1', run: 'r1' }), onBoard(), onBoard({ phase: 'drafting' }), onPreview()]) {
+    const node = findNode(view(run), 'cancel')
+    if (!node || node.type !== 'Button') throw new Error(`no cancel button in ${run.phase}`)
+    expect(node.props.hotkey).toBeUndefined()
+  }
 })
 
 test('nothing that posts or approves is one key away (R46)', () => {
@@ -585,6 +628,7 @@ const PHASES: [string, RunState | null][] = [
   ['posting', onPreview({ phase: 'posting' })],
   ['done', onPreview({ phase: 'done', posted: ['P1', 'F1'] })],
   ['failed', base({ phase: 'failed', error: 'Workflow failed' })],
+  ['cancelled', base({ phase: 'failed', error: 'Cancelled', taskId: 'w1', run: 'r1' })],
 ]
 
 // The fixture views drawn by a test hook on pane id 'spec', every act recorded by key.

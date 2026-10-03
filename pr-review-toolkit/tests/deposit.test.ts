@@ -44,6 +44,26 @@ test('a rejected submission leaves the run state unchanged', () => {
   expect(run).toBe(base)
 })
 
+test('deposits are accepted only while the run is in progress', () => {
+  const input = { run: 'r1', lens: 'code-reviewer', findings: [good], positiveObservations: [] }
+  for (const phase of ['board', 'drafting', 'preview', 'posting', 'done', 'failed'] as const) {
+    const run = { ...base, phase }
+    const out = applyDeposit(run, input, 'findings')
+    expect(out.answer).toBe('rejected: this review run is no longer collecting results. Do not resubmit.')
+    expect(out.run).toBe(run)
+    const verdicts = applyDeposit(run, { run: 'r1', items: [{ ask: 'a', status: 'addressed', evidence: 'e' }] }, 'followup')
+    expect(verdicts.answer).toMatch(/^rejected: this review run is no longer collecting results\. Do not resubmit\.$/)
+    expect(verdicts.run).toBe(run)
+  }
+  expect(applyDeposit(base, input, 'findings').answer).toBe('accepted')
+})
+
+test('a cancelled run refuses a late deposit, and the nonce is still checked first', () => {
+  const cancelled = { ...base, phase: 'failed', error: 'Cancelled', taskId: 't1' }
+  expect(applyDeposit(cancelled, { run: 'r1', lens: 'code-reviewer', findings: [good], positiveObservations: [] }, 'findings').answer).toMatch(/no longer collecting results/)
+  expect(applyDeposit(cancelled, { run: 'zzz', lens: 'code-reviewer', findings: [good], positiveObservations: [] }, 'findings').answer).toBe('rejected: unknown run')
+})
+
 test('findings validation names severity, confidence, location and shape errors', () => {
   const answer = (f: unknown, extra: object = {}) =>
     applyDeposit(base, { run: 'r1', lens: 'code-reviewer', findings: [f], positiveObservations: [], ...extra }, 'findings').answer

@@ -31,6 +31,8 @@ export function inFlightError(run: RunState | null): string | null {
 export function launchGate(run: RunState | null, args: unknown, currentHead: string, now: number): LaunchGate {
   if (!run) return { deny: 'Run prepare_review first; no review is prepared in this session.' }
   if (run.taskId || run.run) return { deny: inFlightError(run) ?? 'This preparation was already used; run prepare_review again.' }
+  // Only a cancel ends a run that never launched.
+  if (run.phase !== 'progress') return { deny: 'This preparation was cancelled; run prepare_review again.' }
   const pr = args && typeof args === 'object' && typeof (args as { pr?: unknown }).pr === 'string' ? (args as { pr: string }).pr : ''
   if (!pr) return { deny: `args.pr is missing; pass the handle prepare_review returned (${run.handle}).` }
   if (pr !== run.handle) return { deny: `This review was prepared for ${run.handle}, not ${pr}. Run prepare_review again.` }

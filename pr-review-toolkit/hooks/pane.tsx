@@ -5,6 +5,7 @@ import type { Io } from './lib/io'
 import { applyKey, askPrompt, drawView, DRAFTING_REF, rewordPrompt, startDrafting, startReword, view } from './lib/pane'
 import { draftPrompt, selectedItem } from './lib/drafting'
 import { finishPosting, postReview, startPosting, submittedEvent } from './lib/posting'
+import { cancelRun, INTERRUPTED } from './lib/cleanup'
 import type { PostResult, ShownPreview } from './lib/posting'
 
 // The review pane: one `Pane` (id 'pr-review') drawn from the run. lib/pane.ts builds
@@ -33,6 +34,12 @@ function makeIo($: EngineInterface): Io {
 }
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+// Stops the review workflow, never awaited: the call can wait while Claude is working. A
+// stop that fails (the task already ended) changes nothing: the run is cancelled already.
+function stopTask($: EngineInterface, taskId: string) {
+  void $.tool.call({ tool: 'TaskStop', task_id: taskId }).catch((err) => $.ui.log(`review workflow ${taskId} not stopped: ${message(err)}`, { to: 'debug' }))
+}
 
 // A request for Claude, never awaited: `$.prompt.submit` resolves only when its turn
 // starts, and Claude may be working.
@@ -65,6 +72,32 @@ async function post($: EngineInterface, shown: ShownPreview | null) {
   void send($, claimed).catch((err) => $.ui.log(`review posting not recorded: ${message(err)}`, { to: 'debug' }))
 }
 
+// Cancel: the run is marked cancelled first (no completion notice follows a stopped
+// workflow, and the mark is what turns late deposits and set_drafts away), then the
+// workflow is stopped. Refused while posting.
+async function cancel($: EngineInterface) {
+  let out = null as ReturnType<typeof cancelRun> | null
+  await setRun($, (r) => { out = cancelRun(r); return out.run })
+  if (out?.refused) $.ui.toast(out.refused)
+  else if (out?.stop) stopTask($, out.stop)
+}
+
+// Records what posted on the run that was claimed. A write that fails would leave the run
+// 'posting' for good, so one more write ends the same run as done with the warning
+// (what posted is then unknown to the run), never as a preview that posts again.
+async function record($: EngineInterface, claimed: RunState, out: PostResult) {
+  try {
+    await setRun($, (r) => finishPosting(r, claimed, out))
+  } catch (err) {
+    $.ui.log(`review posting outcome not recorded: ${message(err)}`, { to: 'debug' })
+    try {
+      await setRun($, (r) => finishPosting(r, claimed, { ...out, finished: true, error: INTERRUPTED }))
+    } catch (fallback) {
+      $.ui.log(`review posting end not recorded: ${message(fallback)}`, { to: 'debug' })
+    }
+  }
+}
+
 async function send($: EngineInterface, claimed: RunState) {
   let out: PostResult
   try {
@@ -74,19 +107,19 @@ async function send($: EngineInterface, claimed: RunState) {
     out = { posted: [], error, log: [error], finished: true }
   }
   try {
-    await setRun($, (r) => finishPosting(r, claimed, out))
+    await record($, claimed, out)
   } finally {
     for (const line of out.log) $.ui.log(line)
   }
 }
 
-// A Button press, by key. Draft and Post talk to Claude and GitHub; every other key
-// is a state change lib/pane.ts makes on the run as it is at the write.
+// A Button press, by key. Draft, Post and Cancel talk to Claude, GitHub and the workflow;
+// every other key is a state change lib/pane.ts makes on the run as it is at the write.
 async function press($: EngineInterface, key: string, shown: ShownPreview | null) {
   try {
     if (key === 'draft') await draft($)
     else if (key === 'post') await post($, shown)
-    // Task 16: 'cancel' (Esc) is handled here.
+    else if (key === 'cancel') await cancel($)
     else await setRun($, (r) => applyKey(r, key))
   } catch (err) {
     $.ui.log(`review pane: ${key} failed: ${message(err)}`, { to: 'debug' })

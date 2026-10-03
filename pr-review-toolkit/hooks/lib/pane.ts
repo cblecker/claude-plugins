@@ -1,6 +1,7 @@
 import type { Elements, RenderElement, RenderNode, RenderSurface } from 'claude-code'
 import type { Board, BoardItem, Draft, FollowUpItem, PlannedLineComment, PlannedReply, ReviewEvent, RunState, VerdictStatus } from './types'
 import { demote, promote, tooPicky } from './board'
+import { CANCELLED } from './cleanup'
 import { replyTarget, selectedItem } from './drafting'
 import { emptyPlan, postingBlockers, submittedEvent } from './posting'
 
@@ -84,6 +85,11 @@ const action = (key: string, hotkey: string, label: string): ViewNode => button(
 // A Button with no hotkey, for what posts or approves (R46): a click, or Enter once the
 // person has walked the focus onto it, never a stray letter.
 const deliberate = (key: string, label: string, primary = false): ViewNode => button(key, label, primary ? { variant: 'primary' } : {})
+// Cancel abandons the run (and its workflow), so it is deliberate too (R46): Esc returns
+// the focus to the prompt, and a hotkey is one letter or digit a stray key could press.
+// Offered while the run can still be abandoned (cleanup.ts cancellable); the posting view
+// has none, since a post cannot be taken back.
+const cancelButton = (): ViewNode => deliberate('cancel', 'Cancel review')
 const input = (key: string, label: string, placeholder: string, submitLabel: string): ViewNode =>
   ({ type: 'Input', props: { key, label, placeholder, submitLabel } })
 
@@ -258,7 +264,7 @@ function progressView(run: RunState): ViewNode {
       : `Follow-up review of your ${plural(followUp.threads.length, 'thread', 'threads')}.`) : null,
     text(`Analyzing: ${names.join(', ') || 'no lenses'}`),
     text(status, { dimColor: true }),
-    // Task 16: the cancel button (Esc) goes here.
+    row([cancelButton()], { marginTop: 1 }),
   ])
 }
 
@@ -360,7 +366,7 @@ function boardView(run: RunState, opts: Required<ViewOptions>): ViewNode {
       selected.length ? action('draft', 'd', `Draft ${selected.length} selected`) : dim('Select items to draft.'),
       action('too-picky', 't', 'Too picky'),
       ownPr(run) ? null : deliberate('approve', 'Approve without comments'),
-      // Task 16: the cancel button (Esc) goes here.
+      cancelButton(),
     ], { marginTop: 1, flexWrap: 'wrap', gap: 2 }),
     caveat ? warn(caveat) : null,
     followUpSection(run, board, opts.columns),
@@ -395,7 +401,7 @@ function draftingView(run: RunState): ViewNode {
     row([
       action('back', 'b', 'Back to board'),
       rewording ? action('preview', 'v', 'Back to preview') : null,
-      // Task 16: the cancel button (Esc) goes here.
+      cancelButton(),
     ], { marginTop: 1, gap: 2, flexWrap: 'wrap' }),
   ])
 }
@@ -459,7 +465,7 @@ function previewView(run: RunState, opts: Required<ViewOptions>): ViewNode {
     row([
       blockers.length ? null : deliberate('post', 'Post this review', true),
       action('edit', 'e', 'Edit (back to the board)'),
-      // Task 16: the cancel button (Esc) goes here.
+      cancelButton(),
     ], { gap: 2, flexWrap: 'wrap' }),
     blockers.length ? dim(`Posting is off: ${oneLine(blockers[0])}`) : dim('Post has no shortcut key: click it, or Tab to it and press Enter.'),
     run.drafts.length ? input('reword', 'Reword:', 'tell Claude what to change in the drafts', 'send') : null,
@@ -507,7 +513,7 @@ function doneView(run: RunState): ViewNode {
 function failedView(run: RunState): ViewNode {
   return column([
     heading(run),
-    warn(`Review failed: ${run.error ?? 'unknown error'}`),
+    warn(run.error === CANCELLED ? 'Review cancelled.' : `Review failed: ${run.error ?? 'unknown error'}`),
     ...run.warnings.map(warn),
     dim('Run /pr-review-toolkit:review-pr to start a new review.'),
   ])
@@ -614,8 +620,8 @@ export function startReword(run: RunState | null): RunState | null {
   return run && run.phase === 'preview' && run.plan && run.drafts.length ? { ...run, phase: 'drafting' } : null
 }
 
-// The board-and-preview actions that only change state, by element key; Draft, Post and
-// the Inputs also talk to Claude or GitHub, so pane.tsx runs those itself.
+// The board-and-preview actions that only change state, by element key; Draft, Post, Cancel
+// and the Inputs also talk to Claude, GitHub or the workflow, so pane.tsx runs those itself.
 export function applyKey(run: RunState | null, key: string): RunState | null {
   const id = (prefix: string): string => key.slice(prefix.length)
   if (key.startsWith('sel-')) return toggleSelect(run, id('sel-'))
@@ -629,7 +635,6 @@ export function applyKey(run: RunState | null, key: string): RunState | null {
     case 'event-approve': return setEvent(run, 'APPROVE')
     case 'edit': case 'back': return backToBoard(run)
     case 'preview': return backToPreview(run)
-    // Task 16: 'cancel'.
     default: return run
   }
 }

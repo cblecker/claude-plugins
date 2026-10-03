@@ -11,6 +11,7 @@ import { synthesize } from './lib/synthesis'
 import { buildBoard } from './lib/board'
 import { acceptDrafts, cleanDrafts, draftsRejection, NO_BOARD } from './lib/drafting'
 import { buildPlan } from './lib/posting'
+import { cleanupPlan, launched, recoverPosting } from './lib/cleanup'
 import { inFlightError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
 import { registerPane } from './pane'
@@ -86,6 +87,13 @@ async function openPane($: EngineInterface, asked: boolean): Promise<UiOpenResul
   }
 }
 
+// Stops the review workflow, never awaited: a session end has 1.5 s for every hook, and a
+// call can wait while Claude is working. A stop that fails (the task already ended) changes
+// nothing, since the run is reset or cancelled either way.
+function stopTask($: EngineInterface, taskId: string) {
+  void $.tool.call({ tool: 'TaskStop', task_id: taskId }).catch(() => {})
+}
+
 async function failRun($: EngineInterface, taskId: string, err: unknown) {
   const why = err instanceof Error ? err.message : String(err)
   try { await setRun($, (r) => failSynthesis(r, taskId, why)) } catch (e) { $.ui.log(`review board failure not recorded: ${String(e)}`, { to: 'debug' }) }
@@ -124,7 +132,11 @@ const lensBash = new Set<string>()
 
 export const register: Register = (on) => {
   registerPane(on)
+  // A reload runs session.start again and loses the module variables a post ran in, so a
+  // run found posting has no live post: it ends as interrupted (R44), whatever the post
+  // wrote. A state failure here must not keep the tools from registering.
   on('session.start', async ($, e, next) => {
+    try { await setRun($, recoverPosting) } catch (err) { $.ui.log(`review run not recovered: ${String(err)}`, { to: 'debug' }) }
     await $.tool.register({
       name: 'submit_findings',
       description: 'Internal to review-pr: a review lens agent reports its findings here. Not for the main conversation.',
@@ -153,6 +165,21 @@ export const register: Register = (on) => {
           alsoCovers: { type: 'array', items: { type: 'string' } } } } } } },
     })
     await $.command.register({ name: 'review-board', description: 'Open the PR review pane', immediate: true })
+    return next(e)
+  })
+
+  // The session ends (/clear, /resume, exit): stop the workflow of a run in progress and
+  // drop the run, so the next conversation starts clean (a /clear fires no session.start).
+  // Every hook shares one 1.5 s bound, so the stop is not awaited, and nothing here may
+  // keep `next` from running.
+  on('session.end', async ($, e, next) => {
+    try {
+      const plan = cleanupPlan(await getRun($))
+      if (plan.stop) stopTask($, plan.stop)
+      await setRun($, () => null)
+    } catch (err) {
+      $.ui.log(`review run not cleaned up: ${String(err)}`, { to: 'debug' })
+    }
     return next(e)
   })
 
@@ -192,8 +219,13 @@ export const register: Register = (on) => {
     let r
     try { r = await next({ ...e, args: gate.args }) } catch (err) { await release(); throw err }
     const taskId = r.deny === undefined ? (r.result as { taskId?: unknown } | undefined)?.taskId : undefined
-    if (typeof taskId === 'string' && taskId) await setRun($, (cur) => (cur && cur.run === nonce ? { ...cur, taskId, phase: 'progress' } : cur))
-    else await release()
+    if (typeof taskId === 'string' && taskId) {
+      // A run cancelled while the launch was under way keeps its phase; the workflow that
+      // started anyway is stopped.
+      let stop = false
+      await setRun($, (cur) => { const l = launched(cur, nonce, taskId); stop = l.stop; return l.run })
+      if (stop) stopTask($, taskId)
+    } else await release()
     return r
   })
 
