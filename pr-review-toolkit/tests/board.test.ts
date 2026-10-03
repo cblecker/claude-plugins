@@ -314,5 +314,11 @@ test('too picky demotes every non-critical recommendation not changed since your
   expect(titles(b, 'recommendedToPost')).toEqual(['crit', 'changed', 'pr'])
   const t = tooPicky(b)
   expect(titles(t, 'recommendedToPost')).toEqual(['crit', 'changed'])
-  expect(t.discussionOnly.find((i) => i.title === 'pr')!.routingNote).toBe('Demoted at your request.')
+  const pr = t.discussionOnly.find((i) => i.title === 'pr')!
+  expect(pr.routingNote).toBe('Demoted at your request.')
+  // Promoted back, it carries no note: a routing note says why a finding is not recommended.
+  expect('routingNote' in promote(t, pr.id).recommendedToPost.find((i) => i.id === pr.id)!).toBe(false)
+  const plain = t.discussionOnly.find((i) => i.title === 'plain')!
+  expect(plain.routingNote).toBe('Code unchanged since your review at abcdef1.')
+  expect('routingNote' in promote(t, plain.id).recommendedToPost.find((i) => i.id === plain.id)!).toBe(false)
 })

@@ -423,7 +423,9 @@ function move(b: Board, id: string, to: BoardSection, note?: string): Board {
   const next: Board = { ...b, recommendedToPost: [...b.recommendedToPost], discussionOnly: [...b.discussionOnly], alreadyCovered: [...b.alreadyCovered], discarded: [...b.discarded] }
   const [item] = next[at.section].splice(at.index, 1)
   if (!item) return b
-  next[to].push(note ? { ...item, routingNote: note } : item)
+  // A routing note explains why a finding is not recommended, so none goes into Recommended.
+  const { routingNote: _note, ...rest } = item
+  next[to].push(to === 'recommendedToPost' ? rest : note ? { ...item, routingNote: note } : item)
   return next
 }
 
