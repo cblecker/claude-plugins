@@ -1,6 +1,6 @@
 import type { Io, McpResult } from './io'
 import type { Draft, PlannedReply, PostingPlan, ReviewEvent, RunState } from './types'
-import { parseDeltaHunks } from './followup'
+import { parseDeltaHunks, SHA_RE } from './followup'
 import { mcpJson } from './github'
 import { replyTarget, selectedItem } from './drafting'
 
@@ -15,7 +15,6 @@ export type HunksByPath = Record<string, Hunks | null>
 // because the last write's outcome is unknown (it may have posted, so it is not resent).
 export type PostResult = { posted: string[]; error?: string; log: string[]; finished: boolean }
 
-const SHA_RE = /^[0-9a-f]{7,40}$/
 const GIT_TIMEOUT_MS = 120000
 const MOVED_HEAD = 'The PR head moved since the review; re-run on the new head.'
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -143,13 +142,16 @@ function planBlockers(run: RunState): string[] {
   const plan = run.plan
   if (!plan) return ['No drafts are ready to post; draft the selected items first.']
   if (plan.headSha !== run.pr.headSha || plan.mergeBase !== run.mergeBase) return ['The drafts were checked against another head or range; draft them again.']
+  const isPosted = (covers: string[]): boolean => covers.some((id) => run.posted.includes(id))
+  const entries = [...plan.replies.map((r) => r.covers), ...plan.lineComments.map((c) => c.covers), ...(plan.bodyCovers.length ? [plan.bodyCovers] : [])]
+  if (entries.length && entries.every(isPosted)) return ['Everything in this preview has been posted.']
   if (hasReviewContent(plan)) {
     if (!run.event) return ['Choose a review event: line comments and review-body text post as a review.']
     const done = reviewCovers(plan).filter((id) => run.posted.includes(id))
     if (done.length) return [`The review covers items already posted: ${done.join(', ')}; draft again.`]
     return []
   }
-  const replies = plan.replies.filter((r) => !r.covers.some((id) => run.posted.includes(id)))
+  const replies = plan.replies.filter((r) => !isPosted(r.covers))
   return replies.length || submittedEvent(run) ? [] : ['Nothing to post: approve without comments, or select items and draft them.']
 }
 
@@ -158,27 +160,37 @@ function planBlockers(run: RunState): string[] {
 export function postingBlockers(run: RunState | null): string[] {
   if (!run) return ['No review is open.']
   if (run.phase === 'posting') return ['The review is being posted.']
-  if (run.phase === 'done') return ['This review has been posted.']
+  if (run.phase === 'done') return ['Posting finished; see the result above.']
   if (run.phase !== 'preview') return ['Posting starts from the preview.']
   return planBlockers(run)
 }
 
+// What the pane showed when the user pressed post: the plan and the event its tally named.
+export type ShownPreview = { plan: PostingPlan; event: ReviewEvent | null }
+
 // The post button's state update: claim the run for posting once (a second press finds
-// it posting), clearing the last post's error. A blocked run is returned as it was.
-export function startPosting(run: RunState | null): { run: RunState | null; blockers: string[] } {
+// it posting), clearing the last post's error. The approval is for the preview the user
+// saw, so the run must still hold that plan and submit that event, compared by value. A
+// blocked run is returned as it was.
+export function startPosting(run: RunState | null, shown: ShownPreview): { run: RunState | null; blockers: string[] } {
   const blockers = postingBlockers(run)
   if (blockers.length || !run) return { run, blockers }
+  if (JSON.stringify(run.plan) !== JSON.stringify(shown.plan) || submittedEvent(run) !== shown.event) {
+    return { run, blockers: ['The preview changed; check it and post again.'] }
+  }
   const { error: _lastError, ...rest } = run
   return { run: { ...rest, phase: 'posting' }, blockers }
 }
 
-// After postReview: what posted is recorded whatever the phase (never lost, never
-// duplicated) and leaves the selection, so a reword after a partial post drafts only
-// what is still to post (a merged draft can never tie a posted id to an unposted one
-// and be dropped with it). A run still posting goes to 'done' when finished, else back
-// to the preview with the error.
-export function finishPosting(run: RunState | null, out: PostResult): RunState | null {
-  if (!run) return run
+// After postReview, on the run startPosting claimed (`claimed`): a run that is no longer
+// that one (another PR or head, or another plan) is returned unchanged. What posted is
+// recorded whatever the phase (never lost, never duplicated) and leaves the selection,
+// so a reword after a partial post drafts only what is still to post (a merged draft
+// can never tie a posted id to an unposted one and be dropped with it). A run still
+// posting goes to 'done' when finished, else back to the preview with the error.
+export function finishPosting(run: RunState | null, claimed: RunState, out: PostResult): RunState | null {
+  if (!run || run.handle !== claimed.handle || run.pr.headSha !== claimed.pr.headSha) return run
+  if (JSON.stringify(run.plan) !== JSON.stringify(claimed.plan)) return run
   const posted = [...run.posted, ...out.posted.filter((id, i) => !run.posted.includes(id) && out.posted.indexOf(id) === i)]
   const selected = run.selected.filter((id) => !out.posted.includes(id))
   if (run.phase !== 'posting') return { ...run, posted, selected }
@@ -186,14 +198,25 @@ export function finishPosting(run: RunState | null, out: PostResult): RunState |
   return { ...rest, posted, selected, phase: out.finished ? 'done' : 'preview', ...(out.error ? { error: out.error } : {}) }
 }
 
-// One GitHub write: ok, refused by GitHub (isError: nothing happened), or unanswered
-// (the call threw: it may or may not have happened).
-type Write = { ok: true } | { ok: false; unanswered: boolean; why: string }
+// A 4xx refusal in an error text: GitHub validated the request and turned it down. URLs
+// are dropped first, so a PR number or repository name in the request URL cannot match.
+const REFUSAL_RE = /\b(?:422|404|403)\b|validation failed|unprocessable|not found|forbidden/i
+export function isRefusal(text: string): boolean {
+  return REFUSAL_RE.test(text.replace(/https?:\/\/\S+/gi, ''))
+}
+
+// One GitHub write: ok; refused (nothing happened); or uncertain (it may have happened).
+// GitHub's MCP server reports HTTP timeouts, connection resets and 5xx answers, some
+// given after GitHub acted, as isError results like any refusal, so an isError counts
+// as refused only when its text shows a 4xx refusal; any other, and a call that threw,
+// is uncertain.
+type Write = { ok: true } | { ok: false; refused: boolean; why: string }
 async function write(io: Io, tool: string, args: Record<string, unknown>): Promise<Write> {
   let r: McpResult
-  try { r = await io.mcp(tool, args) } catch (e) { return { ok: false, unanswered: true, why: message(e) } }
-  if (r?.isError) return { ok: false, unanswered: false, why: r.content?.find((c) => typeof c?.text === 'string')?.text || `${tool} failed` }
-  return { ok: true }
+  try { r = await io.mcp(tool, args) } catch (e) { return { ok: false, refused: false, why: message(e) } }
+  if (!r?.isError) return { ok: true }
+  const why = r.content?.find((c) => typeof c?.text === 'string')?.text || `${tool} failed`
+  return { ok: false, refused: isRefusal(why), why }
 }
 
 const ids = (covers: string[]): string => covers.join(', ')
@@ -204,7 +227,8 @@ const thread = (r: PlannedReply): string => (r.threadPath ? `the thread on ${r.t
 // body; or, with no line comments, one create with the event). Ids already in run.posted
 // are skipped. A failed reply stops before any review exists; a failed line comment or
 // submit deletes the pending review. A failed create deletes nothing: GitHub refuses a
-// second pending review, and the one it refused over may be the user's own. `posted`
+// second pending review, and the one it refused over may be the user's own. A write that
+// may have happened (see write) counts as posted, so it is never sent twice. `posted`
 // names the ids this call posted (each entry's id and alsoCovers); the error names what
 // posted. Never throws.
 export async function postReview(io: Io, run: RunState): Promise<PostResult> {
@@ -242,11 +266,11 @@ export async function postReview(io: Io, run: RunState): Promise<PostResult> {
       log.push(`Replied on ${thread(reply)} for ${ids(reply.covers)}.`)
       continue
     }
-    if (w.unanswered) {
+    if (!w.refused) {
       // It may have posted: it counts as posted, so it is never sent twice.
       const before = sofar()
       posted.push(...reply.covers)
-      return stop(`Posting stopped: GitHub did not answer the reply for ${ids(reply.covers)} on ${thread(reply)} (${w.why}). It may have posted; check that thread. It will not be sent again. ${before} No review was submitted.`)
+      return stop(`Posting stopped: GitHub did not confirm the reply for ${ids(reply.covers)} on ${thread(reply)} (${w.why}). It may have posted; check that thread. It will not be sent again. ${before} No review was submitted.`)
     }
     return stop(`Posting stopped: the reply for ${ids(reply.covers)} on ${thread(reply)} failed: ${w.why}. ${sofar()} No review was submitted.`)
   }
@@ -272,29 +296,35 @@ export async function postReview(io: Io, run: RunState): Promise<PostResult> {
     for (const c of plan.lineComments) {
       const added = await write(io, 'add_comment_to_pending_review', { ...where, path: c.path, line: c.line, side: 'RIGHT', subjectType: 'LINE', body: c.body })
       if (!added.ok) {
+        // A line comment only stages: whatever happened, deleting the pending review takes it back.
         const { note } = await abandon()
-        return stop(`Posting stopped: adding the line comment for ${ids(c.covers)} on ${c.path}:${c.line} failed: ${added.why}. ${note} ${sofar()} No review was submitted.`)
+        const what = added.refused
+          ? `GitHub refused the line comment for ${c.id} on ${c.path}:${c.line}: ${added.why}. If that line is not part of the PR diff on GitHub (a renamed file can make it look like it is here), ask Claude to draft ${c.id} as a review-body comment.`
+          : `GitHub did not confirm the line comment for ${c.id} on ${c.path}:${c.line} (${added.why}).`
+        return stop(`Posting stopped: ${what} ${note} ${sofar()} No review was submitted.`)
       }
       log.push(`Added the line comment for ${ids(c.covers)} on ${c.path}:${c.line}.`)
     }
     const submitted = await write(io, 'pull_request_review_write', { method: 'submit_pending', ...where, event, ...(body ? { body } : {}) })
     if (!submitted.ok) {
+      // A pending review still there to delete was not submitted. One that cannot be
+      // deleted may be gone because the submit went through (even a refusal can follow
+      // a submit that landed), so the review then counts as possibly submitted.
       const { deleted, note } = await abandon()
-      if (submitted.unanswered && !deleted) {
-        // No pending review left to delete: the submit most likely went through.
+      if (!deleted) {
         posted.push(...covers)
-        return stop(`Posting stopped: GitHub did not answer the review submission (${submitted.why}) and the pending review could not be deleted, so the review may have been submitted; check the PR. It will not be sent again. ${sofar()}`, true)
+        return stop(`Posting stopped: submitting the review failed (${submitted.why}) and the pending review could not be deleted, so the review may have been submitted; check the PR. It will not be sent again. ${sofar()}`, true)
       }
       return stop(`Posting stopped: submitting the review failed: ${submitted.why}. ${note} ${sofar()} No review was submitted.`)
     }
   } else if (event) {
     const created = await write(io, 'pull_request_review_write', { method: 'create', ...where, event, ...(body ? { body } : {}), commitID: head })
     if (!created.ok) {
-      if (created.unanswered) {
+      if (!created.refused) {
         posted.push(...covers)
-        return stop(`Posting stopped: GitHub did not answer the review submission (${created.why}), so the review may have been submitted; check the PR. It will not be sent again. ${sofar()}`, true)
+        return stop(`Posting stopped: GitHub did not confirm the review submission (${created.why}), so the review may have been submitted; check the PR. It will not be sent again. ${sofar()}`, true)
       }
-      return stop(`Posting stopped: submitting the review failed: ${created.why}. ${sofar()} No review was submitted.`)
+      return stop(`Posting stopped: GitHub refused the review: ${created.why}. ${sofar()} No review was submitted.`)
     }
   } else {
     log.push('No review submitted: replies only.')

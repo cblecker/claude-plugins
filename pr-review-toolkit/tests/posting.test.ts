@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { buildPlan, emptyPlan, finishPosting, inDiff, planPosting, postingBlockers, postReview, startPosting, submittedEvent } from '../hooks/lib/posting'
+import { buildPlan, emptyPlan, finishPosting, inDiff, isRefusal, planPosting, postingBlockers, postReview, startPosting, submittedEvent } from '../hooks/lib/posting'
 import type { PostResult } from '../hooks/lib/posting'
 import { acceptDrafts } from '../hooks/lib/drafting'
 import type { Io, McpResult, ProcResult } from '../hooks/lib/io'
@@ -37,6 +37,9 @@ const baseRun = {
 const lineIn: Draft = { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: 'in' }
 const lineOut: Draft = { id: 'F2', kind: 'line', path: 'a.go', line: 40, body: 'out' }
 const merged: Draft = { id: 'F4', kind: 'reply', commentId: 9, body: 'r', alsoCovers: ['P1'] }
+
+// What the pane showed for a run: its plan and the event its tally names.
+const shown = (run: RunState) => ({ plan: structuredClone(run.plan!), event: submittedEvent(run) })
 
 const planned = (drafts: Draft[], hunks: Record<string, [number, number][] | null> = { 'a.go': [[1, 5]] }, over: Partial<RunState> = {}): RunState => {
   const run = { ...baseRun, ...over }
@@ -272,6 +275,31 @@ test('a reply GitHub did not answer counts as posted, so it is never sent twice'
   expect(out.error).toContain('No review was submitted.')
 })
 
+test('a reply refused with a 4xx did not post; any other error result may have', async () => {
+  const refusedReply = github({ add_reply_to_pull_request_comment: refused('POST https://api.github.com/repos/o/r/pulls/1/comments/9/replies: 422 Validation Failed []') })
+  const a = await postReview(refusedReply.io, planned([merged, lineIn]))
+  expect(a.posted).toEqual([])
+  expect(a.finished).toBe(false)
+  expect(a.error).toContain('Nothing was posted.')
+
+  // A 502 can come after GitHub took the reply: it counts as posted, so a retry skips it.
+  for (const url of ['repos/o/r/pulls/1', 'repos/o/forbidden/pulls/404']) {
+    const g = github({ add_reply_to_pull_request_comment: refused(`POST https://api.github.com/${url}/comments/9/replies: 502 Bad Gateway`) })
+    const out = await postReview(g.io, planned([merged, lineIn]))
+    expect(out.posted).toEqual(['F4', 'P1'])
+    expect(out.error).toContain('may have posted')
+    expect(wrote(g.keys())).toEqual(['add_reply_to_pull_request_comment'])
+    const retry = github()
+    await postReview(retry.io, { ...planned([merged, lineIn]), posted: out.posted })
+    expect(wrote(retry.keys())).not.toContain('add_reply_to_pull_request_comment')
+  }
+})
+
+test('isRefusal: a 4xx refusal in the text, never in a URL', () => {
+  for (const t of ['422 Validation Failed', 'unprocessable entity', 'HTTP 404', 'Not Found', '403', 'FORBIDDEN']) expect(isRefusal(t)).toBe(true)
+  for (const t of ['502 Bad Gateway', 'timeout', 'connection reset', 'POST https://api.github.com/repos/o/forbidden/pulls/404: 500 Internal Server Error', '4220 items', '']) expect(isRefusal(t)).toBe(false)
+})
+
 test('a failed pending-review create deletes nothing: the pending review GitHub refused over may be the user\'s own', async () => {
   for (const answer of [refused('User can only have one pending review per pull request'), new Error('timeout')]) {
     const g = github({ 'pull_request_review_write:create': answer })
@@ -285,15 +313,29 @@ test('a failed pending-review create deletes nothing: the pending review GitHub 
 })
 
 test('a failed line comment deletes the pending review and names what posted', async () => {
-  const g = github({ add_comment_to_pending_review: refused('line must be part of the diff') })
+  const g = github({ add_comment_to_pending_review: refused('POST https://api.github.com/graphql: 422 Unprocessable Entity: line must be part of the diff') })
   const out = await postReview(g.io, planned([merged, lineIn]))
   expect(wrote(g.keys())).toEqual(['add_reply_to_pull_request_comment', 'pull_request_review_write:create', 'add_comment_to_pending_review', 'pull_request_review_write:delete_pending'])
   expect(g.call('pull_request_review_write:delete_pending')!.args).toEqual({ method: 'delete_pending', owner: 'o', repo: 'r', pullNumber: 1 })
   expect(out.posted).toEqual(['F4', 'P1'])
   expect(out.finished).toBe(false)
   expect(out.error).toContain('line must be part of the diff')
+  expect(out.error).toContain('ask Claude to draft F1 as a review-body comment')
   expect(out.error).toContain('The pending review was deleted.')
   expect(out.error).toContain('Posted before the stop: the reply for F4, P1.')
+})
+
+test('a line comment that threw or failed unclear is taken back with the pending review', async () => {
+  for (const answer of [new Error('socket hang up'), refused('502 Bad Gateway')]) {
+    const g = github({ add_comment_to_pending_review: answer })
+    const out = await postReview(g.io, planned([lineIn, lineOut]))
+    expect(wrote(g.keys())).toEqual(['pull_request_review_write:create', 'add_comment_to_pending_review', 'pull_request_review_write:delete_pending'])
+    expect(out.posted).toEqual([])
+    expect(out.finished).toBe(false)
+    expect(out.error).toContain('GitHub did not confirm the line comment for F1 on a.go:3')
+    expect(out.error).toContain('The pending review was deleted.')
+    expect(out.error).not.toContain('draft F1 as a review-body comment')
+  }
 })
 
 test('a pending review that cannot be deleted is named in the error', async () => {
@@ -326,6 +368,17 @@ test('an unanswered submit: a pending review still there was not submitted; a mi
   expect(b.posted).toEqual(['F1', 'F2'])
   expect(b.finished).toBe(true)
   expect(b.error).toContain('may have been submitted')
+})
+
+test('a refused submit whose pending review cannot be deleted may have been submitted', async () => {
+  // GitHub's MCP server reports a 5xx given after the submit landed as an error result too.
+  for (const answer of [refused('422 Unprocessable Entity'), refused('502 Bad Gateway')]) {
+    const g = github({ 'pull_request_review_write:submit_pending': answer, 'pull_request_review_write:delete_pending': refused('404 Not Found') })
+    const out = await postReview(g.io, planned([lineIn, lineOut]))
+    expect(out.posted).toEqual(['F1', 'F2'])
+    expect(out.finished).toBe(true)
+    expect(out.error).toContain('may have been submitted; check the PR')
+  }
 })
 
 test('posting skips everything already posted', async () => {
@@ -375,6 +428,11 @@ test('a review with no answer to its create may have been submitted, so it is no
   expect(r.posted).toEqual([])
   expect(r.finished).toBe(false)
   expect(wrote(refusedCreate.keys())).toEqual(['pull_request_review_write:create'])
+  const badGateway = github({ 'pull_request_review_write:create': refused('502 Bad Gateway') })
+  const b = await postReview(badGateway.io, { ...planned([{ id: 'F1', kind: 'body', body: 'b' }], {}, { selected: ['F1'] }) })
+  expect(b.posted).toEqual(['F1'])
+  expect(b.finished).toBe(true)
+  expect(b.error).toContain('may have been submitted')
 })
 
 test('posting without an event for review content writes nothing', async () => {
@@ -403,11 +461,13 @@ test('postingBlockers names why the post button is off', () => {
   expect(postingBlockers({ ...planned([merged]), event: null })).toEqual([])
   expect(postingBlockers({ ...baseRun, event: 'APPROVE', plan: emptyPlan(baseRun) } as RunState)).toEqual([])
   expect(postingBlockers({ ...baseRun, event: 'COMMENT', plan: emptyPlan(baseRun) } as RunState)[0]).toMatch(/^Nothing to post/)
-  expect(postingBlockers({ ...planned([merged]), posted: ['F4', 'P1'] })[0]).toMatch(/^Nothing to post/)
+  // Everything in the preview has posted: say so.
+  expect(postingBlockers({ ...planned([merged]), posted: ['F4', 'P1'] })).toEqual(['Everything in this preview has been posted.'])
+  expect(postingBlockers({ ...planned([merged, lineIn, lineOut]), posted: ['F4', 'P1', 'F1', 'F2'] })).toEqual(['Everything in this preview has been posted.'])
   expect(postingBlockers(baseRun)).toEqual(['No drafts are ready to post; draft the selected items first.'])
   expect(postingBlockers(null)).toEqual(['No review is open.'])
   expect(postingBlockers({ ...planned([lineIn]), phase: 'posting' })).toEqual(['The review is being posted.'])
-  expect(postingBlockers({ ...planned([lineIn]), phase: 'done' })).toEqual(['This review has been posted.'])
+  expect(postingBlockers({ ...planned([lineIn]), phase: 'done' })).toEqual(['Posting finished; see the result above.'])
   expect(postingBlockers({ ...planned([lineIn]), phase: 'board' })).toEqual(['Posting starts from the preview.'])
   const stale = planned([lineIn])
   expect(postingBlockers({ ...stale, pr: { ...stale.pr, headSha: 'fff9999' } })).toEqual(['The drafts were checked against another head or range; draft them again.'])
@@ -416,34 +476,65 @@ test('postingBlockers names why the post button is off', () => {
 
 test('startPosting claims a postable preview once; finishPosting records what posted', () => {
   const run = planned([merged, lineIn])
-  const claim = startPosting({ ...run, error: 'old' })
+  const claim = startPosting({ ...run, error: 'old' }, shown(run))
   expect(claim.blockers).toEqual([])
   expect(claim.run!.phase).toBe('posting')
   expect('error' in claim.run!).toBe(false)
+  const claimed = claim.run!
   // A second press finds it posting and changes nothing.
-  const again = startPosting(claim.run)
+  const again = startPosting(claimed, shown(run))
   expect(again.blockers).toEqual(['The review is being posted.'])
-  expect(again.run).toBe(claim.run)
+  expect(again.run).toBe(claimed)
   const blocked = { ...run, event: null }
-  expect(startPosting(blocked).run).toBe(blocked)
+  expect(startPosting(blocked, shown(blocked)).run).toBe(blocked)
 
   const ok: PostResult = { posted: ['F4', 'P1', 'F1'], log: [], finished: true }
-  expect(finishPosting(claim.run, ok)).toMatchObject({ phase: 'done', posted: ['F4', 'P1', 'F1'] })
+  expect(finishPosting(claimed, claimed, ok)).toMatchObject({ phase: 'done', posted: ['F4', 'P1', 'F1'] })
   const failed: PostResult = { posted: ['F4', 'P1'], error: 'boom', log: [], finished: false }
   // Posted items leave the selection: a reword drafts only what is still to post.
-  expect(finishPosting(claim.run, failed)).toMatchObject({ phase: 'preview', error: 'boom', posted: ['F4', 'P1'], selected: ['F1', 'F2'] })
+  expect(finishPosting(claimed, claimed, failed)).toMatchObject({ phase: 'preview', error: 'boom', posted: ['F4', 'P1'], selected: ['F1', 'F2'] })
   const unknown: PostResult = { posted: ['F1'], error: 'maybe', log: [], finished: true }
-  expect(finishPosting(claim.run, unknown)).toMatchObject({ phase: 'done', error: 'maybe' })
+  expect(finishPosting(claimed, claimed, unknown)).toMatchObject({ phase: 'done', error: 'maybe' })
   // What posted is recorded whatever the phase, without duplicates.
-  const moved = { ...claim.run!, phase: 'board' as const, posted: ['F4'] }
-  expect(finishPosting(moved, failed)).toMatchObject({ phase: 'board', posted: ['F4', 'P1'] })
-  expect(finishPosting(null, ok)).toBe(null)
+  const moved = { ...claimed, phase: 'board' as const, posted: ['F4'] }
+  expect(finishPosting(moved, claimed, failed)).toMatchObject({ phase: 'board', posted: ['F4', 'P1'] })
+  expect(finishPosting(null, claimed, ok)).toBe(null)
+})
+
+test('startPosting posts only the preview the user saw, compared by value', () => {
+  const run = planned([merged, lineIn])
+  const changed = 'The preview changed; check it and post again.'
+  // Same plan and event, other objects: claimed.
+  expect(startPosting(run, { plan: JSON.parse(JSON.stringify(run.plan)), event: 'COMMENT' }).run!.phase).toBe('posting')
+  // The plan changed (a reword landed) or the event did.
+  const reworded = { plan: { ...structuredClone(run.plan!), body: 'other' }, event: 'COMMENT' as const }
+  expect(startPosting(run, reworded)).toEqual({ run, blockers: [changed] })
+  expect(startPosting(run, { plan: structuredClone(run.plan!), event: 'APPROVE' })).toEqual({ run, blockers: [changed] })
+  expect(startPosting({ ...run, event: 'REQUEST_CHANGES' }, shown(run)).blockers).toEqual([changed])
+  // Replies alone with COMMENT chosen submit no event, so the pane showed none.
+  const replies = planned([merged])
+  expect(startPosting(replies, { plan: structuredClone(replies.plan!), event: null }).blockers).toEqual([])
+  expect(startPosting(replies, { plan: structuredClone(replies.plan!), event: 'COMMENT' }).blockers).toEqual([changed])
+})
+
+test('finishPosting changes only the run it was posting', () => {
+  const run = planned([merged, lineIn])
+  const claimed = startPosting(run, shown(run)).run!
+  const out: PostResult = { posted: ['F4', 'P1'], error: 'boom', log: [], finished: false }
+  for (const other of [
+    { ...claimed, handle: 'o/r#2' },
+    { ...claimed, pr: { ...claimed.pr, headSha: 'fff9999' } },
+    { ...claimed, plan: { ...claimed.plan!, body: 'reworded' } },
+  ]) expect(finishPosting(other, claimed, out)).toBe(other)
+  // The same run read back from state (equal by value) is updated.
+  expect(finishPosting(structuredClone(claimed), claimed, out)).toMatchObject({ phase: 'preview', posted: ['F4', 'P1'] })
 })
 
 test('after a partial post, a reword cannot tie the posted item to one still to post', () => {
   // P1's reply posted, F4's line comment did not (the review failed).
-  const claimed = startPosting(planned([{ id: 'P1', kind: 'reply', commentId: 9, body: 'p' }, { id: 'F4', kind: 'line', path: 'a.go', line: 3, body: 'f' }], undefined, { selected: ['F4', 'P1'] })).run
-  const after = finishPosting(claimed, { posted: ['P1'], error: 'review failed', log: [], finished: false })!
+  const before = planned([{ id: 'P1', kind: 'reply', commentId: 9, body: 'p' }, { id: 'F4', kind: 'line', path: 'a.go', line: 3, body: 'f' }], undefined, { selected: ['F4', 'P1'] })
+  const claimed = startPosting(before, shown(before)).run!
+  const after = finishPosting(claimed, claimed, { posted: ['P1'], error: 'review failed', log: [], finished: false })!
   expect(after.selected).toEqual(['F4'])
   // The model's merge of F4 with P1 is refused, so F4 is drafted on its own and posts.
   expect(acceptDrafts(after, [{ id: 'F4', kind: 'reply', commentId: 9, body: 'r', alsoCovers: ['P1'] }]).answer).toContain('alsoCovers names unknown id P1')

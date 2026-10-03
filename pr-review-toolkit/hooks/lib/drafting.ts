@@ -120,6 +120,7 @@ export function cleanDrafts(drafts: unknown[]): Draft[] {
 
 // Refusals Claude cannot fix by redrafting say so, so it does not call again on its own.
 const NO_RETRY = 'Do not call set_drafts again unless the user asks for drafts.'
+export const NO_BOARD = `rejected: no review board is open. ${NO_RETRY}`
 
 // The answer that refuses a set_drafts call, or null when the drafts can be accepted.
 // Drafts are collected only once the pane has asked for them ('drafting') or while
@@ -127,7 +128,7 @@ const NO_RETRY = 'Do not call set_drafts again unless the user asks for drafts.'
 // call cannot reset a run that is posting or done. The hook asks this before it
 // checks anchors, so a refused call runs no git.
 export function draftsRejection(run: RunState | null, drafts: unknown): string | null {
-  if (!run?.board) return `rejected: no review board is open. ${NO_RETRY}`
+  if (!run?.board) return NO_BOARD
   if (run.phase !== 'drafting' && run.phase !== 'preview') return `rejected: no drafts are being collected right now. ${NO_RETRY}`
   const errors = validateDrafts(run, drafts)
   return errors.length ? `rejected: ${errors.slice(0, 10).join('; ')}. Call set_drafts again.` : null
@@ -141,9 +142,9 @@ export function draftsRejection(run: RunState | null, drafts: unknown): string |
 // anchors were checked against. A previous plan and posting error are dropped.
 export function acceptDrafts(run: RunState | null, drafts: unknown, plan?: PostingPlan): { answer: string; run: RunState | null } {
   const rejected = draftsRejection(run, drafts)
-  if (rejected || !run) return { answer: rejected ?? `rejected: no review board is open. ${NO_RETRY}`, run }
+  if (rejected || !run) return { answer: rejected ?? NO_BOARD, run }
   if (plan && (plan.headSha !== run.pr.headSha || plan.mergeBase !== run.mergeBase)) {
-    return { answer: 'rejected: the review changed while the drafts were being checked. Call set_drafts again.', run }
+    return { answer: `rejected: the review changed while the drafts were being checked. ${NO_RETRY}`, run }
   }
   const { plan: _oldPlan, error: _oldError, ...rest } = run
   return {

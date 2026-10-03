@@ -147,7 +147,7 @@ test('accepting stores the posting plan and clears a stale plan and posting erro
 test('a plan checked against another head or range is refused', () => {
   const r = { ...run, pr: { headSha: 'fff9999' } }
   const out = acceptDrafts(r, [line, reply], plan)
-  expect(out.answer).toBe('rejected: the review changed while the drafts were being checked. Call set_drafts again.')
+  expect(out.answer).toBe('rejected: the review changed while the drafts were being checked. ' + NO_RETRY)
   expect(out.run).toBe(r)
   expect(acceptDrafts({ ...run, mergeBase: '0000000' }, [line, reply], plan).answer).toMatch(/^rejected: the review changed/)
 })

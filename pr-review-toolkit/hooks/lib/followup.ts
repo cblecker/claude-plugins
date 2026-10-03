@@ -2,7 +2,7 @@ import type { Io } from './io'
 import type { Delta, FollowUpContext, Review, ReviewSummary, Thread } from './types'
 
 // A commit SHA. Commit ids from GitHub reach git command lines, so only this shape is accepted.
-const SHA_RE = /^[0-9a-f]{7,40}$/
+export const SHA_RE = /^[0-9a-f]{7,40}$/
 
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review. A port of

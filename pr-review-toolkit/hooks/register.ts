@@ -9,7 +9,7 @@ import { git } from './lib/git'
 import { prepareReview } from './lib/prepare'
 import { synthesize } from './lib/synthesis'
 import { buildBoard } from './lib/board'
-import { acceptDrafts, cleanDrafts, draftsRejection } from './lib/drafting'
+import { acceptDrafts, cleanDrafts, draftsRejection, NO_BOARD } from './lib/drafting'
 import { buildPlan } from './lib/posting'
 import { inFlightError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
@@ -189,9 +189,9 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__pr-review-toolkit__set_drafts' }, async ($, e) => {
     const run = await getRun($)
     const rejected = draftsRejection(run, e.drafts)
-    if (rejected || !run) return { result: rejected ?? 'rejected: no review board is open' }
+    if (rejected || !run) return { result: rejected ?? NO_BOARD }
     const plan = await buildPlan(makeIo($), run, cleanDrafts(e.drafts as unknown[]))
-    let answer = 'rejected: no review board is open'
+    let answer = NO_BOARD
     await setRun($, (r) => { const out = acceptDrafts(r, e.drafts, plan); answer = out.answer; return out.run })
     return { result: answer }
   })
