@@ -1,6 +1,9 @@
-import { expect, test } from 'claude-code/testing'
-import { inFlightError, launchGate, newNonce } from '../hooks/lib/launch'
+import { expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
+import { BY_NAME_ONLY, inFlightError, launchedTaskId, launchFieldsError, launchGate, newNonce } from '../hooks/lib/launch'
 import type { FollowUpContext, RunState } from '../hooks/lib/types'
+import { world } from './world'
 
 const summary = { scale: 'small', changedFileCount: 1, additions: 2, deletions: 0, notableAreas: ['a.go'], shapeUnavailable: false }
 const run: RunState = {
@@ -97,4 +100,87 @@ test('inFlightError: a review being posted is in flight too', () => {
   expect(inFlightError({ ...run, phase: 'posting' })).toBe(posting)
   expect(denial(launchGate({ ...run, run: 'rx', taskId: 't1', phase: 'posting' }, { pr: 'o/r#1' }, 'abc1234', 1))).toBe(posting)
   for (const phase of ['preview', 'done'] as const) expect(inFlightError({ ...run, run: 'rx', taskId: 't1', phase })).toBe(null)
+})
+
+// ---- what the launch hook makes of the Workflow call and its answer ----
+
+test('launchFieldsError: the review workflow launches by name only', () => {
+  expect(BY_NAME_ONLY).toBe('Launch the review workflow by name only.')
+  expect(launchFieldsError({ name: 'pr-review-toolkit:review-pr-analysis', args: { pr: 'o/r#1' } })).toBe(null)
+  expect(launchFieldsError({ name: 'x', args: {}, description: 'd', title: 't' })).toBe(null)
+  for (const extra of [{ scriptPath: '/tmp/s.js' }, { script: 'export const meta = {}' }, { resumeFromRunId: 'run1' }, { scriptPath: '' }, { script: null }]) {
+    expect(launchFieldsError({ name: 'x', args: { pr: 'o/r#1' }, ...extra })).toBe(BY_NAME_ONLY)
+  }
+})
+
+test('launchedTaskId: only a launch that answered a taskId and no error started', () => {
+  expect(launchedTaskId({ result: { status: 'async_launched', taskId: 'w1' } })).toBe('w1')
+  expect(launchedTaskId({ deny: 'no' })).toBe(null)
+  expect(launchedTaskId({ isError: true, result: { taskId: 'w1' } })).toBe(null)
+  expect(launchedTaskId({ isError: true, result: 'Workflow failed' })).toBe(null)
+  expect(launchedTaskId({ result: { taskId: 'w1', error: 'Syntax check failed' } })).toBe(null)
+  expect(launchedTaskId({ result: { taskId: '' } })).toBe(null)
+  expect(launchedTaskId({ result: { taskId: 7 } })).toBe(null)
+  expect(launchedTaskId({ result: undefined })).toBe(null)
+  expect(launchedTaskId({ result: 'w1' })).toBe(null)
+})
+
+// Through the real hooks: the launch hook sits above the engine's Workflow call, which
+// each test answers in turn from `answers` (a function that throws, or the answer).
+const WORKFLOW = 'pr-review-toolkit:review-pr-analysis'
+type Answer = (e: { args?: { run?: unknown } }) => { result: unknown }
+function workflow(on: On, answers: Answer[]) {
+  const seen = { calls: 0, nonces: [] as string[] }
+  on('tool.call', { tool: 'Workflow' }, async (_$, e) => {
+    const ev = e as { args?: { run?: unknown } }
+    seen.nonces.push(String(ev.args?.run ?? ''))
+    const answer = answers[seen.calls++]!
+    return answer(ev) as { result: { taskId: string; status: 'async_launched' } }
+  })
+  return seen
+}
+const launch = ($: Engine, extra: Record<string, unknown> = {}) =>
+  $.tool.call({ tool: 'Workflow', name: WORKFLOW, args: { pr: 'o/r#1' }, ...extra } as Parameters<typeof $.tool.call>[0])
+const started = (): { result: unknown } => ({ result: { status: 'async_launched', taskId: 'w2' } })
+
+test('a launch that answers an error result gives the preparation back', async ($, on) => {
+  mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  world(on)
+  const seen = workflow(on, [() => ({ result: { status: 'async_launched', taskId: 'w1', error: 'Syntax check failed' } }), started])
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  const failed = await launch($)
+  expect((failed.result as { error?: string }).error).toBe('Syntax check failed')
+  // No taskId was recorded, so the same preparation launches again (not "in progress").
+  const again = await launch($)
+  expect(again.deny).toBeUndefined()
+  expect((again.result as { taskId?: string }).taskId).toBe('w2')
+  expect(seen.calls).toBe(2)
+})
+
+test('a launch whose workflow call throws is denied with the reason, and gives the preparation back', async ($, on) => {
+  mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  world(on)
+  const seen = workflow(on, [() => { throw new Error('the workflow engine is down') }, started])
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  const failed = await launch($)
+  // The kit skips a hook that throws, so next() rejects with its own "no implementation"
+  // error; the deny names whatever message next() rejected with.
+  expect(failed.deny).toMatch(/^The review workflow did not start: \S/)
+  const again = await launch($)
+  expect(again.deny).toBeUndefined()
+  expect((again.result as { taskId?: string }).taskId).toBe('w2')
+  expect(seen.calls).toBe(2)
+})
+
+test('a launch that names another script or an earlier run is denied before it claims the preparation', async ($, on) => {
+  mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  world(on)
+  const seen = workflow(on, [started])
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  for (const extra of [{ scriptPath: '/tmp/other.js' }, { script: 'export const meta = { name: "x" }' }, { resumeFromRunId: 'run1' }]) {
+    expect((await launch($, extra)).deny).toBe(BY_NAME_ONLY)
+  }
+  expect(seen.calls).toBe(0)
+  const ok = await launch($)
+  expect((ok.result as { taskId?: string }).taskId).toBe('w2')
 })

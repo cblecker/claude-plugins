@@ -12,7 +12,7 @@ import { buildBoard } from './lib/board'
 import { acceptDrafts, cleanDrafts, draftsRejection, NO_BOARD } from './lib/drafting'
 import { buildPlan } from './lib/posting'
 import { cleanupPlan, interruptedSynthesis, launched, recoverPosting } from './lib/cleanup'
-import { inFlightError, launchGate } from './lib/launch'
+import { inFlightError, launchedTaskId, launchFieldsError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
 import { registerPane } from './pane'
 import { PANE_ID } from './lib/pane'
@@ -213,11 +213,16 @@ export const register: Register = (on) => {
     return { result: JSON.stringify(clash ? { error: clash } : { handle: out.run.handle }) }
   })
 
-  // The analysis workflow launches only from a fresh preparation: the gate runs
-  // inside the state update, so two launches cannot both claim one preparation.
-  // The nonce is stored before the workflow starts (its agents may deposit at
-  // once); the taskId follows, and a launch that did not start gives the nonce back.
+  // The analysis workflow launches only from a fresh preparation, and by name only (a
+  // script, scriptPath or resumeFromRunId would take the injected payload elsewhere): the
+  // gate runs inside the state update, so two launches cannot both claim one preparation.
+  // The nonce is stored before the workflow starts (its agents may deposit at once); the
+  // taskId follows. A launch that did not start (a deny, an error result, a result with
+  // an error, a call that threw) gives the nonce back; a throw is answered as a deny
+  // naming why, since a hook that throws shows the person a failed-hook warning instead.
   on('tool.call', { tool: 'Workflow', name: WORKFLOW }, async ($, e, next) => {
+    const byName = launchFieldsError(e)
+    if (byName) return { deny: byName }
     const run = await getRun($)
     let head = ''
     if (run) { try { head = (await git(makeIo($), ['rev-parse', 'HEAD'], run.checkoutPath)).trim() } catch {} }
@@ -229,11 +234,19 @@ export const register: Register = (on) => {
     })
     if ('deny' in gate) return { deny: gate.deny }
     const nonce = gate.nonce
-    const release = () => setRun($, (cur) => (cur && cur.run === nonce && !cur.taskId ? withoutNonce(cur) : cur))
+    // Never rejects: a release that fails leaves a nonce prepare_review can replace.
+    const release = async () => {
+      try { await setRun($, (cur) => (cur && cur.run === nonce && !cur.taskId ? withoutNonce(cur) : cur)) } catch (err) { $.ui.log(`review launch not released: ${String(err)}`, { to: 'debug' }) }
+    }
     let r
-    try { r = await next({ ...e, args: gate.args }) } catch (err) { await release(); throw err }
-    const taskId = r.deny === undefined ? (r.result as { taskId?: unknown } | undefined)?.taskId : undefined
-    if (typeof taskId === 'string' && taskId) {
+    try {
+      r = await next({ ...e, args: gate.args })
+    } catch (err) {
+      await release()
+      return { deny: `The review workflow did not start: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    const taskId = launchedTaskId(r)
+    if (taskId) {
       // A run cancelled while the launch was under way keeps its phase; the workflow that
       // started anyway is stopped.
       let stop = false

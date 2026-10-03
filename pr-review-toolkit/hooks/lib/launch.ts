@@ -24,6 +24,26 @@ export function inFlightError(run: RunState | null): string | null {
     : null
 }
 
+// The review workflow launches by name only. `script` and `scriptPath` would run another
+// script (scriptPath takes precedence over name) and `resumeFromRunId` would replay an
+// earlier run, each with the payload the gate injects; any of them, whatever its value,
+// is denied before the preparation is claimed.
+export const BY_NAME_ONLY = 'Launch the review workflow by name only.'
+export function launchFieldsError(call: object): string | null {
+  const c = call as { script?: unknown; scriptPath?: unknown; resumeFromRunId?: unknown }
+  return c.script !== undefined || c.scriptPath !== undefined || c.resumeFromRunId !== undefined ? BY_NAME_ONLY : null
+}
+
+// The taskId of a Workflow launch that started, or null when it did not: a deny, an error
+// result (the tool threw or answered an error), or a result carrying `error` (the script
+// failed its syntax check).
+export function launchedTaskId(r: { deny?: unknown; isError?: unknown; result?: unknown }): string | null {
+  if (r.deny !== undefined || r.isError) return null
+  const result = r.result as { taskId?: unknown; error?: unknown } | null | undefined
+  if (!result || typeof result !== 'object' || result.error) return null
+  return typeof result.taskId === 'string' && result.taskId ? result.taskId : null
+}
+
 // Whether the analysis workflow may launch for `args.pr`, and with what. A preparation
 // launches once: a nonce without a taskId is a launch under way (or one cut off by a
 // reload), and a taskId is a launch that happened. `currentHead` is HEAD in the run's
