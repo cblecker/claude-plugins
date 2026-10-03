@@ -13,6 +13,8 @@ import { acceptDrafts, cleanDrafts, draftsRejection, NO_BOARD } from './lib/draf
 import { buildPlan } from './lib/posting'
 import { inFlightError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
+import { registerPane } from './pane'
+import { PANE_ID } from './lib/pane'
 
 const WORKFLOW = 'pr-review-toolkit:review-pr-analysis'
 
@@ -60,9 +62,18 @@ async function finishRun($: EngineInterface, taskId: string) {
   await setRun($, (r) => {
     if (!finishable(r, taskId)) return r
     written = true
-    return { ...r, failedLenses: run.failedLenses, verifierFailed: run.verifierFailed, board, phase: 'board', synthesizing: false }
+    // The board's recommendations start selected, as the pre-3.0 "Draft recommended findings".
+    return { ...r, failedLenses: run.failedLenses, verifierFailed: run.verifierFailed, board, phase: 'board', synthesizing: false, selected: board.recommendedToPost.map((i) => i.id) }
   })
-  if (!written) $.ui.log('review board dropped: run no longer finishable', { to: 'debug' })
+  if (!written) { $.ui.log('review board dropped: run no longer finishable', { to: 'debug' }); return }
+  // The completed notice says the board is opening there; the person may have closed the pane.
+  await openPane($)
+}
+
+// The review pane (pane.tsx draws it). A pane that could not open leaves the tool's
+// or command's own answer as it was.
+async function openPane($: EngineInterface) {
+  try { await $.ui.open({ id: PANE_ID, title: 'PR review', focus: true }) } catch (err) { $.ui.log(`review pane not opened: ${String(err)}`, { to: 'debug' }) }
 }
 
 async function failRun($: EngineInterface, taskId: string, err: unknown) {
@@ -102,6 +113,7 @@ async function noticeText($: EngineInterface, text: string): Promise<string | nu
 const lensBash = new Set<string>()
 
 export const register: Register = (on) => {
+  registerPane(on)
   on('session.start', async ($, e, next) => {
     await $.tool.register({
       name: 'submit_findings',
@@ -130,7 +142,13 @@ export const register: Register = (on) => {
           path: { type: 'string' }, line: { type: 'integer' }, commentId: { type: 'integer' }, body: { type: 'string' },
           alsoCovers: { type: 'array', items: { type: 'string' } } } } } } },
     })
+    await $.command.register({ name: 'review-board', description: 'Open the PR review pane', immediate: true })
     return next(e)
+  })
+
+  on('command.run', { command: 'review-board' }, async ($) => {
+    await openPane($)
+    return {}
   })
 
   // Prepare the review as code and store it. The in-flight check runs again at the
@@ -140,6 +158,7 @@ export const register: Register = (on) => {
     if ('error' in out) return { result: JSON.stringify({ error: out.error }) }
     let clash = null as string | null
     await setRun($, (cur) => { clash = inFlightError(cur); return clash ? cur : out.run })
+    if (!clash) await openPane($)
     return { result: JSON.stringify(clash ? { error: clash } : { handle: out.run.handle }) }
   })
 
