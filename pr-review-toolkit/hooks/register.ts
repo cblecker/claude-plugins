@@ -9,6 +9,7 @@ import { git } from './lib/git'
 import { prepareReview } from './lib/prepare'
 import { synthesize } from './lib/synthesis'
 import { buildBoard } from './lib/board'
+import { acceptDrafts } from './lib/drafting'
 import { inFlightError, launchGate } from './lib/launch'
 import type { LaunchGate } from './lib/launch'
 
@@ -119,6 +120,15 @@ export const register: Register = (on) => {
       description: 'Prepare a PR review of the current checkout: resolves the PR, collects review data, selects review lenses. Returns { handle } to pass as args.pr to the review-pr-analysis Workflow, or { error } to report verbatim.',
       inputSchema: { type: 'object', properties: {} },
     })
+    await $.tool.register({
+      name: 'set_drafts',
+      description: 'Internal to review-pr: Claude submits the drafted review comments for the items selected in the review pane, only when the pane asks for drafts. Pass every draft in one call; a later call replaces the earlier drafts.',
+      inputSchema: { type: 'object', required: ['drafts'], properties: { drafts: { type: 'array', items: {
+        type: 'object', properties: {
+          id: { type: 'string' }, kind: { type: 'string' },
+          path: { type: 'string' }, line: { type: 'integer' }, commentId: { type: 'integer' }, body: { type: 'string' },
+          alsoCovers: { type: 'array', items: { type: 'string' } } } } } } },
+    })
     return next(e)
   })
 
@@ -167,6 +177,14 @@ export const register: Register = (on) => {
   on('tool.call', { tool: 'mcp__pr-review-toolkit__submit_followup' }, async ($, e) => {
     let answer = 'rejected: unknown run'
     await setRun($, (r) => { const out = applyDeposit(r, e, 'followup'); answer = out.answer; return out.run })
+    return { result: answer }
+  })
+
+  // The drafts Claude writes for the selected items. Accepting happens inside the state
+  // update, so a phase that changed meanwhile (posting, done) is respected.
+  on('tool.call', { tool: 'mcp__pr-review-toolkit__set_drafts' }, async ($, e) => {
+    let answer = 'rejected: no review board is open'
+    await setRun($, (r) => { const out = acceptDrafts(r, e.drafts); answer = out.answer; return out.run })
     return { result: answer }
   })
 

@@ -12,7 +12,10 @@ export type VerdictStatus = 'addressed' | 'partial' | 'not_addressed' | 'unverif
 export type Verdict = { threadId?: string; ask: string; status: VerdictStatus; evidence: string; fixedIn?: string }
 export type FollowUpItem = Verdict & { id: string; commentId?: number; path?: string; line?: number; isResolved?: boolean; isOutdated?: boolean }
 export type Deposit = { findings: Finding[]; positiveObservations: string[] }
-export type Draft = { id: string; kind: 'line' | 'reply' | 'body'; path?: string; line?: number; commentId?: number; body: string }
+// One drafted comment, for the item `id` (F or P). alsoCovers names other selected items the
+// same comment speaks for (a finding and the follow-up item on its thread share one reply);
+// reply and body drafts only. Every selected id is covered exactly once, as an id or in alsoCovers.
+export type Draft = { id: string; kind: 'line' | 'reply' | 'body'; path?: string; line?: number; commentId?: number; body: string; alsoCovers?: string[] }
 export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE'
 export type Phase = 'progress' | 'board' | 'drafting' | 'preview' | 'posting' | 'done' | 'failed'
 // The PR's shape: counts from git, notable areas from the lens selector.
