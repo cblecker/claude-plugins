@@ -15,10 +15,37 @@ export type Deposit = { findings: Finding[]; positiveObservations: string[] }
 export type Draft = { id: string; kind: 'line' | 'reply' | 'body'; path?: string; line?: number; commentId?: number; body: string }
 export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES' | 'APPROVE'
 export type Phase = 'progress' | 'board' | 'drafting' | 'preview' | 'posting' | 'done' | 'failed'
-export type BoardItem = Record<string, unknown> & { id: string; title: string; severity: Severity; confidence: number; location?: Location }
+// The PR's shape: counts from git, notable areas from the lens selector.
+export type ChangeSummary = { scale: string; changedFileCount?: number; additions?: number; deletions?: number; notableAreas: string[]; shapeUnavailable: boolean }
+// An existing review thread a board item matches. The thread's identity comes from the
+// collected thread record, never from the model: commentId is the reply target.
+export type ReviewOverlap = { status: 'overlaps' | 'already_covered'; commentId?: number; isResolved?: boolean; threadAuthor?: string; threadPath?: string; threadLine?: number; rationale?: string }
+// A board item: one finding, or several merged into one concern. alreadyCovered and
+// discarded items keep only id, lens, title, severity, confidence, location, claim,
+// existingReviewOverlap, followUpItemId and routingNote.
+export type BoardItem = {
+  id: string; lens?: string; title: string; severity: Severity; confidence: number; location?: Location
+  claim?: string; evidence?: string; whyItMatters?: string; suggestedFix?: string
+  existingReviewOverlap?: ReviewOverlap; followUpItemId?: string; routingNote?: string; changedSinceLastReview?: boolean
+}
+export type BoardSection = 'recommendedToPost' | 'discussionOnly' | 'alreadyCovered' | 'discarded'
+// The follow-up section: the reviewer's last review, what changed since, and a verdict
+// on each earlier ask (P ids).
+export type FollowUpBoard = {
+  reviewedCommit: string; reviewedAt: string; reviewState: string; threadCount: number
+  deltaAvailable: boolean; commitsSince?: number; verifierFailed: boolean; items: FollowUpItem[]
+}
+export type LensSelection = { source: 'selector' | 'all-lenses-fallback'; rationales: Record<string, string> }
+// warnings are finished sentences, each printed whenever present; the flags stay for
+// the choices that branch on them.
+export type ReviewMeta = {
+  warnings: string[]; reviewerIsAuthor: boolean; selectedReviewers: string[]; lensEffort: Record<string, string>
+  failedReviewers: string[]; lensSelection: LensSelection
+  threadCollectionFailed: boolean; reviewsCollectionFailed: boolean; synthesisFailed: boolean
+}
 export type Board = {
   recommendedToPost: BoardItem[]; discussionOnly: BoardItem[]; alreadyCovered: BoardItem[]; discarded: BoardItem[]
-  positiveObservations: string[]; summary: unknown; followUp: unknown; reviewMeta: Record<string, unknown>
+  positiveObservations: string[]; summary: ChangeSummary; followUp: FollowUpBoard | null; reviewMeta: ReviewMeta
 }
 // baseRepo is the base repository's `owner/repo` as GitHub names it (`base.repo.full_name`),
 // absent when the response does not say; prepare_review checks it against origin.
@@ -27,7 +54,7 @@ export type RunState = {
   handle: string; phase: Phase; error?: string; warnings: string[]
   pr: PrMeta; checkoutPath: string; mergeBase: string; baseAheadCount: number; reviewerLogin: string
   diff: { nameStatus: string; numstat: string; shortstat: string }
-  summary: { scale: string; changedFileCount?: number; additions?: number; deletions?: number; notableAreas: string[]; shapeUnavailable: boolean }
+  summary: ChangeSummary
   lenses: { name: string; effort: string; rationale: string }[]; lensSource: 'selector' | 'all-lenses-fallback'
   threads: Thread[]; threadCollectionFailed: boolean; reviews: Review[]; reviewsCollectionFailed: boolean
   followUp: FollowUpContext | null
