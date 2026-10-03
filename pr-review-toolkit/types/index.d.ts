@@ -32,6 +32,9 @@ export type RunState = {
   threads: Thread[]; threadCollectionFailed: boolean; reviews: Review[]; reviewsCollectionFailed: boolean
   followUp: FollowUpContext | null
   run?: string; taskId?: string
+  // synthesizing: the workflow finished and the mod is building the board (phase stays 'progress').
+  // failedLenses / verifierFailed: lensOutcome at finish, for the board's warnings.
+  synthesizing?: boolean; failedLenses?: string[]; verifierFailed?: boolean
   deposits: Record<string, Deposit>; verdicts: Verdict[] | null
   board?: Board; selected: string[]; drafts: Draft[]; event: ReviewEvent | null; posted: string[]
 }
