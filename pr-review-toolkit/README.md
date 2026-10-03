@@ -2,12 +2,13 @@
 
 Reimplementation of Anthropic's
 [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit)
-as a Claude Code workflow plus a Claude Code mod. The mod runs every
-deterministic step as code (preflight, review-thread collection, lens
-selection, synthesis, the review board, posting) and draws an interactive
-review pane; a bundled workflow fans out one read-only specialist reviewer per
-selected lens against a local checkout of the PR head, and each reports its
-findings straight back to the mod.
+as a Claude Code workflow plus a Claude Code mod. Every step outside the lens
+fan-out runs in the mod: preflight, review-thread collection, lens selection
+and synthesis (model calls the mod makes itself), the review board, and
+posting, with an interactive review pane to drive them. A bundled workflow fans
+out one read-only specialist reviewer per selected lens against a local
+checkout of the PR head, and each reports its findings straight back to the
+mod.
 
 ## Requirements
 
@@ -188,8 +189,9 @@ checkout. The workflow:
 
 When the workflow ends, the mod rewrites its completion notice to a single
 line (`Review complete — the board is opening in the review pane
-(/review-board).`, or `Review failed: <status> — see the review pane.`), so no
-workflow result or warning reaches the transcript. Synthesis then runs detached
+(/review-board).`, `Review failed: <status> — see the review pane.`, or, for a
+run you cancelled, `Review cancelled — see the review pane (/review-board).`),
+so no workflow result or warning reaches the transcript. Synthesis then runs detached
 (one Sonnet call at medium effort, two attempts) and the pane reopens, without
 taking the keyboard, when the board is ready.
 
@@ -304,7 +306,7 @@ areas). Findings are numbered `F1`..`Fn` once, after routing; every later
 action keys on those ids.
 
 Overlap with an existing thread is an annotation on the finding (a tag such as
-"overlaps @alice thread on path:line, unresolved — posts as a reply"), not a
+`↳ overlaps @alice thread on path:line (unresolved) → posts as a reply`), not a
 section. It decides how a selected finding is posted — as a reply on that
 thread — not whether it is recommended. A finding that overlaps one of your own
 earlier threads is tagged as following up the matching `P` item.
@@ -318,8 +320,10 @@ Board actions:
   Not posting can be promoted too.
 - **Too picky** demotes every non-critical recommended finding not tagged as
   changed since your last review (on a first review, every non-critical one).
-- **Ask Claude** about any item: the input under it sends your question with
-  the item to Claude, and the answer arrives in the conversation.
+- **Ask Claude** about a recommended finding, an Other finding, or a follow-up
+  item: the input under it sends your question with the item to Claude, and
+  the answer arrives in the conversation. Items in Not posting have no input;
+  promote one to ask about it.
 - **Draft N selected** asks Claude for comments on the selection.
 - **Approve without comments** goes straight to a preview of an approval with
   no comments. It is not offered on your own PR, since GitHub refuses
@@ -378,13 +382,18 @@ replies alone submits no review, since a Comment or Request changes review
 needs text.
 
 Posting is cautious about what it cannot confirm. An error that GitHub
-validated and refused leaves nothing posted. Any other failure (a timeout, a
-server error) counts as possibly posted and is never sent again; the pane says
-what posted before the stop and tells you to check the PR. A failed line
-comment or submit deletes the pending review that call created, and a failed
-create deletes nothing, since the pending review GitHub refused over may be
-yours. After a partial post the posted items leave the selection, so a reword
-drafts only what is left. When posting ends, the pane lists what posted and
+validated and refused leaves nothing posted for that write. A reply, or the
+single create of a review with no line comments, that fails any other way (a
+timeout, a server error) counts as possibly posted and is never sent again; the
+pane says what posted before the stop and tells you to check the PR. The same
+holds for a submit that fails when the pending review cannot then be deleted,
+since the submit may have gone through. A pending review that fails to create,
+a line comment that fails, or a submit that fails while the pending review is
+deleted cleanly marks nothing further as posted and returns you to the preview
+with the error. A failed line comment or submit deletes the pending review that call
+created, and a failed create deletes nothing, since the pending review GitHub
+refused over may be yours. After a partial post the posted items leave the
+selection, so a reword drafts only what is left. When posting ends, the pane lists what posted and
 the transcript carries a log of each write as a dim notice.
 
 **Cancel review** is available while a run is in progress, on the board,
@@ -397,9 +406,13 @@ PR." rather than offering to post again.
 
 ## Permissions
 
-The review makes few model-issued tool calls: Claude calls `prepare_review` and
+Launching the review takes two model-issued tool calls, `prepare_review` and
 `Workflow`, which the skill's `allowed-tools` pre-approves. Git and GitHub
-steps run as code in the mod.
+steps run as code in the mod. The turns the pane starts later (Draft, Reword,
+and Ask Claude) are ordinary Claude turns, not covered by the skill's
+`allowed-tools`: a drafting or reword turn Reads `references/drafting.md` and
+calls `set_drafts`, so, depending on your permission mode, those calls may
+prompt.
 
 ### Local Git Commands
 
@@ -429,8 +442,8 @@ parent session's rules, Manual mode prompts, and `dontAsk` denies. The
 instruction-level git contract is defense in depth on top of that.
 
 **Auto-allowed git for lens agents.** While a review run is in progress, the
-mod auto-allows a specialist's Bash call, without a prompt, when every part of
-the command is read-only git (`rev-parse`, `diff`, `log`, `show`, `blame`,
+mod auto-allows a subagent's Bash call, without a prompt (it cannot tell a lens
+agent from any other subagent), when every part of the command is read-only git (`rev-parse`, `diff`, `log`, `show`, `blame`,
 `merge-base`, `rev-list`, `status`, optionally with `--literal-pathspecs` or
 `-c core.quotePath=false`) or `head`/`tail` with a line count, joined only by
 `&&`, `||`, `;`, or `|`. Redirection, expansions, subshells, background jobs,

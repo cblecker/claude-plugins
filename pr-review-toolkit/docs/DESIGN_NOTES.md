@@ -137,11 +137,14 @@ the specialists' own fields, and `commentId`, resolution state, and the
 thread descriptors come only from the collected thread record for that id, so a
 reply target always describes one real thread. The one place a rewrite adds
 value is a merge of several lenses' findings, so only multi-finding groups may
-carry a new title and claim. Indexes the synthesizer drops still land on the
-board as their own items. Since 3.0 the mod runs this step itself, as a
-text-only Sonnet call at medium effort with up to two attempts; the grouping is
-validated in code (every finding in exactly one group, valid sections), and the
-decisions-not-findings shape is unchanged.
+carry a new title and claim. Through 2.x, indexes the synthesizer dropped still
+landed on the board as their own items. Since 3.0 the mod runs this step
+itself, as a text-only Sonnet call at medium effort with up to two attempts.
+The grouping is validated in code (every finding in exactly one group, valid
+sections), so a dropped index fails the attempt: the call is retried once and
+then the findings are listed unmerged. The board still turns any index a group
+leaves out into a group of its own, as a backstop. The decisions-not-findings
+shape is unchanged.
 
 The token-overlap heuristic that used to classify overlap when synthesis
 failed was removed with the merge machinery. It served only that rare path,
@@ -199,7 +202,8 @@ effect noted where the mod took a step over:
 - **Verifier delta.** Hunks are `[start, end]` pairs, and the delta diff
   uses `--inter-hunk-context=5` so git merges nearby hunks instead of the
   model transcribing each. A finding in a merged gap reads as changed, which
-  errs toward keeping it recommended.
+  errs toward keeping it recommended. Since 3.0 the mod computes the delta in
+  code with the same flags.
 - **Fewer orchestrator turns.** Through 2.x, `get_me` and the board
   instructions' read rode along with the first GitHub call, and fetch,
   merge-base, and the base-ahead count ran as one chained Bash call
@@ -237,7 +241,9 @@ Considered and rejected:
 
 On the posting side, the line-anchor check runs one diff per distinct path,
 batched in one turn, and a return to the check step reuses output already in
-the conversation. Drafting straight into the preview needed no change: the
+the conversation. (Since 3.0 the mod runs the check in code when drafts are
+accepted, one `git diff` per distinct path in parallel, and the pane previews
+its result.) Drafting straight into the preview needed no change: the
 2.x posting instructions' restructure already showed drafts only once, in the
 preview. A lighter head re-check before posting (a filtered PR list instead of
 `get`) was rejected: it saves little and adds a fallback path to the most
@@ -303,8 +309,8 @@ mostly reshuffles findings at random. The signal that actually tracks
 re-litigation is whether the finding's code changed since the user
 reviewed it. The delta's changed hunks are computed once (by the verifier
 through 2.x, by the mod since 3.0), and after synthesis each merged finding is
-tagged (`changedSinceLastReview`) from its location in code; routing then demotes non-critical findings on
-unchanged code to Other findings with a `routingNote`. Only a known-false
+tagged (`changedSinceLastReview`) from its location in code; routing then
+demotes non-critical findings on unchanged code to Other findings with a `routingNote`. Only a known-false
 tag demotes; an unknown delta never does. An earlier cut had every
 specialist run the delta git itself and tag its own findings, which meant
 three separate ancestry checks and tri-state merge rules for duplicate
@@ -342,8 +348,9 @@ reply can move it.
 threads needs exactly the specialist's tool surface (read-only git, Read,
 Grep, Glob) and nothing else, so it runs on
 `pr-review-analysis-readonly` with its own prompt (and, since 3.0, its own
-deposit tool) in the same fan-out. `parallel()` resolves a failed thunk to `null`, so a verifier
-failure degrades to unverifiable verdicts instead of aborting the review.
+deposit tool) in the same fan-out. `parallel()` resolves a failed thunk to
+`null`, so a verifier failure degrades to unverifiable verdicts instead of
+aborting the review.
 Thread identity and state on each `P` item come from the collected thread
 record; only the verdict comes from the verifier, so ids are stable whatever it
 returns.
@@ -435,8 +442,8 @@ lib.
 
 **Deposits, not workflow results.** Lens agents report by calling
 `submit_findings` or `submit_followup`, correlated by a run nonce the launch
-hook generates. The mod validates each submission against the lens roster and
-the finding shape and answers `accepted` or `rejected` with what to fix; a
+hook generates. The mod validates each submission against the run's selected
+lenses and the finding shape and answers `accepted` or `rejected` with what to fix; a
 later valid submission for the same lens replaces the earlier one. The workflow
 returns only whether each agent reported, so findings never travel through the
 workflow's result or the completion notice. The nonce is stored before the
@@ -460,8 +467,11 @@ itself never does.
 **Posting is cautious about what it cannot confirm.** GitHub's MCP server
 reports transport failures and 5xx answers, some given after GitHub acted, as
 error results like any refusal. A write therefore counts as refused only when
-its error shows a 4xx; any other failure counts as possibly posted and is never
-sent again. A failed create deletes nothing, since the pending review GitHub
+its error shows a 4xx. A reply or a single-shot review create that fails any
+other way counts as possibly posted and is never sent again, as does a submit
+whose cleanup delete also fails (it may have gone through); a failed pending
+create, line comment, or cleanly cleaned-up submit adds nothing to what posted
+and returns to the preview. A failed create deletes nothing, since the pending review GitHub
 refused over may be the user's own. A run found posting after a reload ends as
 done ("Posting was interrupted; check the PR.") and is never offered as a
 postable preview again, and cancel is refused while posting.
