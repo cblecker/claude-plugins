@@ -108,21 +108,23 @@ test('a review goes from prepare to posted through the pane', async ($, on) => {
   expect(await shows(/^Claude is drafting… comments for F1, F2\.$/)).toBe(true)
   expect(prompts.at(-1)).toMatch(/^Draft review comments for the items selected in the review pane\. Read \/.+\/skills\/review-pr\/references\/drafting\.md /)
 
-  // Claude's drafts: the preview shows what posts; F1 is critical, so Request changes.
+  // Claude's drafts: the preview shows what posts, with Comment by default; F1 is
+  // critical, so Request changes is suggested, and the user picks it.
   const drafts = await $.tool.call({ tool: 'mcp__pr-review-toolkit__set_drafts', drafts: [
     { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: 'This drops the last token.' },
     { id: 'F2', kind: 'body', body: 'The error from parse is swallowed.' },
   ] } as Parameters<typeof $.tool.call>[0])
   expect(drafts.result).toMatch(/^accepted/)
-  expect(await shows('1 line comment · 0 thread replies · review body: yes · event: REQUEST_CHANGES')).toBe(true)
-  await ui.press({ key: 'event-comment' })
   expect(await shows('1 line comment · 0 thread replies · review body: yes · event: COMMENT')).toBe(true)
+  expect((await ui.find({ key: 'event-request' }))?.props.label).toBe('○ Request changes (suggested)')
+  await ui.press({ key: 'event-request' })
+  expect(await shows('1 line comment · 0 thread replies · review body: yes · event: REQUEST_CHANGES')).toBe(true)
 
   // Post: exactly the preview, then the pane says it posted.
   await ui.press({ key: 'post' })
   expect(writes.map((w) => w.key)).toEqual(WRITES)
   expect(writes[1]!.args).toMatchObject({ path: 'a.go', line: 3, body: 'This drops the last token.' })
-  expect(writes[2]!.args).toMatchObject({ event: 'COMMENT', body: 'The error from parse is swallowed.' })
+  expect(writes[2]!.args).toMatchObject({ event: 'REQUEST_CHANGES', body: 'The error from parse is swallowed.' })
   expect(await shows('Posted to o/r#1.')).toBe(true)
   expect(await shows('Posted items: F1, F2.')).toBe(true)
   // What posted is logged to the transcript.
@@ -130,7 +132,7 @@ test('a review goes from prepare to posted through the pane', async ($, on) => {
     'o/r#1 is still at aaaaaaa.',
     'Started a pending review on aaaaaaa.',
     'Added the line comment for F1 on a.go:3.',
-    'Submitted the review (COMMENT) with 1 line comment and a review body.',
+    'Submitted the review (REQUEST_CHANGES) with 1 line comment and a review body.',
   ])
   // A second press finds nothing to post.
   expect(await ui.find({ key: 'post' })).toBeUndefined()

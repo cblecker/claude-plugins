@@ -192,8 +192,9 @@ export function approvalCaveat(run: RunState): string | null {
 // offers Comment alone.
 const ownPr = (run: RunState): boolean => !!run.board?.reviewMeta.reviewerIsAuthor
 
-// The event the pane proposes for drafting (pre-3.0 drafting rules): Request changes when
-// a selected item is critical, else Comment.
+// The event the preview marks as suggested (pre-3.0 drafting rules): Request changes when
+// a selected item is critical, else Comment. Comment stays the default (R32); the user
+// picks Request changes.
 export function suggestedEvent(run: RunState, selected: string[] = run.selected): ReviewEvent {
   return !ownPr(run) && selected.some((id) => { const item = selectedItem(run, id); return !!item && 'severity' in item && item.severity === 'critical' })
     ? 'REQUEST_CHANGES'
@@ -525,13 +526,13 @@ export function tooPickyRun(run: RunState | null): RunState | null {
 
 // Draft: the run that asks Claude for drafts, or null when there is nothing to draft.
 // The phase moves first, since set_drafts is accepted only while drafting (R34). Stale
-// drafts and plan go; the event is proposed unless the user chose one.
+// drafts and plan go; the event defaults to Comment unless the user chose one (R32).
 export function startDrafting(run: RunState | null): RunState | null {
   if (!onBoard(run)) return null
   const selected = run.selected.filter((id) => selectable(run, id))
   if (!selected.length) return null
   const { plan: _plan, error: _error, ...rest } = run
-  return { ...rest, selected, phase: 'drafting', drafts: [], event: run.event ?? suggestedEvent(run, selected) }
+  return { ...rest, selected, phase: 'drafting', drafts: [], event: run.event ?? 'COMMENT' }
 }
 
 // Approve without comments (R32): an approval with nothing else, previewed like any review.

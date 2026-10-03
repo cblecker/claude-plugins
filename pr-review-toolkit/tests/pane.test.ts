@@ -352,17 +352,19 @@ test('promote selects the finding, demote and too picky deselect what they move'
   expect(demoteItem(onPreview(), 'F2')!.phase).toBe('preview')
 })
 
-test('draft moves to drafting first, with a fresh slate and a proposed event (R32, R34)', () => {
+test('draft moves to drafting first, with a fresh slate and Comment by default (R32, R34)', () => {
   const run = onBoard({ plan: plan(), error: 'old', drafts: [{ id: 'F1', kind: 'body', body: 'old' }] })
   const next = startDrafting(run)!
   expect(next.phase).toBe('drafting')
   expect(next.drafts).toEqual([])
   expect('plan' in next).toBe(false)
   expect('error' in next).toBe(false)
-  // F1 is critical: Request changes is proposed; otherwise Comment; a chosen event stays.
-  expect(next.event).toBe('REQUEST_CHANGES')
-  expect(startDrafting(onBoard({ selected: ['F2'] }))!.event).toBe('COMMENT')
+  // Comment is the default even with F1 critical (Request changes is only suggested);
+  // an event the user chose stays.
+  expect(next.event).toBe('COMMENT')
+  expect(suggestedEvent(next)).toBe('REQUEST_CHANGES')
   expect(startDrafting(onBoard({ event: 'APPROVE' }))!.event).toBe('APPROVE')
+  expect(suggestedEvent(onBoard({ selected: ['F2'] }))).toBe('COMMENT')
   expect(suggestedEvent(onBoard({ selected: ['P1'] }))).toBe('COMMENT')
   // set_drafts is accepted now.
   expect(draftsRejection(next, [{ id: 'F1', kind: 'reply', commentId: 7, body: 'x' }, { id: 'F2', kind: 'body', body: 'y' }])).toBe(null)
