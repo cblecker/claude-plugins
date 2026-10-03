@@ -4,6 +4,7 @@ import { demote, promote, tooPicky } from './board'
 import { CANCELLED } from './cleanup'
 import { replyTarget, selectedItem } from './drafting'
 import { emptyPlan, postingBlockers, submittedEvent } from './posting'
+import { clean } from './text'
 
 // The review pane, as pure code: the view of a run as a plain element spec, drawn with
 // a surface's element table (drawView, each Button and Input wired by key to handlers
@@ -26,15 +27,9 @@ export type ViewOptions = { columns?: number; focused?: boolean }
 export const PANE_ID = 'pr-review'
 export const DRAFTING_REF = '/skills/review-pr/references/drafting.md'
 
-// Surfaces refuse a whole tree over a stray control character (a Text or Markdown takes
-// tab and newline only), and PR text routinely carries \r\n. Bidirectional controls go
-// too, so review text cannot reorder what the pane shows; line and paragraph separators
-// become newlines.
-const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g
-const BIDI = /[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g
-export function clean(value: unknown): string {
-  return String(value ?? '').replace(/\r\n?|[\u2028\u2029]/g, '\n').replace(CONTROL, ' ').replace(BIDI, '')
-}
+// Every string the pane draws goes through clean (text.ts): no control or bidi
+// characters, newlines for \r\n and separators.
+export { clean }
 
 // A string cut to at most `max` UTF-16 units, never between the halves of a surrogate pair.
 function cutAt(text: string, max: number): string {

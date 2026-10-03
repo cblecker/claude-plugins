@@ -1,5 +1,6 @@
 import type { BoardItem, Draft, FollowUpItem, PostingPlan, RunState } from './types'
 import { findItem } from './board'
+import { clean } from './text'
 
 // Drafting: the prompt that asks Claude to draft comments for the selected board
 // items, and the checks on the drafts it hands back through set_drafts. Pure; the
@@ -79,7 +80,8 @@ export function validateDrafts(run: RunState, drafts: unknown): string[] {
         }
       }
     }
-    if (kind === 'line' && (typeof d.path !== 'string' || !d.path || !Number.isInteger(d.line) || (d.line as number) < 1)) {
+    // Path and body are checked as stored (cleanDrafts), so one that sanitises to nothing is empty.
+    if (kind === 'line' && (typeof d.path !== 'string' || !clean(d.path) || !Number.isInteger(d.line) || (d.line as number) < 1)) {
       errors.push(`${id}: line drafts need path and line`)
     }
     if (kind === 'reply') {
@@ -95,7 +97,7 @@ export function validateDrafts(run: RunState, drafts: unknown): string[] {
         else if (threads[0] !== d.commentId) errors.push(`${id}: reply commentId ${d.commentId} is not the reply target of the items it covers (comment ${threads[0]})`)
       }
     }
-    if (typeof d.body !== 'string' || !d.body.trim()) errors.push(`${id}: body is empty`)
+    if (typeof d.body !== 'string' || !clean(d.body).trim()) errors.push(`${id}: body is empty`)
   })
   for (const [id, count] of covered) if (count > 1) errors.push(`${id} is covered more than once`)
   const missing = run.selected.filter((id) => !covered.has(id))
@@ -105,12 +107,17 @@ export function validateDrafts(run: RunState, drafts: unknown): string[] {
 
 // The drafts as stored: known fields of the right type only, and only the fields
 // its kind uses (path and line on a line draft, commentId on a reply); whatever
-// else the model sent is dropped. Run on drafts validateDrafts has passed.
+// else the model sent is dropped. Body and path are sanitised as the pane draws
+// them (text.ts clean), so the plan built from these drafts posts exactly the text
+// the preview shows (a moved line draft writes its path into the review body).
+// Idempotent, so storing drafts again changes nothing. Run on drafts validateDrafts
+// has passed.
 export function cleanDrafts(drafts: unknown[]): Draft[] {
   return drafts.map((raw) => {
     const d = raw as Record<string, unknown>
-    const draft: Draft = { id: d.id as string, kind: d.kind as Draft['kind'], body: d.body as string }
-    if (draft.kind === 'line' && typeof d.path === 'string' && d.path) draft.path = d.path
+    const draft: Draft = { id: d.id as string, kind: d.kind as Draft['kind'], body: clean(d.body) }
+    const path = typeof d.path === 'string' ? clean(d.path) : ''
+    if (draft.kind === 'line' && path) draft.path = path
     if (draft.kind === 'line' && Number.isInteger(d.line)) draft.line = d.line as number
     if (draft.kind === 'reply' && Number.isInteger(d.commentId)) draft.commentId = d.commentId as number
     if (Array.isArray(d.alsoCovers) && d.alsoCovers.length) draft.alsoCovers = d.alsoCovers as string[]

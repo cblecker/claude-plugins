@@ -217,3 +217,25 @@ test('accepting leaves the given run untouched', () => {
   expect(r.phase).toBe('drafting')
   expect(r.drafts).toEqual([])
 })
+
+// What the preview draws is the pane's clean() of the text; what posts must be that same
+// text, so the stored drafts are sanitised the same way (bidi controls dropped, other
+// control characters to spaces, \r\n to \n).
+test('stored drafts carry the sanitised body and path, and sanitising twice changes nothing', () => {
+  const dirty = [
+    { id: 'F1', kind: 'line', path: 'a‮.go', line: 3, body: 'x‮y\u001bz\r\nw⁦' },
+    { id: 'P2', kind: 'reply', commentId: 7, body: '‏r\u0007' },
+  ]
+  const once = cleanDrafts(dirty)
+  expect(once).toEqual([
+    { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: 'xy z\nw' },
+    { id: 'P2', kind: 'reply', commentId: 7, body: 'r ' },
+  ])
+  expect(cleanDrafts(once)).toEqual(once)
+  expect(acceptDrafts(run, dirty).run!.drafts).toEqual(once)
+})
+
+test('a body or path that sanitises to nothing is empty', () => {
+  expect(validateDrafts(run, [line, { ...reply, body: '‮\u001b' }])).toContain('P2: body is empty')
+  expect(validateDrafts(run, [{ ...line, path: '‮⁦' }, reply])).toContain('F1: line drafts need path and line')
+})

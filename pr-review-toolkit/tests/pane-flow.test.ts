@@ -100,3 +100,46 @@ test('a review goes from prepare to posted through the pane', async ($, on) => {
   expect(await ui.find({ key: 'post' })).toBeUndefined()
   await ui.unmount()
 })
+
+// The preview's text is the pane's cleaned drawing of the plan, and posting sends the
+// plan: with bidi and control characters in the drafts, the text GitHub receives is
+// exactly the text the preview drew.
+test('posting sends exactly the text the preview drew, bidi and control characters included', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 2) })
+  const w = world(on)
+  let nonce = ''
+  on('tool.call', { tool: 'Workflow' }, async (_$, e) => {
+    nonce = String((e as { args?: { run?: unknown } }).args?.run ?? '')
+    return { result: { taskId: 'w1' } }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__prepare_review' })
+  await $.tool.call({ tool: 'Workflow', name: WORKFLOW, args: { pr: 'o/r#1' } } as Parameters<typeof $.tool.call>[0])
+  await $.tool.call({ tool: 'mcp__pr-review-toolkit__submit_findings', run: nonce, lens: 'code-reviewer',
+    findings: [finding('Parser drops the last token', 'critical', 95, 'a.go', 3), finding('Error is swallowed', 'important', 90, 'b.go', 5)],
+    positiveObservations: [] } as Parameters<typeof $.tool.call>[0])
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>w1</task-id>\n<status>completed</status>\n</task-notification>', origin: { kind: 'task-notification' }, wait: false })
+  await clock.settle()
+  await ui.press({ key: 'draft' })
+
+  // F1 lands in a.go's diff (lines 1-4); b.go has no hunks, so F2 moves into the body
+  // with its path, which carries a bidi control too.
+  const dirty = (s: string) => `${s} ‮evil‬\u001b[31m red\r\nnext`
+  const drafts = await $.tool.call({ tool: 'mcp__pr-review-toolkit__set_drafts', drafts: [
+    { id: 'F1', kind: 'line', path: 'a.go', line: 3, body: dirty('line') },
+    { id: 'F2', kind: 'line', path: 'b⁦.go', line: 5, body: dirty('moved') },
+  ] } as Parameters<typeof $.tool.call>[0])
+  expect(drafts.result).toMatch(/^accepted/)
+  const lineText = 'line evil [31m red\nnext'
+  const bodyText = '`b.go:5`: moved evil [31m red\nnext'
+  expect((await ui.find({ type: 'Text', text: lineText }))?.text).toBe(lineText)
+  expect((await ui.find({ type: 'Text', text: bodyText }))?.text).toBe(bodyText)
+  expect(await ui.find({ type: 'Text', text: 'F2: b.go:5 is outside the PR diff, so it posts in the review body.' })).toBeDefined()
+
+  await ui.press({ key: 'post' })
+  expect(w.writes.map((x) => x.key)).toEqual(WRITES)
+  expect(w.writes[1]!.args).toMatchObject({ path: 'a.go', line: 3 })
+  expect(w.writes[1]!.args.body).toBe(lineText)
+  expect(w.writes[2]!.args.body).toBe(bodyText)
+  await ui.unmount()
+})

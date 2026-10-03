@@ -6,8 +6,8 @@ import {
 } from '../hooks/lib/pane'
 import type { ViewNode } from '../hooks/lib/pane'
 import { finalizeBoard } from '../hooks/lib/board'
-import { draftsRejection } from '../hooks/lib/drafting'
-import { emptyPlan, postingBlockers } from '../hooks/lib/posting'
+import { acceptDrafts, cleanDrafts, draftsRejection } from '../hooks/lib/drafting'
+import { emptyPlan, planPosting, postingBlockers } from '../hooks/lib/posting'
 import type { Board, FollowUpBoard, PostingPlan, RunState, Severity, Thread } from '../hooks/lib/types'
 import { HEAD, MB, PANE, world } from './world'
 
@@ -384,6 +384,35 @@ test('review text is cleaned for display: controls, bidi controls and separators
   expect(clean('a\r\nb\rc d e')).toBe('a\nb\nc\nd\ne')
   expect(clean('x‮evil‬⁦y⁩‎‏')).toBe('xevily')
   expect(clean('tab\there\u0007bell\u009Fc1')).toBe('tab\there bell c1')
+})
+
+// The bodies and paths Claude drafts are stored sanitised, so the plan (built from the
+// stored drafts) holds exactly the text the preview draws, and posting sends the plan.
+test('the preview draws exactly what posts, for text with bidi and control characters', () => {
+  const DIRTY = (s: string) => `${s} \u202Eevil\u202C\u001b[31m red\r\nnext\u2066`
+  const CLEAN = (s: string) => `${s} evil [31m red\nnext`
+  const drafting = onBoard({ phase: 'drafting', selected: ['F1', 'F2', 'P1', 'P2'], event: 'COMMENT' })
+  const drafts = [
+    { id: 'P1', kind: 'reply', commentId: 7, body: DIRTY('reply') },
+    { id: 'F1', kind: 'line', path: 'a\u2066.go', line: 99, body: DIRTY('moved') },
+    { id: 'F2', kind: 'line', path: 'b.go', line: 5, body: DIRTY('line') },
+    { id: 'P2', kind: 'body', body: DIRTY('body') },
+  ]
+  const plan = planPosting(drafting, cleanDrafts(drafts), { 'a.go': [[1, 4]], 'b.go': [[1, 10]] })
+  const run = acceptDrafts(drafting, drafts, plan).run!
+  expect(run.plan).toBe(plan)
+  expect(plan.replies[0]!.body).toBe(CLEAN('reply'))
+  expect(plan.lineComments[0]!.body).toBe(CLEAN('line'))
+  expect(plan.moved).toEqual([{ id: 'F1', path: 'a.go', line: 99, reason: 'outside-diff' }])
+  expect(plan.body).toBe(`\`a.go:99\`: ${CLEAN('moved')}\n\n${CLEAN('body')}`)
+  const drawn: string[] = []
+  const walk = (n: ViewNode) => { if (n.type === 'Box') n.children.forEach(walk); else if (n.type === 'Text') drawn.push(n.text) }
+  walk(view(run))
+  expect(drawn).toContain(plan.replies[0]!.body)
+  expect(drawn).toContain(plan.lineComments[0]!.body)
+  expect(drawn).toContain(plan.body)
+  expect(drawn).toContain('F2 · line comment on b.go:5')
+  expect(drawn).toContain('F1: a.go:99 is outside the PR diff, so it posts in the review body.')
 })
 
 test('long text: one-liners are bounded, exact text is split into whole chunks', () => {
