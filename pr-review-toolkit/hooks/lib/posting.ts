@@ -144,7 +144,10 @@ function planBlockers(run: RunState): string[] {
   if (plan.headSha !== run.pr.headSha || plan.mergeBase !== run.mergeBase) return ['The drafts were checked against another head or range; draft them again.']
   const isPosted = (covers: string[]): boolean => covers.some((id) => run.posted.includes(id))
   const entries = [...plan.replies.map((r) => r.covers), ...plan.lineComments.map((c) => c.covers), ...(plan.bodyCovers.length ? [plan.bodyCovers] : [])]
-  if (entries.length && entries.every(isPosted)) return ['Everything in this preview has been posted.']
+  // An approval without review text carries no ids: when its replies posted but it did
+  // not, it is still to post (one that went through, or may have, ends the run as 'done').
+  const approvalLeft = !hasReviewContent(plan) && submittedEvent(run) === 'APPROVE'
+  if (entries.length && entries.every(isPosted) && !approvalLeft) return ['Everything in this preview has been posted.']
   if (hasReviewContent(plan)) {
     if (!run.event) return ['Choose a review event: line comments and review-body text post as a review.']
     const done = reviewCovers(plan).filter((id) => run.posted.includes(id))
@@ -182,15 +185,17 @@ export function startPosting(run: RunState | null, shown: ShownPreview): { run: 
   return { run: { ...rest, phase: 'posting' }, blockers }
 }
 
-// After postReview, on the run startPosting claimed (`claimed`): a run that is no longer
-// that one (another PR or head, or another plan) is returned unchanged. What posted is
-// recorded whatever the phase (never lost, never duplicated) and leaves the selection,
-// so a reword after a partial post drafts only what is still to post (a merged draft
-// can never tie a posted id to an unposted one and be dropped with it). A run still
-// posting goes to 'done' when finished, else back to the preview with the error.
+// After postReview, on the run startPosting claimed (`claimed`). Another run (another
+// launch nonce or task, PR or head) is returned unchanged. On the same run, what posted
+// is always recorded, whatever its phase or plan now (a plan replaced or dropped while
+// posting must not lose it, or a later post would send it again): never duplicated, and
+// it leaves the selection, so a reword after a partial post drafts only what is still to
+// post (a merged draft can never tie a posted id to an unposted one and be dropped with
+// it). A run still posting goes to 'done' when finished, else back to the preview with
+// the error.
 export function finishPosting(run: RunState | null, claimed: RunState, out: PostResult): RunState | null {
-  if (!run || run.handle !== claimed.handle || run.pr.headSha !== claimed.pr.headSha) return run
-  if (JSON.stringify(run.plan) !== JSON.stringify(claimed.plan)) return run
+  if (!run || run.run !== claimed.run || run.taskId !== claimed.taskId) return run
+  if (run.handle !== claimed.handle || run.pr.headSha !== claimed.pr.headSha) return run
   const posted = [...run.posted, ...out.posted.filter((id, i) => !run.posted.includes(id) && out.posted.indexOf(id) === i)]
   const selected = run.selected.filter((id) => !out.posted.includes(id))
   if (run.phase !== 'posting') return { ...run, posted, selected }
@@ -298,10 +303,12 @@ export async function postReview(io: Io, run: RunState): Promise<PostResult> {
       if (!added.ok) {
         // A line comment only stages: whatever happened, deleting the pending review takes it back.
         const { note } = await abandon()
+        // A GraphQL out-of-diff error names no status code, so the hint goes with either.
         const what = added.refused
-          ? `GitHub refused the line comment for ${c.id} on ${c.path}:${c.line}: ${added.why}. If that line is not part of the PR diff on GitHub (a renamed file can make it look like it is here), ask Claude to draft ${c.id} as a review-body comment.`
+          ? `GitHub refused the line comment for ${c.id} on ${c.path}:${c.line}: ${added.why}.`
           : `GitHub did not confirm the line comment for ${c.id} on ${c.path}:${c.line} (${added.why}).`
-        return stop(`Posting stopped: ${what} ${note} ${sofar()} No review was submitted.`)
+        const hint = `If that line is not part of the PR diff on GitHub (a renamed file can make it look like it is here), ask Claude to draft ${c.id} as a review-body comment.`
+        return stop(`Posting stopped: ${what} ${hint} ${note} ${sofar()} No review was submitted.`)
       }
       log.push(`Added the line comment for ${ids(c.covers)} on ${c.path}:${c.line}.`)
     }

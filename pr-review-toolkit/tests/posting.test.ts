@@ -334,7 +334,8 @@ test('a line comment that threw or failed unclear is taken back with the pending
     expect(out.finished).toBe(false)
     expect(out.error).toContain('GitHub did not confirm the line comment for F1 on a.go:3')
     expect(out.error).toContain('The pending review was deleted.')
-    expect(out.error).not.toContain('draft F1 as a review-body comment')
+    // A GraphQL out-of-diff error carries no status code: the redraft hint shows here too.
+    expect(out.error).toContain('ask Claude to draft F1 as a review-body comment')
   }
 })
 
@@ -518,16 +519,46 @@ test('startPosting posts only the preview the user saw, compared by value', () =
 })
 
 test('finishPosting changes only the run it was posting', () => {
-  const run = planned([merged, lineIn])
+  const run = { ...planned([merged, lineIn]), run: 'r1', taskId: 't1' }
   const claimed = startPosting(run, shown(run)).run!
   const out: PostResult = { posted: ['F4', 'P1'], error: 'boom', log: [], finished: false }
   for (const other of [
+    { ...claimed, run: 'r2' },
+    { ...claimed, taskId: 't2' },
     { ...claimed, handle: 'o/r#2' },
     { ...claimed, pr: { ...claimed.pr, headSha: 'fff9999' } },
-    { ...claimed, plan: { ...claimed.plan!, body: 'reworded' } },
   ]) expect(finishPosting(other, claimed, out)).toBe(other)
   // The same run read back from state (equal by value) is updated.
   expect(finishPosting(structuredClone(claimed), claimed, out)).toMatchObject({ phase: 'preview', posted: ['F4', 'P1'] })
+})
+
+test('on the same run, what posted is recorded even when its plan was replaced or dropped mid-post', () => {
+  const run = { ...planned([merged, lineIn]), run: 'r1', taskId: 't1' }
+  const claimed = startPosting(run, shown(run)).run!
+  const out: PostResult = { posted: ['F4', 'P1'], error: 'boom', log: [], finished: false }
+  // Back to the board (plan dropped), or a cancel, while the replies were posting.
+  const { plan: _dropped, ...noPlan } = claimed
+  const back = finishPosting({ ...noPlan, phase: 'board' }, claimed, out)!
+  expect(back).toMatchObject({ phase: 'board', posted: ['F4', 'P1'], selected: ['F1', 'F2'] })
+  expect('plan' in back).toBe(false)
+  const replaced = finishPosting({ ...claimed, plan: { ...claimed.plan!, body: 'reworded' } }, claimed, out)!
+  expect(replaced).toMatchObject({ posted: ['F4', 'P1'], selected: ['F1', 'F2'] })
+  expect(replaced.plan!.body).toBe('reworded')
+})
+
+test('an approval that did not post after its replies did can still be posted', async () => {
+  // Replies-only plan with Approve chosen: the reply posted, the approval was refused.
+  const run = { ...planned([merged]), event: 'APPROVE' as const, posted: ['F4', 'P1'] }
+  expect(postingBlockers(run)).toEqual([])
+  const g = github()
+  const out = await postReview(g.io, run)
+  expect(wrote(g.keys())).toEqual(['pull_request_review_write:create'])
+  expect(g.call('pull_request_review_write:create')!.args).toMatchObject({ event: 'APPROVE' })
+  expect(out).toEqual({ posted: [], log: expect.any(Array), finished: true })
+  // Once it went through (or may have), the run is done and nothing is left to post.
+  expect(postingBlockers({ ...run, phase: 'done' })).toEqual(['Posting finished; see the result above.'])
+  // With Comment chosen, replies alone submit no review: everything has posted.
+  expect(postingBlockers({ ...run, event: 'COMMENT' })).toEqual(['Everything in this preview has been posted.'])
 })
 
 test('after a partial post, a reword cannot tie the posted item to one still to post', () => {
