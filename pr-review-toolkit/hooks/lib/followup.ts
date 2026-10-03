@@ -6,9 +6,10 @@ const SHA_RE = /^[0-9a-f]{7,40}$/
 
 // Follow-up detection: the reviewer's own threads and submitted reviews,
 // recognised by login. Without a login every run is a first review. A port of
-// review-pr.js (follow-up detection block); logins compare exactly, as there:
-// a human reviewer's thread and review authors are the same string, and an
-// account that differs in case or by a `[bot]` suffix is a different account.
+// the pre-3.0 review-pr workflow's follow-up detection; logins compare
+// exactly, as there: a human reviewer's thread and review authors are the same
+// string, and an account that differs in case or by a `[bot]` suffix is a
+// different account.
 // Returns null when this is a first review; the caller adds the delta.
 export function detectFollowUp(threads: Thread[], reviews: Review[], login: string, prAuthor: string): Omit<FollowUpContext, 'delta'> | null {
   // On the reviewer's own PR their threads and comments are author notes, not

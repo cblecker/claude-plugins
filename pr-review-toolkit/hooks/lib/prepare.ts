@@ -9,9 +9,9 @@ import { inFlightError } from './launch'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-// Collection warnings. The two total-failure sentences are the workflow's own
-// (reviewWarnings), word for word, so a board that also derives them from the
-// flags can drop the duplicate by exact match.
+// Collection warnings. The two total-failure sentences are the pre-3.0
+// review-pr workflow's own (reviewWarnings), word for word, so a board that
+// also derives them from the flags can drop the duplicate by exact match.
 const THREADS_FAILED = 'Existing review threads could not be collected, so overlap classification and verdicts on your earlier threads are unavailable, and recommended findings may duplicate existing comments.'
 const THREADS_PARTIAL = 'Review threads may be incomplete.'
 const REVIEWS_FAILED = 'Your submitted reviews could not be read, so asks made only in a review summary are not checked.'
@@ -19,8 +19,8 @@ const REVIEWS_PARTIAL = 'Your earlier reviews could not be read completely.'
 const NO_LOGIN = 'Your GitHub login could not be read (get_me failed), so follow-up detection is unavailable this run.'
 const DIRTY = 'Uncommitted changes are present; file reads see them, the diff does not.'
 
-// The workflow's scale rule (review-pr.js, Collect phase) over the diff's file
-// count and churn (additions + deletions).
+// The pre-3.0 review-pr workflow's scale rule, over the diff's file count and
+// churn (additions + deletions).
 export function scaleOf(fileCount: number, churn: number): string {
   return fileCount > 250 || churn > 20000 ? 'very_large'
     : fileCount > 75 || churn > 5000 ? 'large'
@@ -89,7 +89,7 @@ export async function prepareReview(io: Io, existing: RunState | null): Promise<
   if (login === null) warnings.push(NO_LOGIN)
   const reviewerLogin = login ?? ''
   // The reviewer's reviews serve follow-up only, which is off on their own PR
-  // (the workflow's rule), so they are read only for someone else's PR.
+  // (the pre-3.0 workflow's rule), so they are read only for someone else's PR.
   const followUpLogin = reviewerLogin && reviewerLogin.toLowerCase() !== pr.author.toLowerCase() ? reviewerLogin : ''
   const [threadRead, reviewRead, selection] = await Promise.all([
     collectThreads(io, ref),
