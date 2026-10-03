@@ -13,7 +13,7 @@ Personal Claude Code plugin marketplace
 ├── golang/                    # Custom plugin: gopls MCP/LSP, gofmt hook
 ├── gws/                       # Vendored upstream skills: Google Workspace CLI
 ├── plan-review/               # Custom plugin: plan-file pre-flight review
-├── pr-review-toolkit/         # Custom plugin: PR review workflow
+├── pr-review-toolkit/         # Custom plugin: PR review workflow + review mod
 ├── rh-dataverse/              # MCP wrapper: Red Hat Dataverse, Rover people skill
 ├── sandbox-ssh-fix/           # Custom plugin: macOS sandbox git-over-SSH workaround
 └── CLAUDE.md

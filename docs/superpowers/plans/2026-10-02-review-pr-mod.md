@@ -227,7 +227,7 @@ and scratchpad/tmp leftovers: user deletes (the Bash sandbox can't).
 ---
 ---
 
-# review-pr Workflow + Mod Implementation Plan
+## review-pr Workflow + Mod Implementation Plan
 
 > **Amendment (2026-10-02, during execution):** Claude Code refuses `$` passed across a file
 > import, and `$.state` atoms must be declared in the same file that reads them. So `hooks/lib/*.ts`
