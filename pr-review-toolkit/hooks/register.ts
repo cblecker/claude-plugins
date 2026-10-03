@@ -49,12 +49,18 @@ function withoutNonce(r: RunState): RunState {
 // that flag, a newer run has another taskId). A throw reaches failRun.
 async function finishRun($: EngineInterface, taskId: string) {
   const claimed = await getRun($)
-  if (!finishable(claimed, taskId)) return
+  if (!finishable(claimed, taskId)) { $.ui.log('review finish skipped: run no longer finishable', { to: 'debug' }); return }
   const run = withOutcome(claimed)
-  const board = buildBoard(run, await synthesize(makeIo($), run))
-  await setRun($, (r) => (finishable(r, taskId)
-    ? { ...r, failedLenses: run.failedLenses, verifierFailed: run.verifierFailed, board, phase: 'board', synthesizing: false }
-    : r))
+  const out = await synthesize(makeIo($), run)
+  if (out.reason) $.ui.log(`review synthesis failed, findings listed unmerged: ${out.reason}`, { to: 'debug' })
+  const board = buildBoard(run, out)
+  let written = false as boolean
+  await setRun($, (r) => {
+    if (!finishable(r, taskId)) return r
+    written = true
+    return { ...r, failedLenses: run.failedLenses, verifierFailed: run.verifierFailed, board, phase: 'board', synthesizing: false }
+  })
+  if (!written) $.ui.log('review board dropped: run no longer finishable', { to: 'debug' })
 }
 
 async function failRun($: EngineInterface, taskId: string, err: unknown) {

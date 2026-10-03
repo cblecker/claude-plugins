@@ -6,16 +6,12 @@ import { collectReviews, collectThreads, fetchPr, mcpJson, parseShortstat, resol
 import { computeDelta, detectFollowUp } from './followup'
 import { selectLenses } from './select'
 import { inFlightError } from './launch'
+import { REVIEWS_FAILED, REVIEWS_PARTIAL, THREADS_FAILED, THREADS_PARTIAL } from './warnings'
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-// Collection warnings. The two total-failure sentences are the pre-3.0
-// review-pr workflow's own (reviewWarnings), word for word, so a board that
-// also derives them from the flags can drop the duplicate by exact match.
-const THREADS_FAILED = 'Existing review threads could not be collected, so overlap classification and verdicts on your earlier threads are unavailable, and recommended findings may duplicate existing comments.'
-const THREADS_PARTIAL = 'Review threads may be incomplete.'
-const REVIEWS_FAILED = 'Your submitted reviews could not be read, so asks made only in a review summary are not checked.'
-const REVIEWS_PARTIAL = 'Your earlier reviews could not be read completely.'
+// Warnings recorded on the run. The collection ones live in warnings.ts, shared
+// with the board.
 const NO_LOGIN = 'Your GitHub login could not be read (get_me failed), so follow-up detection is unavailable this run.'
 const DIRTY = 'Uncommitted changes are present; file reads see them, the diff does not.'
 

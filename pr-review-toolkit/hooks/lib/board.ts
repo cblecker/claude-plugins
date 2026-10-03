@@ -2,6 +2,7 @@ import type {
   Board, BoardItem, BoardSection, ChangeSummary, Delta, Finding, FollowUpBoard, FollowUpContext, FollowUpItem,
   LensSelection, Location, ReviewOverlap, RunState, Thread, Verdict,
 } from './types'
+import { REVIEWS_FAILED, THREADS_FAILED } from './warnings'
 
 // The review board: a port of the pre-3.0 review-pr workflow's routing and
 // finalizeBoard, as pure functions over the run. The workflow's module globals
@@ -10,10 +11,11 @@ import type {
 export const BOARD_SECTIONS: readonly BoardSection[] = ['recommendedToPost', 'discussionOnly', 'alreadyCovered', 'discarded']
 
 // The synthesizer's decisions, by index into its input findings (see synthesis.ts).
+// validateSynthesis checks findings and section only; the other fields are model
+// output of any type, read here only when they are strings.
 export type SynthesisGroup = {
   findings: number[]; section: string
-  overlap?: { status: string; threadId?: string; rationale?: string }
-  title?: string; claim?: string; note?: string
+  overlap?: unknown; title?: unknown; claim?: unknown; note?: unknown
 }
 export type Synthesized = { groups: SynthesisGroup[]; keepPositives?: number[] }
 
@@ -61,7 +63,11 @@ export function knownResolved(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
 }
 
-type Group = { members: number[]; section?: string; overlap?: SynthesisGroup['overlap']; title?: string; claim?: string; note?: string }
+type Group = { members: number[]; section?: string; overlap?: unknown; title?: string; claim?: string; note?: string }
+
+// A model-supplied text field: kept only when it is a string. A wrong type in a
+// cosmetic field does not fail the synthesis; the field is just not used.
+const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
 // While the board is built an overlap still names its thread; the id is dropped once
 // it has served the follow-up cross-reference.
 type Overlap = ReviewOverlap & { threadId?: string }
@@ -90,9 +96,9 @@ function synthesisGroups(synthesized: Synthesized | null, findingCount: number):
       members,
       section: group.section,
       overlap: group.overlap,
-      title: merged ? group.title : undefined,
-      claim: merged ? group.claim : undefined,
-      note: group.note,
+      title: merged ? text(group.title) : undefined,
+      claim: merged ? text(group.claim) : undefined,
+      note: text(group.note),
     })
   })
   for (let index = 0; index < findingCount; index++) {
@@ -106,9 +112,12 @@ function synthesisGroups(synthesized: Synthesized | null, findingCount: number):
 // describe one real thread. An 'overlaps' id that matches no thread keeps the
 // status but carries no reply target, which the posting preview flags;
 // 'already_covered' hides the finding, so it needs a real thread.
-function reviewOverlap(overlap: SynthesisGroup['overlap'], threads: Thread[]): Overlap | undefined {
-  if (!overlap || (overlap.status !== 'overlaps' && overlap.status !== 'already_covered')) return undefined
-  const thread = overlap.threadId ? threads.find((t) => t && t.id === overlap.threadId) : null
+function reviewOverlap(raw: unknown, threads: Thread[]): Overlap | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const overlap = raw as { status?: unknown; threadId?: unknown; rationale?: unknown }
+  if (overlap.status !== 'overlaps' && overlap.status !== 'already_covered') return undefined
+  const threadId = text(overlap.threadId)
+  const thread = threadId ? threads.find((t) => t && t.id === threadId) : null
   if (overlap.status === 'already_covered' && !thread) return undefined
   const result: Overlap = { status: overlap.status }
   if (thread) {
@@ -121,7 +130,8 @@ function reviewOverlap(overlap: SynthesisGroup['overlap'], threads: Thread[]): O
       threadLine: thread.line != null ? thread.line : thread.originalLine,
     })
   }
-  if (overlap.rationale) result.rationale = overlap.rationale
+  const rationale = text(overlap.rationale)
+  if (rationale) result.rationale = rationale
   return result
 }
 
@@ -251,13 +261,13 @@ function reviewWarnings(context: BoardContext): string[] {
     warnings.push(context.failedReviewers.join(', ') + ' did not complete, so the board is missing that coverage and the review is narrower than the reviewer list suggests.')
   }
   if (context.threadCollectionFailed && !(context.threads && context.threads.length)) {
-    warnings.push('Existing review threads could not be collected, so overlap classification and verdicts on your earlier threads are unavailable, and recommended findings may duplicate existing comments.')
+    warnings.push(THREADS_FAILED)
   }
   if (context.synthesisFailed) {
     warnings.push('The synthesis step did not complete, so duplicate findings from different lenses are listed separately, overlap with existing threads was not checked, and sections come from severity and confidence alone.')
   }
   if (context.reviewsCollectionFailed && !context.reviewCount) {
-    warnings.push('Your submitted reviews could not be read, so asks made only in a review summary are not checked.')
+    warnings.push(REVIEWS_FAILED)
   }
   if (context.reviewerIsAuthor) {
     warnings.push('You opened this PR, so your own threads and comments are author notes and follow-up mode is off.')

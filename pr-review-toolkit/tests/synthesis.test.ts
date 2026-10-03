@@ -155,3 +155,15 @@ test('a model call that throws, or does not answer, is a failed attempt', async 
   expect((await synthesize(flaky, run)).synthesized).toEqual(JSON.parse(VALID))
   expect(flaky.calls.length).toBe(2)
 })
+
+test('a failed synthesis says why, from the last attempt', async () => {
+  const reason = async (io: Io) => (await synthesize(io, run)).reason
+  expect(await reason(ioWith(answers('not json')))).toBe('unparseable')
+  expect(await reason(ioWith(answers('not json', '42')))).toBe('unparseable')
+  expect(await reason(ioWith(answers('not json', '{"groups":[{"findings":[0],"section":"discarded"}]}')))).toBe('invalid grouping')
+  expect(await reason(ioWith(answers('not json', '[1,2,3]')))).toBe('invalid grouping')
+  expect(await reason(ioWith(async () => { throw new Error('boom') }))).toBe('boom')
+  expect(await reason(ioWith(async () => ({ isAnswered: false, text: '' })))).toBe('no answer')
+  expect(await reason(ioWith(answers('not json', VALID)))).toBeUndefined()
+  expect(await reason(ioWith(answers(VALID)))).toBeUndefined()
+})

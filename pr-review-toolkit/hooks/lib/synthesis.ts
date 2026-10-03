@@ -155,17 +155,25 @@ const ATTEMPTS = 2
 // Synthesize the run's findings. With none there is nothing to group, so no
 // model call. Otherwise up to two attempts; the first answer that parses to an
 // object and validates wins. A throw, no answer, unparseable or invalid JSON
-// each spend an attempt; after both, synthesized is null and the board lists
-// the findings unmerged.
-export async function synthesize(io: Io, run: RunState): Promise<{ synthesized: Synthesized | null; findings: IndexedFinding[]; positives: string[] }> {
+// each spend an attempt; after both, synthesized is null, the board lists the
+// findings unmerged, and reason says what went wrong with the last attempt.
+// Only findings and section are checked: the board reads the text fields only
+// when they are strings, so a wrong type there costs no attempt.
+export async function synthesize(io: Io, run: RunState): Promise<{ synthesized: Synthesized | null; findings: IndexedFinding[]; positives: string[]; reason?: string }> {
   const { findings, positives, prompt } = synthesisInput(run)
   if (findings.length === 0) return { synthesized: null, findings, positives }
+  let reason = ''
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     try {
       const r = await io.complete({ model: 'sonnet', system: SYSTEM, prompt, maxTokens: 16000, effort: 'medium', timeoutMs: 300000 })
-      const j = r.isAnswered ? parseModelJson(r.text) : null
-      if (j !== null && typeof j === 'object' && validateSynthesis(j, findings.length)) return { synthesized: j as Synthesized, findings, positives }
-    } catch {}
+      if (!r.isAnswered) { reason = 'no answer'; continue }
+      const j = parseModelJson(r.text)
+      if (j === null || typeof j !== 'object') { reason = 'unparseable'; continue }
+      if (!validateSynthesis(j, findings.length)) { reason = 'invalid grouping'; continue }
+      return { synthesized: j as Synthesized, findings, positives }
+    } catch (e) {
+      reason = e instanceof Error ? e.message : String(e)
+    }
   }
-  return { synthesized: null, findings, positives }
+  return { synthesized: null, findings, positives, reason }
 }

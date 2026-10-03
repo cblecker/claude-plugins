@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { buildBoard, demote, finalizeBoard, findItem, followUpBoard, followUpItems, promote, tooPicky } from '../hooks/lib/board'
 import type { Board, Severity } from '../hooks/lib/types'
+import { REVIEWS_FAILED, REVIEWS_PARTIAL, THREADS_FAILED, THREADS_PARTIAL } from '../hooks/lib/warnings'
 
 const f = (title: string, severity: Severity, confidence: number, lens = 'code-reviewer') => ({ location: { path: 'a.go', line: 1 }, severity, confidence, title, claim: 'c', evidence: 'e ' + title, whyItMatters: 'w', lens })
 const ctx: any = { threads: [], followUp: null, followUpDelta: null, summary: {}, selectedReviewers: [], lensEffort: {}, failedReviewers: [], lensSelection: { source: 'selector' }, reviewerIsAuthor: false }
@@ -8,8 +9,6 @@ const at = (title: string, severity: Severity, confidence: number, path: string,
 const ids = (b: Board, s: 'recommendedToPost' | 'discussionOnly' | 'alreadyCovered' | 'discarded') => b[s].map((i) => i.id)
 const titles = (b: Board, s: 'recommendedToPost' | 'discussionOnly' | 'alreadyCovered' | 'discarded') => b[s].map((i) => i.title)
 
-const THREADS_FAILED = 'Existing review threads could not be collected, so overlap classification and verdicts on your earlier threads are unavailable, and recommended findings may duplicate existing comments.'
-const REVIEWS_FAILED = 'Your submitted reviews could not be read, so asks made only in a review summary are not checked.'
 
 // Brief tests (behavior parity with the workflow).
 
@@ -133,6 +132,20 @@ test('an overlap on one of your own threads cross-references its follow-up item 
   expect(b.followUp).toBe(followUp)
 })
 
+test('non-string text from the model is ignored, never copied onto the board', () => {
+  const synth: any = { groups: [
+    { findings: [0, 1], section: 'recommendedToPost', title: { x: 1 }, claim: 7, note: 5, overlap: { status: 'overlaps', threadId: 'T1', rationale: [] } },
+    { findings: [2], section: 'discussionOnly', note: 5, overlap: 'overlaps' },
+    { findings: [3], section: 'discussionOnly', note: ['x'], overlap: { status: 1, threadId: 'T1' } },
+  ], keepPositives: [] }
+  const b = finalizeBoard(synth, [f('a', 'critical', 95), f('b', 'important', 90), f('c', 'important', 90), f('d', 'important', 85)], [], { ...ctx, threads })
+  const lead = b.recommendedToPost[0]!
+  expect([lead.title, lead.claim]).toEqual(['a', 'c'])
+  expect(lead.existingReviewOverlap).toEqual({ status: 'overlaps', commentId: 11, isResolved: false, threadAuthor: 'bot', threadPath: 'a.go', threadLine: 5 })
+  expect('rationale' in lead.existingReviewOverlap!).toBe(false)
+  expect(b.discussionOnly.map((i) => [i.title, 'routingNote' in i, 'existingReviewOverlap' in i])).toEqual([['c', false, false], ['d', false, false]])
+})
+
 test('Not posting items keep only the summary fields', () => {
   const b = finalizeBoard(null, [{ ...f('low', 'important', 10), suggestedFix: 'x' }], [], { ...ctx, synthesisFailed: true })
   expect(Object.keys(b.discarded[0]!).sort()).toEqual(['claim', 'confidence', 'id', 'lens', 'location', 'severity', 'title'])
@@ -194,8 +207,8 @@ test('warnings: prepare-time warnings first, flag sentences after, nothing said 
 
 test('a partial read is not reported as a failed one', () => {
   const b = finalizeBoard(null, [], [], { ...ctx, threads, threadCollectionFailed: true, reviewsCollectionFailed: true, reviewCount: 2,
-    warnings: ['Review threads may be incomplete.', 'Your earlier reviews could not be read completely.'] })
-  expect(b.reviewMeta.warnings).toEqual(['Review threads may be incomplete.', 'Your earlier reviews could not be read completely.'])
+    warnings: [THREADS_PARTIAL, REVIEWS_PARTIAL] })
+  expect(b.reviewMeta.warnings).toEqual([THREADS_PARTIAL, REVIEWS_PARTIAL])
   expect(b.reviewMeta.threadCollectionFailed).toBe(true)
   expect(b.reviewMeta.reviewsCollectionFailed).toBe(true)
 })
