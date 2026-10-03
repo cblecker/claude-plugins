@@ -3,7 +3,7 @@ import type { EngineInterface, ModelEffort, Register } from 'claude-code'
 import type { RunState } from './lib/types'
 import type { Io } from './lib/io'
 import { applyDeposit } from './lib/deposit'
-import { claimNotice, rewriteNotice, withOutcome } from './lib/completion'
+import { claimNotice, failSynthesis, finishable, rewriteNotice, withOutcome } from './lib/completion'
 import { shouldAutoAllow } from './lib/bash-guard'
 import { git } from './lib/git'
 import { prepareReview } from './lib/prepare'
@@ -41,21 +41,23 @@ function withoutNonce(r: RunState): RunState {
 }
 
 // Task 11 replaces this stub with synthesis and the board. It runs detached once a
-// completed notice has claimed the run (`synthesizing`), and sets the board last.
-async function finishRun($: EngineInterface) {
-  await setRun($, (r) => (r && r.phase === 'progress' ? { ...withOutcome(r), phase: 'board', synthesizing: false } : r))
+// completed notice has claimed the run (`synthesizing`), and sets the board last. It
+// writes only onto the run it was started for (R36): keep the `finishable` guard.
+async function finishRun($: EngineInterface, taskId: string) {
+  await setRun($, (r) => (finishable(r, taskId) ? { ...withOutcome(r), phase: 'board', synthesizing: false } : r))
 }
 
-async function failRun($: EngineInterface, err: unknown) {
+async function failRun($: EngineInterface, taskId: string, err: unknown) {
   const why = err instanceof Error ? err.message : String(err)
-  try { await setRun($, (r) => (r && r.phase === 'progress' ? { ...r, phase: 'failed', synthesizing: false, error: `Review board failed: ${why}` } : r)) } catch {}
+  try { await setRun($, (r) => failSynthesis(r, taskId, why)) } catch (e) { $.ui.log(`review board failure not recorded: ${String(e)}`, { to: 'debug' }) }
 }
 
-// The workflow's completion notice: the one line that replaces it, or null to pass it
-// through. A notice for our taskId is always rewritten, so no workflow result reaches
-// the transcript, but only the first one for a run still in progress advances the run:
-// a duplicate is rewritten and changes nothing. Synthesis runs detached (it can take
-// minutes), so the rewritten notice is delivered at once.
+// The workflow's completion notice: the text that replaces it (our notice as one line,
+// any other text kept), or null to pass it through. A notice for our taskId is always
+// rewritten, so no workflow result reaches the transcript, but only the first one for a
+// run still in progress advances the run: a duplicate is rewritten and changes nothing.
+// Synthesis runs detached (it can take minutes), so the rewritten notice is delivered
+// at once.
 async function onNotice($: EngineInterface, text: string): Promise<string | null> {
   const run = await getRun($)
   const hit = rewriteNotice(text, run)
@@ -63,12 +65,17 @@ async function onNotice($: EngineInterface, text: string): Promise<string | null
   if (!hit || !taskId) return null
   let claimed = false as boolean
   await setRun($, (cur) => { const c = claimNotice(cur, taskId, hit.ok, hit.status); claimed = c.claimed; return c.run })
-  if (claimed && hit.ok) void finishRun($).catch((err) => failRun($, err))
-  return hit.line
+  if (claimed && hit.ok) {
+    void finishRun($, taskId).catch((err) => {
+      $.ui.log(`review finish failed: ${String(err)}`, { to: 'debug' })
+      return failRun($, taskId, err)
+    })
+  }
+  return hit.text
 }
 
 // A hook that throws must still hand the notice on, so nothing here can fail the chain.
-async function noticeLine($: EngineInterface, text: string): Promise<string | null> {
+async function noticeText($: EngineInterface, text: string): Promise<string | null> {
   try { return await onNotice($, text) } catch (err) { $.ui.log(`completion notice not rewritten: ${String(err)}`, { to: 'debug' }); return null }
 }
 
@@ -154,13 +161,13 @@ export const register: Register = (on) => {
   // answer goes through `next`: a `prompt.submit` answered without it, or dropped,
   // prints a transcript warning.
   on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
-    const line = await noticeLine($, e.text)
-    return next(line === null ? e : { ...e, text: line })
+    const text = await noticeText($, e.text)
+    return next(text === null ? e : { ...e, text })
   })
   on('prompt.submit', async ($, e, next) => {
-    if (e.origin.kind !== 'task-notification') return next(e)
-    const line = await noticeLine($, e.text)
-    return next(line === null ? e : { ...e, text: line })
+    if (e.origin?.kind !== 'task-notification') return next(e)
+    const text = await noticeText($, e.text)
+    return next(text === null ? e : { ...e, text })
   })
 
   // Lens agents run read-only git constantly; auto-allow exactly that and leave every

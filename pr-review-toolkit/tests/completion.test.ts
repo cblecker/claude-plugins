@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { claimNotice, completionLine, lensOutcome, noticeFor, rewriteNotice, withOutcome } from '../hooks/lib/completion'
+import { claimNotice, completionLine, failSynthesis, finishable, lensOutcome, noticeFor, rewriteNotice, withOutcome } from '../hooks/lib/completion'
 import type { RunState } from '../hooks/lib/types'
 
 const notice = (id: string, status: string) =>
@@ -32,15 +32,17 @@ test('the verifier fails only when a follow-up was due and no verdicts arrived',
 
 test('our completed notice is rewritten to the one line, with no workflow data left', () => {
   const hit = rewriteNotice(notice('w1', 'completed'), run)
-  expect(hit).toEqual({ line: 'Review complete — the board is open in the review pane.', ok: true, status: 'completed' })
-  expect(hit?.line).not.toMatch(/leaked|task-notification|w1/)
+  const line = 'Review complete — the board is opening in the review pane.'
+  expect(hit).toEqual({ text: line, line, ok: true, status: 'completed' })
+  expect(hit?.text).not.toMatch(/leaked|task-notification|w1/)
 })
 
 test('our failed notice is rewritten to the failure line naming the status', () => {
-  expect(rewriteNotice(notice('w1', 'failed'), run)).toEqual({ line: 'Review failed: failed — see the review pane.', ok: false, status: 'failed' })
-  expect(rewriteNotice(notice('w1', 'killed'), run)?.line).toBe('Review failed: killed — see the review pane.')
+  const line = 'Review failed: failed — see the review pane.'
+  expect(rewriteNotice(notice('w1', 'failed'), run)).toEqual({ text: line, line, ok: false, status: 'failed' })
+  expect(rewriteNotice(notice('w1', 'killed'), run)?.text).toBe('Review failed: killed — see the review pane.')
   expect(completionLine(false, 'killed')).toBe('Review failed: killed — see the review pane.')
-  expect(completionLine(true, 'completed')).toBe('Review complete — the board is open in the review pane.')
+  expect(completionLine(true, 'completed')).toBe('Review complete — the board is opening in the review pane.')
 })
 
 test("another task's notice, or one with no run, passes through", () => {
@@ -55,6 +57,39 @@ test('text that holds the taskId but not the <task-id> tag passes through', () =
   expect(rewriteNotice('<task-id> w1 </task-id> <status>completed</status>', run)).toBe(null)
   expect(rewriteNotice('<task-id>w10</task-id><status>completed</status>', run)).toBe(null)
   expect(rewriteNotice('task-id: w1\nstatus: completed', run)).toBe(null)
+})
+
+test('the status is read inside our notice only, and trimmed', () => {
+  const other = notice('w2', 'completed')
+  expect(noticeFor(`${other}\n${notice('w1', 'failed')}`, 'w1')).toEqual({ status: 'failed' })
+  expect(noticeFor(`${notice('w1', 'failed')}\n${other}`, 'w1')).toEqual({ status: 'failed' })
+  expect(noticeFor('<task-notification>\n<task-id>w1</task-id>\n<status> completed </status>\n</task-notification>', 'w1')).toEqual({ status: 'completed' })
+})
+
+test('two notices in one text: only ours is replaced, the other kept whole', () => {
+  const other = notice('w2', 'completed')
+  const failed = 'Review failed: failed — see the review pane.'
+  const a = rewriteNotice(`${other}\n${notice('w1', 'failed')}`, run)
+  expect(a).toEqual({ text: `${other}\n${failed}`, line: failed, ok: false, status: 'failed' })
+  const b = rewriteNotice(`${notice('w1', 'failed')}\n${other}`, run)
+  expect(b?.text).toBe(`${failed}\n${other}`)
+  expect(b?.ok).toBe(false)
+})
+
+test('text around our notice is kept', () => {
+  const line = 'Review complete — the board is opening in the review pane.'
+  expect(rewriteNotice(`Earlier text\n${notice('w1', 'completed')}\nLater text`, run)?.text).toBe(`Earlier text\n${line}\nLater text`)
+})
+
+test('a text with no wrapper is taken whole; an unterminated wrapper never leaks', () => {
+  const line = 'Review complete — the board is opening in the review pane.'
+  expect(rewriteNotice('<task-id>w1</task-id> <status>completed</status>', run)?.text).toBe(line)
+  const open = '<task-notification>\n<task-id>w1</task-id>\n<status>completed</status>\n<result>{"findings":[]}</result>'
+  expect(rewriteNotice(open, run)?.text).toBe(line)
+})
+
+test('our tag outside any notice block, among other notices, passes through', () => {
+  expect(rewriteNotice(`${notice('w2', 'completed')}\nsee <task-id>w1</task-id>`, run)).toBe(null)
 })
 
 test('the first completed notice claims the run for synthesis; a duplicate does not', () => {
@@ -85,4 +120,25 @@ test('only a run in progress with the same taskId is claimed', () => {
 test('finishing records the lens outcome for the board', () => {
   const r: any = { ...run, synthesizing: true, lenses: [{ name: 'code-reviewer' }, { name: 'pr-test-analyzer' }], deposits: { 'code-reviewer': { findings: [], positiveObservations: [] } }, followUp: {}, verdicts: null }
   expect(withOutcome(r)).toMatchObject({ failedLenses: ['pr-test-analyzer'], verifierFailed: true })
+})
+
+test('a detached finish writes only onto the run it claimed (same taskId, in progress, synthesizing)', () => {
+  const claimed: any = { ...run, synthesizing: true }
+  expect(finishable(claimed, 'w1')).toBe(true)
+  expect(finishable(claimed, 'w2')).toBe(false)
+  expect(finishable(null, 'w1')).toBe(false)
+  expect(finishable({ ...claimed, synthesizing: false }, 'w1')).toBe(false) // cancelled during synthesis
+  expect(finishable({ ...claimed, synthesizing: undefined }, 'w1')).toBe(false)
+  expect(finishable({ ...claimed, phase: 'failed' }, 'w1')).toBe(false)
+  expect(finishable({ ...claimed, phase: 'board' }, 'w1')).toBe(false)
+})
+
+test('a failed synthesis fails only the claimed run', () => {
+  const claimed: any = { ...run, synthesizing: true }
+  expect(failSynthesis(claimed, 'w1', 'boom')).toMatchObject({ phase: 'failed', synthesizing: false, error: 'Review board failed: boom' })
+  const newer = { ...claimed, taskId: 'w9' }
+  expect(failSynthesis(newer, 'w1', 'boom')).toBe(newer)
+  const cancelled = { ...claimed, synthesizing: false, phase: 'failed' }
+  expect(failSynthesis(cancelled, 'w1', 'boom')).toBe(cancelled)
+  expect(failSynthesis(null, 'w1', 'boom')).toBe(null)
 })
