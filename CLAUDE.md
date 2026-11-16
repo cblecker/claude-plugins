@@ -16,6 +16,7 @@ Personal Claude Code plugin marketplace
 ├── pr-review-toolkit/         # Custom plugin: PR review workflow
 ├── rh-dataverse/              # MCP wrapper: Red Hat Dataverse, Rover people skill
 ├── sandbox-ssh-fix/           # Custom plugin: macOS sandbox git-over-SSH workaround
+├── slack/                     # Custom plugin: Slack message formatting
 └── CLAUDE.md
 ```
 

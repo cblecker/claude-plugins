@@ -47,6 +47,11 @@
       "name": "golang",
       "source": "./golang",
       "strict": true
+    },
+    {
+      "name": "slack",
+      "source": "./slack",
+      "strict": true
     }
   ]
 }
