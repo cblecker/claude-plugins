@@ -24,6 +24,7 @@ claude plugin marketplace add cblecker/claude-plugins
 | [sandbox-ssh-fix](./sandbox-ssh-fix)         | Fixes git-over-SSH in the Claude Code sandbox on macOS by replacing the broken BSD nc SOCKS5 proxy |
 | [plan-review](./plan-review)                 | Pre-flight review of plan files before context clear                                             |
 | [golang](./golang)                           | gopls MCP and LSP servers, plus automatic gofmt formatting of edited Go files                    |
+| [slack](./slack)                             | Slack message formatting for text pasted into the Slack composer                                 |
 
 ## License
 
