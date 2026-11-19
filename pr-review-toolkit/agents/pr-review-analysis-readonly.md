@@ -5,12 +5,15 @@ description: Read-only PR analysis agent for pr-review-toolkit specialist review
 # MCP tools (GitHub, language servers) cost their full schemas on every turn
 # where tool search is off (any custom ANTHROPIC_BASE_URL), and measured runs
 # showed they drove most of the investigation volume while contributing
-# almost nothing to findings. See docs/DESIGN_NOTES.md.
+# almost nothing to findings. See docs/DESIGN_NOTES.md. The two deposit tools
+# are the pr-review-toolkit mod's own: how a lens reports its result.
 tools:
   - Bash
   - Read
   - Grep
   - Glob
+  - mcp__pr-review-toolkit__submit_findings
+  - mcp__pr-review-toolkit__submit_followup
 ---
 
 ## Scope
@@ -54,3 +57,8 @@ Instead:
   target.
 - Say in the finding's evidence when a lookup was sampled rather than read in
   full.
+
+## Reporting
+
+Call the deposit tool named in your prompt with the run and lens it gives; on
+`rejected`, fix and call again.

@@ -7,13 +7,6 @@ rules:
     # via !`command`. The rule matches exactly: when a skill's command text
     # changes, update the entry here too.
     allowlist:
-      # pr-review-toolkit/skills/review-pr/SKILL.md
-      - "git rev-parse HEAD"
-      - "git rev-parse --show-toplevel"
-      - "git rev-parse --abbrev-ref HEAD"
-      - "git remote get-url origin | cut -d@ -f2-"
-      - "git config --get-regexp '^branch\\..*\\.merge$'"
-      - "git status --porcelain"
       # pr-review-toolkit/skills/address-pr-feedback/SKILL.md
       - "git branch --show-current"
       - |-
@@ -24,3 +17,6 @@ rules:
 
 exclude:
   - "gws/skills/**"
+  # Mod manifest ({"modules": [...]}), not a command-hooks file; claude-hooks-valid
+  # would demand a "hooks" key. `claude plugin validate` checks it instead.
+  - "pr-review-toolkit/hooks/hooks.json"
