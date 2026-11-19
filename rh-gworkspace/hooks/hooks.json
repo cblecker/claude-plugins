@@ -1,0 +1,17 @@
+{
+  "description": "Ask before Google Workspace calls that send mail, notify attendees, delete, trash or change sharing",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_rh-gworkspace_rh-gworkspace__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

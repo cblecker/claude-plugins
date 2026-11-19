@@ -1,0 +1,9 @@
+{
+  "name": "rh-gworkspace",
+  "description": "Red Hat Google Workspace MCP server",
+  "version": "1.0.0",
+  "author": {
+    "name": "cblecker"
+  },
+  "keywords": ["rh-gworkspace", "google-workspace", "gmail", "calendar", "drive", "docs", "sheets", "mcp"]
+}

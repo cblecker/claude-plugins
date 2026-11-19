@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rh-gworkspace": {
+      "type": "http",
+      "url": "https://gworkspace.corp.redhat.com/mcp"
+    }
+  }
+}

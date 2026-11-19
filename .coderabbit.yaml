@@ -12,8 +12,6 @@ reviews:
       mode: "error"
     docstrings:
       mode: "off"  # No docstring-bearing code in this repo
-  path_filters:
-    - "!gws/skills/**"  # Vendored upstream gws generate-skills output
   tools:
     biome:
       enabled: false

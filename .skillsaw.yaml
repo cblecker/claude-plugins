@@ -21,6 +21,3 @@ rules:
       - "git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo none"
       # github/skills/triage-prs/SKILL.md
       - "git remote get-url upstream 2>/dev/null || git remote get-url origin 2>/dev/null || echo __NO_REMOTE__"
-
-exclude:
-  - "gws/skills/**"
