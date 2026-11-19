@@ -24,13 +24,13 @@
       "strict": true
     },
     {
-      "name": "gws",
-      "source": "./gws",
+      "name": "rh-dataverse",
+      "source": "./rh-dataverse",
       "strict": true
     },
     {
-      "name": "rh-dataverse",
-      "source": "./rh-dataverse",
+      "name": "rh-gworkspace",
+      "source": "./rh-gworkspace",
       "strict": true
     },
     {

@@ -19,8 +19,8 @@ claude plugin marketplace add cblecker/claude-plugins
 | [git](./git)                                 | Dynamic git instructions via SessionStart hook with mainline detection, conventional commits, fork handling, and safety guardrails |
 | [github](./github)                           | GitHub MCP server with selected toolsets enabled, tools loaded on demand, plus a PR triage skill |
 | [pr-review-toolkit](./pr-review-toolkit)     | Comprehensive PR review board using shared workflow context                                      |
-| [gws](./gws)                                 | Google Workspace CLI skills for Gmail, Calendar, Drive, Docs, Sheets, Slides, Meet, and Tasks   |
 | [rh-dataverse](./rh-dataverse)               | Red Hat Dataverse MCP server                                                                    |
+| [rh-gworkspace](./rh-gworkspace)             | Red Hat Google Workspace MCP server, with a hook that asks before sending mail, deleting or sharing |
 | [sandbox-ssh-fix](./sandbox-ssh-fix)         | Fixes git-over-SSH in the Claude Code sandbox on macOS by replacing the broken BSD nc SOCKS5 proxy |
 | [plan-review](./plan-review)                 | Pre-flight review of plan files before context clear                                             |
 | [golang](./golang)                           | gopls MCP and LSP servers, plus automatic gofmt formatting of edited Go files                    |

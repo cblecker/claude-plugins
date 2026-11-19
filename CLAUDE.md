@@ -11,10 +11,10 @@ Personal Claude Code plugin marketplace
 ├── git/                       # Custom plugin: git workflows & safety
 ├── github/                    # MCP wrapper: GitHub tools, PR triage skill
 ├── golang/                    # Custom plugin: gopls MCP/LSP, gofmt hook
-├── gws/                       # Vendored upstream skills: Google Workspace CLI
 ├── plan-review/               # Custom plugin: plan-file pre-flight review
 ├── pr-review-toolkit/         # Custom plugin: PR review workflow
 ├── rh-dataverse/              # MCP wrapper: Red Hat Dataverse, Rover people skill
+├── rh-gworkspace/             # MCP wrapper: Red Hat Google Workspace, write guard hook
 ├── sandbox-ssh-fix/           # Custom plugin: macOS sandbox git-over-SSH workaround
 ├── slack/                     # Custom plugin: Slack message formatting
 └── CLAUDE.md
